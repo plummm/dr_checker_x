@@ -41,7 +41,7 @@ namespace DRCHECKER {
         // OK, this is kmalloc function, now check if this is kzmalloc?
         if(this->targetChecker->is_kmalloc_function(targetFunction)) {
             Value *kmalloc_flag = callInst.getArgOperand(1);
-            Range flag_range = this->currState->getRange(kmalloc_flag);
+            RangeAnalysis::Range flag_range = this->currState->getRange(kmalloc_flag);
             if(flag_range.isBounded()) {
                 uint64_t lb =flag_range.getLower().getZExtValue();
                 uint64_t ub = flag_range.getUpper().getZExtValue();

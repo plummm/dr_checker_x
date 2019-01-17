@@ -203,7 +203,7 @@ namespace DRCHECKER {
         std::set<Value*> allVals;
         for(unsigned i=0;i<I.getNumOperands(); i++) {
             Value* currOp = I.getOperand(i);
-            Range currRange = this->currState.getRange(currOp);
+            RangeAnalysis::Range currRange = this->currState.getRange(currOp);
             if(currRange.isBounded()) {
                 // if the range of the index we use is bounded?
                 // it may not be bad.

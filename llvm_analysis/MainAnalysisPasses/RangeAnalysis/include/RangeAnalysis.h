@@ -6,9 +6,9 @@
 // This file is distributed under the University of Illinois Open Source
 // License. See LICENSE.TXT for details.
 //
-// Copyright (C) 2011-2012, 2015    Victor Hugo Sperle Campos
-//               2011               Douglas do Couto Teixeira
-//               2012               Igor Rafael de Assis Costa
+// Copyright (C) 2011-2012, 2015, 2017  Victor Hugo Sperle Campos
+//               2011               	  Douglas do Couto Teixeira
+//               2012               	  Igor Rafael de Assis Costa
 //
 //===----------------------------------------------------------------------===//
 // This file contains a pass that performs range analysis. The objective of
@@ -34,31 +34,32 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_TRANSFORMS_RANGEANALYSIS_RANGEANALYSIS_H_
-#define LLVM_TRANSFORMS_RANGEANALYSIS_RANGEANALYSIS_H_
+#ifndef _RANGEANALYSIS_RANGEANALYSIS_H
+#define _RANGEANALYSIS_RANGEANALYSIS_H
 
-#include "llvm/IR/Function.h"
-#include "llvm/Pass.h"
-#include "llvm/IR/Constants.h"
-#include "llvm/IR/Instructions.h"
-#include "llvm/IR/Module.h"
-#include "llvm/IR/ConstantRange.h"
-#include "llvm/IR/InstIterator.h"
-#include "llvm/ADT/DenseMap.h"
-#include "llvm/IR/CallSite.h"
-#include "llvm/ADT/StringMap.h"
-#include "llvm/ADT/SmallPtrSet.h"
-#include "llvm/ADT/Statistic.h"
-#include "llvm/Support/Debug.h"
-#include "llvm/Support/raw_ostream.h"
-#include "llvm/Support/TimeValue.h"
-#include "llvm/Support/Process.h"
-#include "llvm/Support/FileSystem.h"
 #include <deque>
-#include <stack>
-#include <set>
 #include <sstream>
-#include <algorithm>
+#include <stack>
+#include <utility>
+
+#include "llvm/ADT/APInt.h"
+#include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringRef.h"
+#include "llvm/IR/BasicBlock.h"
+#include "llvm/IR/InstrTypes.h"
+#include "llvm/Pass.h"
+#include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/Timer.h"
+
+namespace llvm {
+class BranchInst;
+class SwitchInst;
+raw_ostream & dbgs();
+} // namespace llvm
+
+namespace RangeAnalysis {
 
 using namespace llvm;
 
@@ -67,10 +68,10 @@ using namespace llvm;
 //#define SCC_DEBUG
 
 // Comment the line below to disable the dot printing of Constraint Graphs
-//#define PRINT_DEBUG
+#define PRINT_DEBUG
 
 // Used to enable the stats computing. Comment the below line to disable it
-//#define STATS
+#define STATS
 
 // Uncomment the line below to activate jump-set widening technique
 // It generally leads to better precision in spite of low overhead in
@@ -87,8 +88,8 @@ using namespace llvm;
 
 #define PRINTCOMPONENT(component)                                              \
   errs() << "\n--------------\n";                                              \
-  for (SmallPtrSetIterator<VarNode *> cit = component.begin(),                 \
-                                      cend = component.end();                  \
+  for (SmallPtrSetIterator<VarNode *> cit = (component).begin(),               \
+                                      cend = (component).end();                \
        cit != cend; ++cit) {                                                   \
     const VarNode *var = *cit;                                                 \
     const Value *V = var->getValue();                                          \
@@ -132,10 +133,6 @@ llvm::raw_fd_ostream _log_file(_log_fileName.str().c_str(), _log_ErrorInfo,
 #endif
 //****************************************************************************//
 
-extern APInt Min;
-extern APInt Max;
-extern APInt Zero;
-
 /// In our range analysis pass we have to perform operations on ranges all the
 /// time. LLVM has a class to perform operations on ranges: the class
 /// ConstantRange. However, the class ConstantRange doesn't serve very well
@@ -157,14 +154,19 @@ class Range {
 private:
   APInt l; // The lower bound of the range.
   APInt u; // The upper bound of the range.
-  RangeType type;
+  RangeType type{Regular};
 
 public:
   Range();
-  Range(APInt lb, APInt ub, RangeType type = Regular);
-  ~Range();
-  APInt getLower() const { return l; }
-  APInt getUpper() const { return u; }
+  Range(const APInt &lb, const APInt &ub, RangeType rType = Regular);
+  ~Range() = default;
+  Range(const Range &other) = default;
+  Range(Range &&) = default;
+  Range &operator=(const Range &other) = default;
+  Range &operator=(Range &&) = default;
+
+  const APInt& getLower() const { return l; }
+  const APInt& getUpper() const { return u; }
   void setLower(const APInt &newl) { this->l = newl; }
   void setUpper(const APInt &newu) { this->u = newu; }
   bool isUnknown() const { return type == Unknown; }
@@ -222,12 +224,16 @@ private:
   char abstractState;
 
 public:
-  VarNode(const Value *V);
+  explicit VarNode(const Value *V);
   ~VarNode();
+  VarNode(const VarNode &) = delete;
+  VarNode(VarNode &&) = delete;
+  VarNode &operator=(const VarNode &) = delete;
+  VarNode &operator=(VarNode &&) = delete;
   /// Initializes the value of the node.
   void init(bool outside);
   /// Returns the range of the variable represented by this node.
-  Range getRange() const { return interval; }
+  const Range& getRange() const { return interval; }
   /// Returns the variable represented by this node.
   const Value *getValue() const { return V; }
   /// Changes the status of the variable represented by this node.
@@ -257,13 +263,18 @@ private:
   Range range;
 
 public:
-  BasicInterval(const Range &range);
-  BasicInterval(const APInt &l, const APInt &u);
   BasicInterval();
+  explicit BasicInterval(Range range);
+  BasicInterval(const APInt &l, const APInt &u);
   virtual ~BasicInterval(); // This is a base class.
+  BasicInterval(const BasicInterval &) = delete;
+  BasicInterval(BasicInterval &&) = delete;
+  BasicInterval &operator=(const BasicInterval &) = delete;
+  BasicInterval &operator=(BasicInterval &&) = delete;
+
   // Methods for RTTI
   virtual IntervalId getValueId() const { return BasicIntervalId; }
-  static bool classof(BasicInterval const *) { return true; }
+  static bool classof(BasicInterval const * /*unused*/) { return true; }
   /// Returns the range of this interval.
   const Range &getRange() const { return this->range; }
   /// Sets the range of this interval to another range.
@@ -293,10 +304,15 @@ private:
 
 public:
   SymbInterval(const Range &range, const Value *bound, CmpInst::Predicate pred);
-  ~SymbInterval();
+  ~SymbInterval() override;
+  SymbInterval(const SymbInterval &) = delete;
+  SymbInterval(SymbInterval &&) = delete;
+  SymbInterval &operator=(const SymbInterval &) = delete;
+  SymbInterval &operator=(SymbInterval &&) = delete;
+
   // Methods for RTTI
-  virtual IntervalId getValueId() const { return SymbIntervalId; }
-  static bool classof(SymbInterval const *) { return true; }
+  IntervalId getValueId() const override { return SymbIntervalId; }
+  static bool classof(SymbInterval const * /*unused*/) { return true; }
   static bool classof(BasicInterval const *BI) {
     return BI->getValueId() == SymbIntervalId;
   }
@@ -307,17 +323,12 @@ public:
   /// Replace symbolic intervals with hard-wired constants.
   Range fixIntersects(VarNode *bound, VarNode *sink);
   /// Prints the content of the interval.
-  void print(raw_ostream &OS) const;
+  void print(raw_ostream &OS) const override;
 };
-
-enum OperationId { UnaryOpId, SigmaOpId, BinaryOpId, PhiOpId, ControlDepId };
 
 /// This class represents a generic operation in our analysis.
 class BasicOp {
 private:
-  // We do not want people creating objects of this class.
-  void operator=(const BasicOp &);
-  BasicOp(const BasicOp &);
   // The range of the operation. Each operation has a range associated to it.
   // This range is obtained by inspecting the branches in the source program
   // and extracting its condition and intervals.
@@ -334,11 +345,26 @@ protected:
   BasicOp(BasicInterval *intersect, VarNode *sink, const Instruction *inst);
 
 public:
+  enum class OperationId {
+    UnaryOpId,
+    SigmaOpId,
+    BinaryOpId,
+    TernaryOpId,
+    PhiOpId,
+    ControlDepId
+  };
+
   /// The dtor. It's virtual because this is a base class.
   virtual ~BasicOp();
+  // We do not want people creating objects of this class.
+  BasicOp(const BasicOp &) = delete;
+  BasicOp(BasicOp &&) = delete;
+  BasicOp &operator=(const BasicOp &) = delete;
+  BasicOp &operator=(BasicOp &&) = delete;
+
   // Methods for RTTI
   virtual OperationId getValueId() const = 0;
-  static bool classof(BasicOp const *) { return true; }
+  static bool classof(BasicOp const * /*unused*/) { return true; }
   /// Given the input of the operation and the operation that will be
   /// performed, evaluates the result of the operation.
   virtual Range eval() const = 0;
@@ -373,17 +399,23 @@ private:
   unsigned int opcode;
   /// Computes the interval of the sink based on the interval of the sources,
   /// the operation and the interval associated to the operation.
-  Range eval() const;
+  Range eval() const override;
 
 public:
   UnaryOp(BasicInterval *intersect, VarNode *sink, const Instruction *inst,
           VarNode *source, unsigned int opcode);
-  ~UnaryOp();
+  ~UnaryOp() override;
+  UnaryOp(const UnaryOp &) = delete;
+  UnaryOp(UnaryOp &&) = delete;
+  UnaryOp &operator=(const UnaryOp &) = delete;
+  UnaryOp &operator=(UnaryOp &&) = delete;
+
   // Methods for RTTI
-  virtual OperationId getValueId() const { return UnaryOpId; }
-  static bool classof(UnaryOp const *) { return true; }
+  OperationId getValueId() const override { return OperationId::UnaryOpId; }
+  static bool classof(UnaryOp const * /*unused*/) { return true; }
   static bool classof(BasicOp const *BO) {
-    return BO->getValueId() == UnaryOpId || BO->getValueId() == SigmaOpId;
+    return BO->getValueId() == OperationId::UnaryOpId ||
+           BO->getValueId() == OperationId::SigmaOpId;
   }
   /// Return the opcode of the operation.
   unsigned int getOpcode() const { return opcode; }
@@ -391,7 +423,7 @@ public:
   VarNode *getSource() const { return source; }
   /// Prints the content of the operation. I didn't it an operator overload
   /// because I had problems to access the members of the class outside it.
-  void print(raw_ostream &OS) const;
+  void print(raw_ostream &OS) const override;
 };
 
 // Specific type of UnaryOp used to represent sigma functions
@@ -399,22 +431,27 @@ class SigmaOp : public UnaryOp {
 private:
   /// Computes the interval of the sink based on the interval of the sources,
   /// the operation and the interval associated to the operation.
-  Range eval() const;
+  Range eval() const override;
 
   bool unresolved;
 
 public:
   SigmaOp(BasicInterval *intersect, VarNode *sink, const Instruction *inst,
           VarNode *source, unsigned int opcode);
-  ~SigmaOp();
+  ~SigmaOp() override = default;
+  SigmaOp(const SigmaOp &) = delete;
+  SigmaOp(SigmaOp &&) = delete;
+  SigmaOp &operator=(const SigmaOp &) = delete;
+  SigmaOp &operator=(SigmaOp &&) = delete;
+
   // Methods for RTTI
-  virtual OperationId getValueId() const { return SigmaOpId; }
-  static bool classof(SigmaOp const *) { return true; }
+  OperationId getValueId() const override { return OperationId::SigmaOpId; }
+  static bool classof(SigmaOp const * /*unused*/) { return true; }
   static bool classof(UnaryOp const *UO) {
-    return UO->getValueId() == SigmaOpId;
+    return UO->getValueId() == OperationId::SigmaOpId;
   }
   static bool classof(BasicOp const *BO) {
-    return BO->getValueId() == SigmaOpId;
+    return BO->getValueId() == OperationId::SigmaOpId;
   }
 
   bool isUnresolved() const { return unresolved; }
@@ -423,7 +460,7 @@ public:
 
   /// Prints the content of the operation. I didn't it an operator overload
   /// because I had problems to access the members of the class outside it.
-  void print(raw_ostream &OS) const;
+  void print(raw_ostream &OS) const override;
 };
 
 /// Specific type of BasicOp used in Nuutila's strongly connected
@@ -431,17 +468,22 @@ public:
 class ControlDep : public BasicOp {
 private:
   VarNode *source;
-  Range eval() const;
-  void print(raw_ostream &OS) const;
+  Range eval() const override;
+  void print(raw_ostream &OS) const override;
 
 public:
   ControlDep(VarNode *sink, VarNode *source);
-  ~ControlDep();
+  ~ControlDep() override;
+  ControlDep(const ControlDep &) = delete;
+  ControlDep(ControlDep &&) = delete;
+  ControlDep &operator=(const ControlDep &) = delete;
+  ControlDep &operator=(ControlDep &&) = delete;
+
   // Methods for RTTI
-  virtual OperationId getValueId() const { return ControlDepId; }
-  static bool classof(ControlDep const *) { return true; }
+  OperationId getValueId() const override { return OperationId::ControlDepId; }
+  static bool classof(ControlDep const * /*unused*/) { return true; }
   static bool classof(BasicOp const *BO) {
-    return BO->getValueId() == ControlDepId;
+    return BO->getValueId() == OperationId::ControlDepId;
   }
   /// Returns the source of the operation.
   VarNode *getSource() const { return source; }
@@ -452,27 +494,32 @@ class PhiOp : public BasicOp {
 private:
   // Vector of sources
   SmallVector<const VarNode *, 2> sources;
-  unsigned opcode;
   /// Computes the interval of the sink based on the interval of the sources,
   /// the operation and the interval associated to the operation.
-  Range eval() const;
+  Range eval() const override;
 
 public:
-  PhiOp(BasicInterval *intersect, VarNode *sink, const Instruction *inst,
-        unsigned int opcode);
-  ~PhiOp();
+  PhiOp(BasicInterval *intersect, VarNode *sink, const Instruction *inst);
+  ~PhiOp() override = default;
+  PhiOp(const PhiOp &) = delete;
+  PhiOp(PhiOp &&) = delete;
+  PhiOp &operator=(const PhiOp &) = delete;
+  PhiOp &operator=(PhiOp &&) = delete;
+
   // Add source to the vector of sources
   void addSource(const VarNode *newsrc);
   // Return source identified by index
   const VarNode *getSource(unsigned index) const { return sources[index]; }
   unsigned getNumSources() const { return sources.size(); }
   // Methods for RTTI
-  virtual OperationId getValueId() const { return PhiOpId; }
-  static bool classof(PhiOp const *) { return true; }
-  static bool classof(BasicOp const *BO) { return BO->getValueId() == PhiOpId; }
+  OperationId getValueId() const override { return OperationId::PhiOpId; }
+  static bool classof(PhiOp const * /*unused*/) { return true; }
+  static bool classof(BasicOp const *BO) {
+    return BO->getValueId() == OperationId::PhiOpId;
+  }
   /// Prints the content of the operation. I didn't it an operator overload
   /// because I had problems to access the members of the class outside it.
-  void print(raw_ostream &OS) const;
+  void print(raw_ostream &OS) const override;
 };
 
 /// A constraint like sink = source1 operation source2 intersect [l, u].
@@ -486,17 +533,22 @@ private:
   unsigned int opcode;
   /// Computes the interval of the sink based on the interval of the sources,
   /// the operation and the interval associated to the operation.
-  Range eval() const;
+  Range eval() const override;
 
 public:
   BinaryOp(BasicInterval *intersect, VarNode *sink, const Instruction *inst,
            VarNode *source1, VarNode *source2, unsigned int opcode);
-  ~BinaryOp();
+  ~BinaryOp() override = default;
+  BinaryOp(const BinaryOp &) = delete;
+  BinaryOp(BinaryOp &&) = delete;
+  BinaryOp &operator=(const BinaryOp &) = delete;
+  BinaryOp &operator=(BinaryOp &&) = delete;
+
   // Methods for RTTI
-  virtual OperationId getValueId() const { return BinaryOpId; }
-  static bool classof(BinaryOp const *) { return true; }
+  OperationId getValueId() const override { return OperationId::BinaryOpId; }
+  static bool classof(BinaryOp const * /*unused*/) { return true; }
   static bool classof(BasicOp const *BO) {
-    return BO->getValueId() == BinaryOpId;
+    return BO->getValueId() == OperationId::BinaryOpId;
   }
   /// Return the opcode of the operation.
   unsigned int getOpcode() const { return opcode; }
@@ -506,11 +558,54 @@ public:
   VarNode *getSource2() const { return source2; }
   /// Prints the content of the operation. I didn't it an operator overload
   /// because I had problems to access the members of the class outside it.
-  void print(raw_ostream &OS) const;
+  void print(raw_ostream &OS) const override;
+};
+
+class TernaryOp : public BasicOp {
+private:
+  // The first operand.
+  VarNode *source1;
+  // The second operand.
+  VarNode *source2;
+  // The third operand.
+  VarNode *source3;
+  // The opcode of the operation.
+  unsigned int opcode;
+  /// Computes the interval of the sink based on the interval of the sources,
+  /// the operation and the interval associated to the operation.
+  Range eval() const override;
+
+public:
+  TernaryOp(BasicInterval *intersect, VarNode *sink, const Instruction *inst,
+            VarNode *source1, VarNode *source2, VarNode *source3,
+            unsigned int opcode);
+  ~TernaryOp() override = default;
+  TernaryOp(const TernaryOp &) = delete;
+  TernaryOp(TernaryOp &&) = delete;
+  TernaryOp &operator=(const TernaryOp &) = delete;
+  TernaryOp &operator=(TernaryOp &&) = delete;
+
+  // Methods for RTTI
+  OperationId getValueId() const override { return OperationId::TernaryOpId; }
+  static bool classof(TernaryOp const * /*unused*/) { return true; }
+  static bool classof(BasicOp const *BO) {
+    return BO->getValueId() == OperationId::TernaryOpId;
+  }
+  /// Return the opcode of the operation.
+  unsigned int getOpcode() const { return opcode; }
+  /// Returns the first operand of this operation.
+  VarNode *getSource1() const { return source1; }
+  /// Returns the second operand of this operation.
+  VarNode *getSource2() const { return source2; }
+  /// Returns the third operand of this operation.
+  VarNode *getSource3() const { return source3; }
+  /// Prints the content of the operation. I didn't it an operator overload
+  /// because I had problems to access the members of the class outside it.
+  void print(raw_ostream &OS) const override;
 };
 
 /// This class is used to store the intersections that we get in the branches.
-/// I decided to write it because I think it is better to have an objetc
+/// I decided to write it because I think it is better to have an object
 /// to store these information than create a lot of maps
 /// in the ConstraintGraph class.
 class ValueBranchMap {
@@ -526,6 +621,11 @@ public:
                  const BasicBlock *BBFalse, BasicInterval *ItvT,
                  BasicInterval *ItvF);
   ~ValueBranchMap();
+  ValueBranchMap(const ValueBranchMap &) = default;
+  ValueBranchMap(ValueBranchMap &&) = default;
+  ValueBranchMap &operator=(const ValueBranchMap &) = delete;
+  ValueBranchMap &operator=(ValueBranchMap &&) = delete;
+
   /// Get the "false side" of the branch
   const BasicBlock *getBBFalse() const { return BBFalse; }
   /// Get the "true side" of the branch
@@ -555,8 +655,11 @@ public:
   ValueSwitchMap(
       const Value *V,
       SmallVector<std::pair<BasicInterval *, const BasicBlock *>, 4> &BBsuccs);
-
   ~ValueSwitchMap();
+  ValueSwitchMap(const ValueSwitchMap &) = default;
+  ValueSwitchMap(ValueSwitchMap &&) = default;
+  ValueSwitchMap &operator=(const ValueSwitchMap &) = delete;
+  ValueSwitchMap &operator=(ValueSwitchMap &&) = delete;
 
   /// Get the corresponding basic block
   const BasicBlock *getBB(unsigned idx) const { return BBsuccs[idx].second; }
@@ -579,88 +682,50 @@ public:
 /// to provide a class for this exact purpose. We'll keep using this
 /// because it works just fine and is well put together.
 class Profile {
-public:
-  class TimeValue : public sys::TimeValue {
-  public:
-    // Default constructor
-    TimeValue() : sys::TimeValue(0.0) {}
+  using AccTimesMap = StringMap<llvm::TimeRecord>;
+  TimerGroup *tg{};
+  SmallVector<Timer *, 4> timers;
 
-    // Copy constructor related to parent class
-    TimeValue(const sys::TimeValue &from) : sys::TimeValue(0.0) {
-      seconds(from.seconds());
-      nanoseconds(from.nanoseconds());
-    }
-
-    // Copy constructor
-    TimeValue(const TimeValue &from) : sys::TimeValue(0.0) {
-      seconds(from.seconds());
-      nanoseconds(from.nanoseconds());
-    }
-
-    // Assignment operator
-    TimeValue &operator=(const TimeValue &from) {
-      if (*this == from) {
-        return *this;
-      }
-
-      seconds(from.seconds());
-      nanoseconds(from.nanoseconds());
-
-      return *this;
-    }
-
-    // Add operator
-    TimeValue operator+(const TimeValue &op) {
-      return static_cast<TimeValue>(static_cast<sys::TimeValue>(*this) +
-                                    static_cast<sys::TimeValue>(op));
-    }
-
-    TimeValue &operator+=(const TimeValue &op) {
-      TimeValue result = *this + op;
-      *this = result;
-      return *this;
-    }
-
-    // Sub operator
-    TimeValue operator-(const TimeValue &op) {
-      return static_cast<TimeValue>(static_cast<sys::TimeValue>(*this) -
-                                    static_cast<sys::TimeValue>(op));
-    }
-
-    TimeValue &operator-=(const TimeValue &op) {
-      TimeValue result = *this - op;
-      *this = result;
-      return *this;
-    }
-  };
-
-  // Map to store accumulated times
-  typedef StringMap<TimeValue> AccTimesMap;
-
-private:
   AccTimesMap accumulatedtimes;
-  size_t memory;
+  ssize_t memory{0L};
 
 public:
-  Profile() : memory(0) {}
-
-  TimeValue timenow() {
-    TimeValue garbage, usertime;
-    sys::Process::GetTimeUsage(garbage, usertime, garbage);
-
-    return usertime;
+  Profile() {
+    tg = new TimerGroup("RangeAnalysis", "Range Analysis algorithm");
   }
 
-  void updateTime(StringRef key, const TimeValue &time) {
+  ~Profile() {
+    delete tg;
+    for (Timer *timer : timers) {
+      delete timer;
+    }
+  }
+
+  Profile(const Profile &) = delete;
+  Profile(Profile &&) = delete;
+  Profile &operator=(const Profile &) = delete;
+  Profile &operator=(Profile &&) = delete;
+
+  ssize_t getMemoryUsage() const { return memory; }
+
+  Timer *registerNewTimer(StringRef key, StringRef descr) {
+    Timer *timer = new Timer(key, descr, *tg);
+    timers.push_back(timer);
+
+    return timer;
+  }
+
+  void addTimeRecord(const Timer *timer) {
+    StringRef key = timer->getName();
+    TimeRecord time = timer->getTotalTime();
     accumulatedtimes[key] += time;
   }
 
   double getTimeDouble(StringRef key) {
-    return accumulatedtimes[key].seconds() +
-           (0.001) * accumulatedtimes[key].milliseconds();
+    return accumulatedtimes[key].getUserTime();
   }
 
-  TimeValue getTime(StringRef key) { return accumulatedtimes[key]; }
+  TimeRecord getTimeRecord(StringRef key) { return accumulatedtimes[key]; }
 
   void printTime(StringRef key) {
     double time = getTimeDouble(key);
@@ -669,16 +734,15 @@ public:
     errs() << formatted.str() << "\t - " << key << " elapsed time\n";
   }
 
-  void setMemoryUsage() {
-    size_t newmemory = sys::Process::GetMallocUsage();
+  void registerMemoryUsage() {
+    TimeRecord current = TimeRecord::getCurrentTime();
+    ssize_t newmemory = current.getMemUsed();
     if (newmemory > memory) {
       memory = newmemory;
     }
   }
 
-  size_t getMemoryUsage() { return memory; }
-
-  void printMemoryUsage() {
+  void printMemoryUsage() const {
     std::ostringstream formatted;
     // Convert bytes to kilobytes
     double mem = memory;
@@ -689,24 +753,24 @@ public:
 };
 
 // The VarNodes type.
-typedef DenseMap<const Value *, VarNode *> VarNodes;
+using VarNodes = DenseMap<const Value *, VarNode *>;
 
 // The Operations type.
-typedef SmallPtrSet<BasicOp *, 64> GenOprs;
+using GenOprs = SmallPtrSet<BasicOp *, 32>;
 
 // A map from variables to the operations where these variables are used.
-typedef DenseMap<const Value *, SmallPtrSet<BasicOp *, 8>> UseMap;
+using UseMap = DenseMap<const Value *, SmallPtrSet<BasicOp *, 8>>;
 
 // A map from variables to the operations where these
 // variables are present as bounds
-typedef DenseMap<const Value *, SmallPtrSet<BasicOp *, 8>> SymbMap;
+using SymbMap = DenseMap<const Value *, SmallPtrSet<BasicOp *, 8>>;
 
 // A map from varnodes to the operation in which this variable is defined
-typedef DenseMap<const Value *, BasicOp *> DefMap;
+using DefMap = DenseMap<const Value *, BasicOp *>;
 
-typedef DenseMap<const Value *, ValueBranchMap> ValuesBranchMap;
+using ValuesBranchMap = DenseMap<const Value *, ValueBranchMap>;
 
-typedef DenseMap<const Value *, ValueSwitchMap> ValuesSwitchMap;
+using ValuesSwitchMap = DenseMap<const Value *, ValueSwitchMap>;
 
 /// This class represents our constraint graph. This graph is used to
 /// perform all computations in our analysis.
@@ -719,7 +783,7 @@ protected:
 
 private:
   // Save the last Function analyzed
-  const Function *func;
+  const Function *func{nullptr};
   // A map from variables to the operations that define them
   DefMap defMap;
   // A map from variables to the operations where these variables are used.
@@ -738,6 +802,8 @@ private:
 
   /// Adds a BinaryOp in the graph.
   void addBinaryOp(const Instruction *I);
+  /// Adds a TernaryOp in the graph.
+  void addTernaryOp(const Instruction *I);
   /// Adds a PhiOp in the graph.
   void addPhiOp(const PHINode *Phi);
   // Adds a SigmaOp to the graph.
@@ -780,8 +846,12 @@ public:
   /// I'm doing this because I want to use this analysis in an
   /// inter-procedural pass. So, I have to receive these data structures as
   // parameters.
-  ConstraintGraph();
+  ConstraintGraph() = default;
   virtual ~ConstraintGraph();
+  ConstraintGraph(const ConstraintGraph &) = delete;
+  ConstraintGraph(ConstraintGraph &&) = delete;
+  ConstraintGraph &operator=(const ConstraintGraph &) = delete;
+  ConstraintGraph &operator=(ConstraintGraph &&) = delete;
   /// Adds a VarNode in the graph.
   VarNode *addVarNode(const Value *V);
 
@@ -810,7 +880,7 @@ public:
   /// Prints the content of the graph in dot format. For more informations
   /// about the dot format, see: http://www.graphviz.org/pdf/dotguide.pdf
   void print(const Function &F, raw_ostream &OS) const;
-  void printToFile(const Function &F, Twine FileName);
+  void printToFile(const Function &F, const std::string &FileName);
   /// Allow easy printing of graphs from the debugger.
   void dump(const Function &F) const {
     print(F, dbgs());
@@ -824,27 +894,27 @@ public:
 class Cousot : public ConstraintGraph {
 private:
   void preUpdate(const UseMap &compUseMap,
-                 SmallPtrSet<const Value *, 6> &entryPoints);
+                 SmallPtrSet<const Value *, 6> &entryPoints) override;
   void posUpdate(const UseMap &compUseMap,
-                 SmallPtrSet<const Value *, 6> &activeVars,
-                 const SmallPtrSet<VarNode *, 32> *component);
+                 SmallPtrSet<const Value *, 6> &entryPoints,
+                 const SmallPtrSet<VarNode *, 32> *component) override;
 
 public:
-  Cousot() : ConstraintGraph() {}
+  Cousot() = default;
 };
 
 class CropDFS : public ConstraintGraph {
 private:
   void preUpdate(const UseMap &compUseMap,
-                 SmallPtrSet<const Value *, 6> &entryPoints);
+                 SmallPtrSet<const Value *, 6> &entryPoints) override;
   void posUpdate(const UseMap &compUseMap,
                  SmallPtrSet<const Value *, 6> &activeVars,
-                 const SmallPtrSet<VarNode *, 32> *component);
-  void storeAbstractStates(const SmallPtrSet<VarNode *, 32> *component);
+                 const SmallPtrSet<VarNode *, 32> *component) override;
+  void storeAbstractStates(const SmallPtrSet<VarNode *, 32> &component);
   void crop(const UseMap &compUseMap, BasicOp *op);
 
 public:
-  CropDFS() : ConstraintGraph() {}
+  CropDFS() = default;
 };
 
 class Nuutila {
@@ -867,12 +937,16 @@ public:
   Nuutila(VarNodes *varNodes, UseMap *useMap, SymbMap *symbMap,
           bool single = false);
   ~Nuutila();
+  Nuutila(const Nuutila &) = delete;
+  Nuutila(Nuutila &&) = delete;
+  Nuutila &operator=(const Nuutila &) = delete;
+  Nuutila &operator=(Nuutila &&) = delete;
 
   void addControlDependenceEdges(SymbMap *symbMap, UseMap *useMap,
                                  VarNodes *vars);
   void delControlDependenceEdges(UseMap *useMap);
   void visit(Value *V, std::stack<Value *> &stack, UseMap *useMap);
-  typedef std::deque<Value *>::reverse_iterator iterator;
+  using iterator = std::deque<Value *>::reverse_iterator;
   iterator begin() { return worklist.rbegin(); }
   iterator end() { return worklist.rend(); }
 };
@@ -889,9 +963,16 @@ public:
 
 class RangeAnalysis {
 protected:
-  ConstraintGraph *CG;
+  ConstraintGraph *CG{nullptr};
 
 public:
+  RangeAnalysis() = default;
+  virtual ~RangeAnalysis() = default;
+  RangeAnalysis(const RangeAnalysis &) = delete;
+  RangeAnalysis &operator=(const RangeAnalysis &) = delete;
+  RangeAnalysis(RangeAnalysis &&) = delete;
+  RangeAnalysis &operator=(RangeAnalysis &&) = delete;
+
   /** Gets the maximum bit width of the operands in the instructions of the
    * function. This function is necessary because the class APInt only
    * supports binary operations on operands that have the same number of
@@ -900,47 +981,51 @@ public:
    * the number of operands used in the function.
    */
   static unsigned getMaxBitWidth(const Function &F);
-  static void updateMinMax(unsigned maxBitWidth);
+  static void updateConstantIntegers(unsigned maxBitWidth);
 
   virtual APInt getMin() = 0;
   virtual APInt getMax() = 0;
   virtual Range getRange(const Value *v) = 0;
-  virtual ~RangeAnalysis() { /*errs() << "\nRangeAnalysis";*/
-  }
 };
 
 template <class CGT>
 class InterProceduralRA : public ModulePass, public RangeAnalysis {
 public:
   static char ID; // Pass identification, replacement for typeid
-  InterProceduralRA() : ModulePass(ID) { CG = NULL; }
-  ~InterProceduralRA();
-  bool runOnModule(Module &M);
-  void getAnalysisUsage(AnalysisUsage &AU) const;
+  InterProceduralRA() : ModulePass(ID) {}
+  ~InterProceduralRA() override;
+  InterProceduralRA(const InterProceduralRA &) = delete;
+  InterProceduralRA &operator=(const InterProceduralRA &) = delete;
+  InterProceduralRA(InterProceduralRA &&) = delete;
+  InterProceduralRA &operator=(InterProceduralRA &&) = delete;
+  bool runOnModule(Module &M) override;
+  void getAnalysisUsage(AnalysisUsage &AU) const override;
   static unsigned getMaxBitWidth(Module &M);
 
-  virtual APInt getMin();
-  virtual APInt getMax();
-  virtual Range getRange(const Value *v);
+  APInt getMin() override;
+  APInt getMax() override;
+  Range getRange(const Value *v) override;
 
 private:
   void MatchParametersAndReturnValues(Function &F, ConstraintGraph &G);
 };
 
 template <class CGT>
-class IntraProceduralRA : public FunctionPass, public RangeAnalysis {
+class IntraProceduralRA : public FunctionPass, RangeAnalysis {
 public:
   static char ID; // Pass identification, replacement for typeid
-  IntraProceduralRA() : FunctionPass(ID) {
-    CG = NULL; /*errs() << "\nIntraProceduralRA ctor";*/
-  }
-  ~IntraProceduralRA();
-  void getAnalysisUsage(AnalysisUsage &AU) const;
-  bool runOnFunction(Function &F);
+  IntraProceduralRA() : FunctionPass(ID) {}
+  ~IntraProceduralRA() override;
+  IntraProceduralRA(const IntraProceduralRA &) = delete;
+  IntraProceduralRA &operator=(const IntraProceduralRA &) = delete;
+  IntraProceduralRA(IntraProceduralRA &&) = delete;
+  IntraProceduralRA &operator=(IntraProceduralRA &&) = delete;
+  void getAnalysisUsage(AnalysisUsage &AU) const override;
+  bool runOnFunction(Function &F) override;
 
-  virtual APInt getMin();
-  virtual APInt getMax();
-  virtual Range getRange(const Value *v);
+  APInt getMin() override;
+  APInt getMax() override;
+  Range getRange(const Value *v) override;
 }; // end of class RangeAnalysis
-
-#endif /* LLVM_TRANSFORMS_RANGEANALYSIS_RANGEANALYSIS_H_ */
+} // namespace RangeAnalysis
+#endif // _RANGEANALYSIS_RANGEANALYSIS_H

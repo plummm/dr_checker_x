@@ -78,7 +78,7 @@ namespace DRCHECKER {
         std::set<AnalysisContext*> availableAnalysisContexts;
 
         // Range analysis results.
-        RangeAnalysis *range_analysis;
+        RangeAnalysis::RangeAnalysis *range_analysis;
 
         //is the current function being analyzed read/write?
         bool is_read_write_function = false;
@@ -98,7 +98,7 @@ namespace DRCHECKER {
         // Information needed for TaintAnalysis
         std::map<AnalysisContext*, std::map<Value *, std::set<TaintFlag*>*>*> taintInformation;
 
-        GlobalState(RangeAnalysis *ra, DataLayout *currDataLayout) {
+        GlobalState(RangeAnalysis::RangeAnalysis *ra, DataLayout *currDataLayout) {
             this->range_analysis = ra;
             this->targetDataLayout = currDataLayout;
         }
@@ -526,7 +526,7 @@ namespace DRCHECKER {
          * @param targetValue Value for which range needs to be fetched.
          * @return Pointer to range object, if exists, else Null.
          */
-        Range getRange(Value *targetValue) {
+        RangeAnalysis::Range getRange(Value *targetValue) {
             return this->range_analysis->getRange(targetValue);
         }
 

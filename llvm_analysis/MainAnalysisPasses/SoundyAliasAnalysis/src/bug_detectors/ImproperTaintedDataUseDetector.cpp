@@ -29,7 +29,7 @@ namespace DRCHECKER {
                 // if this is a copy_from_user method?
                 // check if dst object is a heap object
                 Value *sizeArg = I.getArgOperand(2);
-                Range sizeRange = this->currState.getRange(sizeArg);
+                RangeAnalysis::Range sizeRange = this->currState.getRange(sizeArg);
                 if(sizeRange.isBounded()) {
                     std::set<Value *> toCheck;
                     toCheck.clear();
@@ -61,7 +61,7 @@ namespace DRCHECKER {
                         // a malloced object which is not bounded i.e whose size can vary.
                         for(AliasObject *currObj:allObjects) {
                             if(currObj->isHeapObject()) {
-                                Range currObjRange = this->currState.getRange(currObj->getAllocSize());
+                                RangeAnalysis::Range currObjRange = this->currState.getRange(currObj->getAllocSize());
                                 if(!currObjRange.isBounded()) {
                                     allInterestingObjects.insert(currObj);
                                 }

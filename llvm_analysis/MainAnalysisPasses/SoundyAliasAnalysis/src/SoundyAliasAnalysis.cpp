@@ -150,7 +150,7 @@ namespace DRCHECKER {
             // create data layout for the current module
             DataLayout *currDataLayout = new DataLayout(&m);
 
-            InterProceduralRA<CropDFS> &range_analysis = getAnalysis<InterProceduralRA<CropDFS>>();
+            RangeAnalysis::InterProceduralRA<RangeAnalysis::CropDFS> &range_analysis = getAnalysis<RangeAnalysis::InterProceduralRA<RangeAnalysis::CropDFS>>();
             GlobalState currState(&range_analysis, currDataLayout);
             // set the read and write flag in global state, to be used by differect detectors.
             currState.is_read_write_function = functionType == READ_HDR || functionType == WRITE_HDR;
@@ -315,7 +315,7 @@ namespace DRCHECKER {
 
         void getAnalysisUsage(AnalysisUsage &AU) const override {
             AU.setPreservesAll();
-            AU.addRequired<InterProceduralRA<CropDFS>>();
+            AU.addRequired<RangeAnalysis::InterProceduralRA<RangeAnalysis::CropDFS>>();
             AU.addRequired<CallGraphWrapperPass>();
             AU.addRequired<LoopInfoWrapperPass>();
         }
@@ -417,7 +417,7 @@ namespace DRCHECKER {
             bool is_handled = false;
             if(functionType == IOCTL_HDR) {
                 // last argument is the user pointer.
-                taintedArgs.insert(targetFunction->getArgumentList().size() - 1);
+                taintedArgs.insert(targetFunction->arg_size() - 1);
                 // first argument is the file pointer
                 pointerArgs.insert(0);
                 is_handled = true;
@@ -430,34 +430,34 @@ namespace DRCHECKER {
                 is_handled = true;
             }
             if(functionType == V4L2_IOCTL_FUNC) {
-                taintedArgData.insert(targetFunction->getArgumentList().size() - 1);
-                for(unsigned long i=0;i<targetFunction->getArgumentList().size(); i++) {
+                taintedArgData.insert(targetFunction->arg_size() - 1);
+                for(unsigned long i=0;i<targetFunction->arg_size(); i++) {
                     pointerArgs.insert(i);
                 }
                 is_handled = true;
             }
             if(functionType == DEVATTR_SHOW) {
-                for(unsigned long i=0;i<targetFunction->getArgumentList().size(); i++) {
+                for(unsigned long i=0;i<targetFunction->arg_size(); i++) {
                     pointerArgs.insert(i);
                 }
                 is_handled = true;
             }
             if(functionType == DEVATTR_STORE) {
-                if(targetFunction->getArgumentList().size() == 3) {
+                if(targetFunction->arg_size() == 3) {
                     // this is driver attribute
                     taintedArgData.insert(1);
                 } else {
                     // this is device attribute
                     taintedArgData.insert(2);
                 }
-                for (unsigned long i = 0; i < targetFunction->getArgumentList().size() - 1; i++) {
+                for (unsigned long i = 0; i < targetFunction->arg_size() - 1; i++) {
                     pointerArgs.insert(i);
                 }
                 is_handled = true;
             }
             if(functionType == NETDEV_IOCTL) {
                 taintedArgData.insert(1);
-                for(unsigned long i=0;i<targetFunction->getArgumentList().size()-1; i++) {
+                for(unsigned long i=0;i<targetFunction->arg_size()-1; i++) {
                     pointerArgs.insert(i);
                 }
                 is_handled = true;

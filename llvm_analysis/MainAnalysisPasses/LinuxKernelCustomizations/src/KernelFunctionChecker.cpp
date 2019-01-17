@@ -43,7 +43,7 @@ namespace DRCHECKER {
     bool KernelFunctionChecker::is_init_function(const Function *targetFunction) {
         if(!targetFunction->isDeclaration()) {
             for(const std::string &curr_sec:KernelFunctionChecker::init_section_names) {
-                if(targetFunction->getSection() != nullptr && strlen(targetFunction->getSection()) &&
+                if( (!targetFunction->getSection().empty()) && targetFunction->getSection().size() &&
                    (curr_sec.find(targetFunction->getSection()) != std::string::npos)) {
                     return true;
                 }
