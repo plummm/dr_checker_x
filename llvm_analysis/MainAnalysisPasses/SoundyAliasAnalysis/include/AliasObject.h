@@ -2,6 +2,8 @@
 // Created by machiry on 10/24/16.
 //
 
+#ifndef PROJECT_ALIASOBJECT_H
+#define PROJECT_ALIASOBJECT_H
 #include <set>
 #include <llvm/Support/Debug.h>
 #include "llvm/Pass.h"
@@ -12,8 +14,6 @@
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Type.h"
 #include "TaintInfo.h"
-#ifndef PROJECT_ALIASOBJECT_H
-#define PROJECT_ALIASOBJECT_H
 
 using namespace llvm;
 #ifdef DEBUG
@@ -465,41 +465,10 @@ namespace DRCHECKER {
          * @return true if added else false if the taint flag is a duplicate.
          */
         bool taintAllFields(TaintFlag *targetTaintFlag) {
-            std::set<long> allAvailableFields;
             if(!this->all_contents_tainted) {
                 this->all_contents_tainted = true;
                 this->all_contents_taint_flag = targetTaintFlag;
-                if (this->targetType->isStructTy()) {
-                    StructType *resStType = dyn_cast<StructType>(this->targetType);
-#ifdef DEBUG
-                    dbgs() << "\nIs a structure type:" << resStType->getNumElements() << "\n";
-#endif
-                    for (long i = 0; i < (resStType->getNumElements()); i++) {
-                        allAvailableFields.insert(allAvailableFields.end(), i);
-                    }
-
-                } else if (this->targetType->isPointerTy() && this->targetType->getContainedType(0)->isStructTy()) {
-                    // if this is a pointer to a struct.
-                    StructType *resStType = dyn_cast<StructType>(this->targetType->getContainedType(0));
-                    for (long i = 0; i < (resStType->getNumElements()); i++) {
-                        allAvailableFields.insert(allAvailableFields.end(), i);
-                    }
-                } else if (this->pointsTo.size()) {
-                    // has some points to?
-                    // iterate thru pointsTo and get all fields.
-                    for (auto objPoint:this->pointsTo) {
-                        long currFieldID = objPoint->fieldId;
-                        // no added? then add.
-                        if (allAvailableFields.find(currFieldID) == allAvailableFields.end()) {
-                            allAvailableFields.insert(allAvailableFields.end(), currFieldID);
-                        }
-                    }
-
-                } else {
-                    // This must be a scalar type.
-                    // just add taint to the field 0.
-                    allAvailableFields.insert(allAvailableFields.end(), 0);
-                }
+                std::set<long> allAvailableFields = getAllAvailableFields();
 
                 // add the taint to all available fields.
                 for (auto fieldId:allAvailableFields) {
@@ -513,6 +482,72 @@ namespace DRCHECKER {
             }
             return false;
 
+        }
+
+        inline Value * getValue();
+
+        //hz: taint all fields and attach a different taint tag for each field in the TaintFlag.
+        bool taintAllFieldsWithTag(TaintFlag *targetTaintFlag) {
+            Value *v = this->getValue();
+            if (v == nullptr){
+                return false;
+            }
+            if(!this->all_contents_tainted) {
+                this->all_contents_tainted = true;
+                //TODO: Do we need to put a special tag here?
+                this->all_contents_taint_flag = targetTaintFlag;
+                std::set<long> allAvailableFields = getAllAvailableFields();
+
+                // add the taint to all available fields.
+                for (auto fieldId:allAvailableFields) {
+#ifdef DEBUG
+                    dbgs() << "Adding taint to field:" << fieldId << "\n";
+#endif
+                    TaintTag *tag = new TaintTag(fieldId,v);
+                    TaintFlag *newFlag = new TaintFlag(targetTaintFlag,tag);
+                    addFieldTaintFlag(fieldId, newFlag);
+                }
+
+                return true;
+            }
+            return false;
+
+        }
+
+        std::set<long> getAllAvailableFields() {
+            std::set<long> allAvailableFields;
+            if (this->targetType->isStructTy()) {
+                StructType *resStType = dyn_cast<StructType>(this->targetType);
+#ifdef DEBUG
+                dbgs() << "\nIs a structure type:" << resStType->getNumElements() << "\n";
+#endif
+                for (long i = 0; i < (resStType->getNumElements()); i++) {
+                    allAvailableFields.insert(allAvailableFields.end(), i);
+                }
+
+            } else if (this->targetType->isPointerTy() && this->targetType->getContainedType(0)->isStructTy()) {
+                // if this is a pointer to a struct.
+                StructType *resStType = dyn_cast<StructType>(this->targetType->getContainedType(0));
+                for (long i = 0; i < (resStType->getNumElements()); i++) {
+                    allAvailableFields.insert(allAvailableFields.end(), i);
+                }
+            } else if (this->pointsTo.size()) {
+                // has some points to?
+                // iterate thru pointsTo and get all fields.
+                for (auto objPoint:this->pointsTo) {
+                    long currFieldID = objPoint->fieldId;
+                    // no added? then add.
+                    if (allAvailableFields.find(currFieldID) == allAvailableFields.end()) {
+                        allAvailableFields.insert(allAvailableFields.end(), currFieldID);
+                    }
+                }
+
+            } else {
+                // This must be a scalar type.
+                // just add taint to the field 0.
+                allAvailableFields.insert(allAvailableFields.end(), 0);
+            }
+            return allAvailableFields;
         }
 
         //TaintInfo helpers end
@@ -558,6 +593,13 @@ namespace DRCHECKER {
         virtual bool isFunctionArg() {
             /***
              * checks whether the current object is a function argument.
+             */
+            return false;
+        }
+
+        virtual bool isFunctionLocal() {
+            /***
+             * checks whether the current object is a function local object.
              */
             return false;
         }
@@ -669,6 +711,10 @@ namespace DRCHECKER {
 
         Value* getObjectPtr() {
             return this->targetAllocaInst;
+        }
+
+        bool isFunctionLocal() {
+            return true;
         }
 
         friend llvm::raw_ostream& operator<<(llvm::raw_ostream& os, const FunctionLocalVariable& obj) {
@@ -832,6 +878,20 @@ namespace DRCHECKER {
             return true;
         }
     };
+
+    //hz: get the llvm::Value behind this AliasObject.
+    Value * AliasObject::getValue() {
+        Value *v = nullptr;
+        if (this->isGlobalObject()){
+            v = ((DRCHECKER::GlobalObject*)this)->targetVar;
+        }else if(this->isFunctionArg()){
+            v = ((DRCHECKER::FunctionArgument*)this)->targetArgument;
+        }else if (this->isFunctionLocal()){
+            v = ((DRCHECKER::FunctionLocalVariable*)this)->targetVar;
+        } //TODO: HeapAllocation
+        return v;
+    }
+
 
 
 }

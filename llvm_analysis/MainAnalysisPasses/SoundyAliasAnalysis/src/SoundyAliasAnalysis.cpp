@@ -224,20 +224,22 @@ namespace DRCHECKER {
                         callSites.push_back(currFunction.getEntryBlock().getFirstNonPHIOrDbg());
                         // set up user function args.
                         setupFunctionArgs(&currFunction, currState, &callSites);
+                        //hz: taint all global objects, field-sensitive.
+                        addGlobalTaintSource(currState);
 
                         std::vector<VisitorCallback *> allCallBacks;
 
                         // add pre analysis bug detectors/
                         // these are the detectors, that need to be run before all the analysis passes.
-                        BugDetectorDriver::addPreAnalysisBugDetectors(currState, &currFunction, &callSites,
-                                                                      &allCallBacks, targetChecker);
+                        //BugDetectorDriver::addPreAnalysisBugDetectors(currState, &currFunction, &callSites,
+                        //                                              &allCallBacks, targetChecker);
 
                         // first add all analysis visitors.
                         addAllVisitorAnalysis(currState, &currFunction, &callSites, &allCallBacks);
 
                         // next, add all bug detector analysis visitors, which need to be run post analysis passed.
-                        BugDetectorDriver::addPostAnalysisBugDetectors(currState, &currFunction, &callSites,
-                                                                       &allCallBacks, targetChecker);
+                        //BugDetectorDriver::addPostAnalysisBugDetectors(currState, &currFunction, &callSites,
+                        //                                               &allCallBacks, targetChecker);
 
                         // create global visitor and run it.
                         GlobalVisitor *vis = new GlobalVisitor(currState, &currFunction, &callSites, traversalOrder, allCallBacks);
@@ -247,6 +249,13 @@ namespace DRCHECKER {
                         //SAAVisitor *vis = new SAAVisitor(currState, &currFunction, &callSites, traversalOrder);
                         dbgs() << "Starting Analyzing function:" << currFunction.getName() << "\n";
                         vis->analyze();
+
+                        //hz: dump the taint information we require here.
+                        std::error_code EC;
+                        llvm::raw_fd_ostream o_taint("taint_info_" + checkFunctionName, EC);
+                        currState.dumpTaintInfo(o_taint);
+                        o_taint.close();
+
                         if(outputFile == "") {
                             // No file provided, write to dbgs()
                             dbgs() << "[+] Writing JSON output :\n";
@@ -504,7 +513,21 @@ namespace DRCHECKER {
             }
         }
 
+        //hz: try to set all global variables as taint source.
+        void addGlobalTaintSource(GlobalState &targetState){
+            //Type of globalVariables: std::map<Value *, std::set<PointerPointsTo*>*>
+            for(auto const &it : GlobalState::globalVariables){
+                Value *v = it.first;
+                TaintFlag *currFlag = new TaintFlag(v, true);
+                std::set<PointerPointsTo*> *ps = it.second;
+                for(auto const &p : *ps){
+                    p->targetObject->taintAllFieldsWithTag(currFlag);
+                }
+            }
+        }
+
     };
+
 
     char SAAPass::ID = 0;
     static RegisterPass<SAAPass> x("dr_checker", "Soundy Driver Checker", false, true);

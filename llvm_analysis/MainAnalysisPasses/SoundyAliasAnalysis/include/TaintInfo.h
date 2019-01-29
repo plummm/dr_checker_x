@@ -17,6 +17,24 @@
 #define PROJECT_TAINTFLAG_H
 using namespace llvm;
 namespace DRCHECKER {
+
+    //hz: Class that intends to identify a unique taint source.
+    class TaintTag {
+    public:
+        long fieldId;
+        Value *v;
+
+        TaintTag(long fieldId, Value *v) {
+            this -> fieldId = fieldId;
+            this -> v = v;
+        }
+
+        TaintTag(TaintTag *srcTag) {
+            this -> fieldId = srcTag -> fieldId;
+            this -> v = srcTag -> v;
+        }
+    };
+
     //Class that holds the taint flag
     class TaintFlag {
 
@@ -26,6 +44,7 @@ namespace DRCHECKER {
             assert(targetInstr != nullptr && "Target Instruction cannot be NULL");
             this->targetInstr = targetInstr;
             this->is_tainted = is_tainted;
+            this->tag = nullptr;
         }
 
         TaintFlag(TaintFlag *copyTaint, Value *targetInstr, Value *srcOperand) {
@@ -41,7 +60,20 @@ namespace DRCHECKER {
             if(srcInstr != nullptr && lastInstr != srcInstr) {
                 this->instructionTrace.push_back(srcInstr);
             }
+            //hz: tag propagation.
+            this->tag = copyTaint->tag;
         }
+
+        //hz: A copy w/ a different tag.
+        TaintFlag(TaintFlag *copyTaint, TaintTag *tag) {
+            this->targetInstr = copyTaint -> targetInstr;
+            this->is_tainted = copyTaint->isTainted();
+            // copy the instruction trace from the source taint guy
+            this->instructionTrace.insert(instructionTrace.begin(),
+                                          copyTaint->instructionTrace.begin(), copyTaint->instructionTrace.end());
+            this->tag = tag;
+        }
+
         TaintFlag(Value * targetInstr) : TaintFlag(targetInstr, false) {}
         //Destructors
         ~TaintFlag() {}
@@ -86,8 +118,18 @@ namespace DRCHECKER {
                 OS << (InstructionUtils::getInstructionName((*SI))) << ": at line " << InstructionUtils::getLineNumber(**SI) << " ,";
             }
             OS << "]\n";
+            //hz: dump tag information if any.
+            if (tag) {
+                OS << "Taint Tag:\n";
+                OS << "Value:\n";
+                tag->v->print(OS,true);
+                OS << "\nfieldId: " << tag->fieldId << " \n";
+            }
 
         }
+
+        //hz: add taint tag support.
+        TaintTag *tag;
     private:
         // flag to indicate the taint flag.
         bool is_tainted;

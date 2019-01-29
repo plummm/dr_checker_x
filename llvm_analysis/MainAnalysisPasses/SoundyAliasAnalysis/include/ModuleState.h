@@ -519,6 +519,34 @@ namespace DRCHECKER {
             return nullptr;
         };
 
+        //Dump all the taint information to the raw_ostream.
+        void dumpTaintInfo(llvm::raw_ostream& O) {
+            for (auto const &it : taintInformation){
+                O << "<<<<<===============================================>>>>>\n";
+                //Dump current AnalysisContext.
+                it.first->printContext(O);
+                //Then all the Value-TaintFlag pairs.
+                std::map<Value *, std::set<TaintFlag*>*>* vt = it.second;
+                O << "\n";
+                if (vt == nullptr){
+                    continue;
+                }
+                for (auto const &jt : *vt){
+                    //Dump the "Value" information.
+                    O << "------------------Value------------------\n";
+                    jt.first->print(O,true);
+                    O << "\n";
+                    //Dump the TaintFlag(s) for current value under current context.
+                    std::set<TaintFlag*> *pflags = jt.second;
+                    for (TaintFlag *p : *pflags){
+                        O << "------------------Taint------------------\n";
+                        p->dumpInfo(O);
+                    }
+                }
+            }
+            return;
+        }
+
         // Range analysis helpers
 
         /***
