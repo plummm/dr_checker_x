@@ -53,7 +53,11 @@ namespace DRCHECKER {
             // copy the instruction trace from the source taint guy
             this->instructionTrace.insert(instructionTrace.begin(),
                                           copyTaint->instructionTrace.begin(), copyTaint->instructionTrace.end());
-            Instruction *lastInstr = this->instructionTrace.back();
+            //hz: in case the instructionTrace is empty
+            Instruction *lastInstr = nullptr;
+            if (!instructionTrace.empty()){
+                lastInstr = this->instructionTrace.back();
+            }
 
             // add the source instruction into the trace.
             Instruction *srcInstr = dyn_cast<Instruction>(srcOperand);

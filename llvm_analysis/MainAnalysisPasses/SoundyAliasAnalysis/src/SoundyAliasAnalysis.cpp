@@ -45,6 +45,7 @@ namespace DRCHECKER {
 #define DEVATTR_SHOW "DEVSHOW"
 #define DEVATTR_STORE "DEVSTORE"
 #define V4L2_IOCTL_FUNC "V4IOCTL"
+#define NULL_ARG "NULL_ARG"
 
     std::map<Value *, std::set<PointerPointsTo*>*> GlobalState::globalVariables;
     std::map<Function *, std::set<BasicBlock*>*> GlobalState::loopExitBlocks;
@@ -256,6 +257,7 @@ namespace DRCHECKER {
                         currState.dumpTaintInfo(o_taint);
                         o_taint.close();
 
+                        /*
                         if(outputFile == "") {
                             // No file provided, write to dbgs()
                             dbgs() << "[+] Writing JSON output :\n";
@@ -288,6 +290,7 @@ namespace DRCHECKER {
 
                             dbgs() << "[+] Return message from file write:" << res_code.message() << "\n";
                         }
+                        */
 
                         //clean up
                         delete(vis);
@@ -469,6 +472,10 @@ namespace DRCHECKER {
                 for(unsigned long i=0;i<targetFunction->arg_size()-1; i++) {
                     pointerArgs.insert(i);
                 }
+                is_handled = true;
+            }
+            //hz: the function doesn't have arguments. This is created for test purposes.
+            if(functionType == NULL_ARG) {
                 is_handled = true;
             }
             if(!is_handled) {
