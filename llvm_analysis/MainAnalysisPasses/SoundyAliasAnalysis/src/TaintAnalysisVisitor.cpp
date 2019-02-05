@@ -10,14 +10,12 @@
 using namespace llvm;
 namespace DRCHECKER {
 
-/*#define DEBUG_CALL_INSTR
+#define DEBUG_CALL_INSTR
 #define DEBUG_RET_INSTR
 #define DEBUG_LOAD_INSTR
-#define DEBUG_CAST_INSTR
-#define DEBUG
-#define DEBUG_BIN_INSTR*/
-
-//#define DEBUG_CALL_INSTR
+//#define DEBUG_CAST_INSTR
+//#define DEBUG
+//#define DEBUG_BIN_INSTR
 
     std::set<TaintFlag*>* TaintAnalysisVisitor::getTaintInfo(Value *targetVal) {
         return TaintUtils::getTaintInfo(this->currState, this->currFuncCallSites, targetVal);
@@ -243,6 +241,9 @@ namespace DRCHECKER {
 
         //Copy the taint from tainted pointer.
         if(srcTaintInfo != nullptr) {
+#ifdef DEBUG_LOAD_INSTR
+            dbgs() << "The src pointer itself is tainted.\n";
+#endif
             for(auto currTaintFlag:*srcTaintInfo) {
                 TaintFlag *newTaintFlag = new TaintFlag(currTaintFlag, &I, srcPointer);
                 TaintAnalysisVisitor::addNewTaintFlag(newTaintInfo, newTaintFlag);
@@ -287,6 +288,10 @@ namespace DRCHECKER {
                 // to the result of this instruction.
                 if (fieldTaintInfo != nullptr) {
                     this->makeTaintInfoCopy(&I, &I, fieldTaintInfo, newTaintInfo);
+                } else {
+#ifdef DEBUG_LOAD_INSTR
+                    dbgs() << "No taint information available!\n";
+#endif
                 }
             }
         } else {
@@ -539,7 +544,7 @@ namespace DRCHECKER {
                         assert(currArgTaintInfo != nullptr);
 #ifdef DEBUG_CALL_INSTR
                         // OK, we need to add taint info.
-                        dbgs() << "Argument:" << (arg_no + 1) << " has taint info\n";
+                        dbgs() << "Argument:" << (arg_no) << " has taint info\n";
 #endif
                         (*contextTaintInfo)[currfArgVal] = currArgTaintInfo;
                         break;
@@ -548,7 +553,7 @@ namespace DRCHECKER {
                 }
             } else {
 #ifdef DEBUG_CALL_INSTR
-                dbgs() << "Argument:" << (arg_no + 1) << " does not have taint info\n";
+                dbgs() << "Argument:" << (arg_no) << " does not have taint info\n";
 #endif
             }
             arg_no++;
@@ -656,6 +661,11 @@ namespace DRCHECKER {
     VisitorCallback* TaintAnalysisVisitor::visitCallInst(CallInst &I, Function *currFunc,
                                                          std::vector<Instruction *> *oldFuncCallSites,
                                                          std::vector<Instruction *> *callSiteContext) {
+#ifdef DEBUG_CALL_INSTR
+       dbgs() << "---------\nTaint analysis visits call instruction: ";
+       I.print(dbgs());
+       dbgs() << "\n";
+#endif
         // if this is a kernel internal function.
         if(currFunc->isDeclaration()) {
             this->handleKernelInternalFunction(I, currFunc);

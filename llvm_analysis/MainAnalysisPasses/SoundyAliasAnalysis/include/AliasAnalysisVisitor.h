@@ -9,6 +9,7 @@
 #include "CFGUtils.h"
 #include "VisitorCallback.h"
 #include <FunctionChecker.h>
+#include <llvm/IR/Operator.h>
 
 
 using namespace llvm;
@@ -76,6 +77,7 @@ namespace DRCHECKER {
         virtual void visitLoadInst(LoadInst &I);
         virtual void visitStoreInst(StoreInst &I);
         virtual void visitGetElementPtrInst(GetElementPtrInst &I);
+        Value* visitGetElementPtrOperator(Instruction *I,GEPOperator *gep);
 
         // Allocator instructions.
         virtual void visitAllocaInst(AllocaInst &I);

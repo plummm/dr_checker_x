@@ -1,7 +1,6 @@
 //
 // Created by machiry on 12/4/16.
 //
-#include <llvm/IR/Operator.h>
 #include "AliasObject.h"
 #include "AliasAnalysisVisitor.h"
 
@@ -382,6 +381,101 @@ namespace DRCHECKER {
 
     }
 
+    //hz: this method aims to deal with the embedded GEP operator (in "I") in a recursive way.
+    //It will try to analyze and record the point-to information in the global state for each GEP operator.
+    Value* AliasAnalysisVisitor::visitGetElementPtrOperator(Instruction *I, GEPOperator *gep) {
+#ifdef DEBUG_GET_ELEMENT_PTR
+        dbgs() << "In :visitGetElementPtrOperator()\n";
+#endif
+        //Null pointer or we have processed it before.
+        if(!gep || hasPointsToObjects(gep)){
+            return gep;
+        }
+        if(gep->getNumOperands() <= 0 || !gep->getPointerOperand()){
+            //What happens...
+            return gep;
+        }
+        //Ok, does it contain another GEP operator as its pointer operand?
+        Value* srcPointer = gep->getPointerOperand();
+        GEPOperator *op = dyn_cast<GEPOperator>(srcPointer);
+        if(op && op->getNumOperands() > 0 && op->getPointerOperand()){
+            //Do the recursion.
+            srcPointer = visitGetElementPtrOperator(I,op);
+        }else{
+            if(!hasPointsToObjects(srcPointer)) {
+                srcPointer = srcPointer->stripPointerCasts();
+            }
+        }
+        if(gep->getPointerOperand()->getType()->getContainedType(0)->isStructTy() && (gep->getNumOperands() > 2) ) {
+            // Index a structure.
+            if (ConstantInt *CI = dyn_cast<ConstantInt>(gep->getOperand(2))) {
+                unsigned long structFieldId = CI->getZExtValue();
+                if(hasPointsToObjects(srcPointer)) {
+#ifdef DEBUG_GET_ELEMENT_PTR
+                    dbgs() << "Has Points to information for:";
+                    srcPointer->print(dbgs());
+                    dbgs() << "\n";
+#endif
+
+                    std::set<PointerPointsTo*>* srcPointsTo = getPointsToObjects(srcPointer);
+                    //We will make current GEP operator point to a field with "structFieldId" of the object pointed to by its pointer operand.
+                    //By doing this, we not only register the point-to informtion of each instruction value, but also each GEP operator value.
+                    //Without doing this, current taint analysis implementation will fail to find point-to objects in instructions like "load i32, i32 * getelementptr(xxxx)"
+                    std::set<PointerPointsTo*>* newPointsToInfo = makePointsToCopy(I, gep, srcPointsTo, structFieldId);
+                    this->updatePointsToObjects(gep, newPointsToInfo);
+                } else {
+                    // we are trying to dereference a structure or an array
+                    // however the src pointer does not point to any object.
+                    // How sad??
+#ifdef DEBUG_GET_ELEMENT_PTR
+                    errs() << "Error occurred, Trying to dereference a structure, which does not point to any object.";
+                    errs() << " Ignoring:" << srcPointer << "\n";
+                    srcPointer->print(errs());
+                    errs() << "  END\n";
+#endif
+                    //assert(false);
+                }
+
+            }
+        } else {
+            for(int i=0;i<gep->getNumOperands();i++) {
+                if(dyn_cast<Constant>(gep->getOperand(i))) {
+                    continue;
+                }
+                srcPointer = gep->getOperand(i);
+
+                // we could have array operand as first operand, rather than pointer operand.
+                // array operand could be at end
+                if (!hasPointsToObjects(srcPointer)) {
+                    // check if this is the array operand.
+                    // srcPointer = gep->getOperand(1);
+                    if (!hasPointsToObjects(srcPointer)) {
+                        srcPointer = srcPointer->stripPointerCasts();
+                    }
+                }
+                //Ignore the index.
+                if (hasPointsToObjects(srcPointer)) {
+                    std::set<PointerPointsTo *> *srcPointsTo = getPointsToObjects(srcPointer);
+                    std::set<PointerPointsTo *> *newPointsToInfo = makePointsToCopy(I, gep, srcPointsTo, -1);
+                    this->updatePointsToObjects(gep, newPointsToInfo);
+                    break;
+                } else {
+                    // we are trying to dereference an array
+                    // however the src pointer does not point to any object.
+                    // How sad??
+#ifdef DEBUG_GET_ELEMENT_PTR
+                    errs() << "Array pointer does not point to any object:";
+                    srcPointer->print(dbgs());
+                    errs() << "Ignoring.\n";
+#endif
+                    //assert(false);
+                }
+            }
+
+        }
+        return gep;
+    }
+
     void AliasAnalysisVisitor::visitGetElementPtrInst(GetElementPtrInst &I) {
         /***
          *  Handle GetElementPtr instruction.
@@ -392,6 +486,9 @@ namespace DRCHECKER {
         GEPOperator *gep = dyn_cast<GEPOperator>(I.getPointerOperand());
         if(gep && gep->getNumOperands() > 0 && gep->getPointerOperand()) {
             srcPointer = gep->getPointerOperand();
+            //hz: TODO: consider this again.
+            //hz: recursively deal with the GEP operator.
+            //srcPointer = visitGetElementPtrOperator(&I,gep);
         } else {
             if(!hasPointsToObjects(srcPointer)) {
                 srcPointer = srcPointer->stripPointerCasts();
@@ -482,7 +579,9 @@ namespace DRCHECKER {
         Value* srcPointer = I.getPointerOperand();
         GEPOperator *gep = dyn_cast<GEPOperator>(I.getPointerOperand());
         if(gep && gep->getNumOperands() > 0 && gep->getPointerOperand()) {
-            srcPointer = gep->getPointerOperand();
+            //srcPointer = gep->getPointerOperand();
+            //hz: to get the field sensitive point-to information and record it for the GEP operator value.
+            srcPointer = visitGetElementPtrOperator(&I,gep);
         } else {
             if(!hasPointsToObjects(srcPointer)) {
                 srcPointer = srcPointer->stripPointerCasts();
@@ -579,7 +678,9 @@ namespace DRCHECKER {
         Value *targetPointer = I.getPointerOperand();
         GEPOperator *gep = dyn_cast<GEPOperator>(I.getPointerOperand());
         if(gep && gep->getNumOperands() > 0 && gep->getPointerOperand()) {
-            targetPointer = gep->getPointerOperand();
+            //targetPointer = gep->getPointerOperand();
+            //hz: get field-sensitive point-to information for this GEP operator and record it in the global status.
+            targetPointer = visitGetElementPtrOperator(&I,gep);
         } else {
             if(!hasPointsToObjects(targetPointer)) {
                 targetPointer = targetPointer->stripPointerCasts();
@@ -588,7 +689,9 @@ namespace DRCHECKER {
         Value *targetValue = I.getValueOperand();
         gep = dyn_cast<GEPOperator>(targetValue);
         if(gep && gep->getNumOperands() > 0 && gep->getPointerOperand()) {
-            targetValue = gep->getPointerOperand();
+            //targetValue = gep->getPointerOperand();
+            //hz: get field-sensitive point-to information for this GEP operator and record it in the global status.
+            targetValue = visitGetElementPtrOperator(&I,gep);
         }
         if(hasPointsToObjects(targetValue) || hasPointsToObjects(targetValue->stripPointerCasts())) {
 
