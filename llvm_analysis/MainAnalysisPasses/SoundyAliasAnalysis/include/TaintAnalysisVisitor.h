@@ -92,6 +92,13 @@ namespace DRCHECKER {
 
         virtual void visitICmpInst(ICmpInst &I);
 
+        //hz: add new instruction support to taint analysis.
+        virtual void visitBranchInst(BranchInst &I);
+
+        //virtual void visitIndirectBrInst(IndirectBrInst &I);
+
+        virtual void visitSwitchInst(SwitchInst &I);
+
     private:
         /***
          * Get the set of taint flags of the provided value.

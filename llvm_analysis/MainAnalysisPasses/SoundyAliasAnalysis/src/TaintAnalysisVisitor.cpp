@@ -748,4 +748,67 @@ namespace DRCHECKER {
         }
     }
 
+    //hz: add support for branch and switch instructions into taint analysis. 
+    //TODO: In the future if we want to do control taint, we need to extend these below methods.
+
+    //hz: the overall propagation logic of this is borrowed (w/o a plan to return) from visitCastInst.
+    void TaintAnalysisVisitor::visitBranchInst(BranchInst &I) {
+        //No need to handle a unconditional branch since it has no condition variable.
+        if (I.isUnconditional()) {
+            return;
+        }
+        //Get the branch condition Value.
+        Value *condition = I.getCondition();
+        std::set<TaintFlag*>* srcTaintInfo = getTaintInfo(condition);
+        if(srcTaintInfo == nullptr) {
+            condition = condition->stripPointerCasts();
+            srcTaintInfo = getTaintInfo(condition);
+        }
+        // if there exists some taintflags..propagate them
+        if(srcTaintInfo != nullptr) {
+            std::set<TaintFlag*> *newTaintInfo = this->makeTaintInfoCopy(condition, &I, srcTaintInfo);
+            if(newTaintInfo != nullptr) {
+                this->updateTaintInfo(&I, newTaintInfo);
+            } else {
+#ifdef DEBUG_BRANCH_INSTR
+                dbgs() << "Taint Info cannot be propagated because the current instruction is not reachable from";
+                dbgs() << "  tainted source at ";
+                I.print(dbgs());
+                dbgs() << "\n";
+#endif
+            }
+        }
+    }
+
+    /*
+    void TaintAnalysisVisitor::visitIndirectBrInst(IndirectBrInst &I) {
+        //
+    }
+    */
+
+    //hz: basically the same as visitBranchInst()
+    void TaintAnalysisVisitor::visitSwitchInst(SwitchInst &I) {
+        //Get the switch condition Value.
+        Value *condition = I.getCondition();
+        std::set<TaintFlag*>* srcTaintInfo = getTaintInfo(condition);
+        if(srcTaintInfo == nullptr) {
+            condition = condition->stripPointerCasts();
+            srcTaintInfo = getTaintInfo(condition);
+        }
+        // if there exists some taintflags..propagate them
+        if(srcTaintInfo != nullptr) {
+            std::set<TaintFlag*> *newTaintInfo = this->makeTaintInfoCopy(condition, &I, srcTaintInfo);
+            if(newTaintInfo != nullptr) {
+                this->updateTaintInfo(&I, newTaintInfo);
+            } else {
+#ifdef DEBUG_BRANCH_INSTR
+                dbgs() << "Taint Info cannot be propagated because the current instruction is not reachable from";
+                dbgs() << "  tainted source at ";
+                I.print(dbgs());
+                dbgs() << "\n";
+#endif
+            }
+        }
+    }
+
 }
