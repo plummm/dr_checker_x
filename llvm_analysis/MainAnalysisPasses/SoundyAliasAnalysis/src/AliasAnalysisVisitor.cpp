@@ -1,24 +1,56 @@
 //
 // Created by machiry on 12/4/16.
 //
-#include "AliasObject.h"
 #include "AliasAnalysisVisitor.h"
 
 namespace DRCHECKER {
 
-/*#define DEBUG_GET_ELEMENT_PTR
-#define DEBUG_ALLOCA_INSTR
-#define DEBUG_CAST_INSTR
-#define DEBUG_BINARY_INSTR
-#define DEBUG_PHI_INSTR
+#define DEBUG_GET_ELEMENT_PTR
+//#define DEBUG_ALLOCA_INSTR
+//#define DEBUG_CAST_INSTR
+//#define DEBUG_BINARY_INSTR
+//#define DEBUG_PHI_INSTR
 #define DEBUG_LOAD_INSTR
 #define DEBUG_STORE_INSTR
-#define DEBUG_BB_VISIT*/
+//#define DEBUG_BB_VISIT
 //#define DEBUG_CALL_INSTR
 //#define STRICT_CAST
 //#define DEBUG_RET_INSTR
 //#define FAST_HEURISTIC
 //#define MAX_ALIAS_OBJ 50
+//hz: Enable creating new objects on the fly when the pointer points to nothing.
+#define CREATE_DUMMY_OBJ_IF_NULL
+
+    //hz: A helper method to create and (taint) a new OutsideObject.
+    OutsideObject* AliasAnalysisVisitor::createOutsideObj(Value *p, bool taint) {
+        //First do some sanity checks, we need to make sure that "p" is a structure pointer.
+        if (!(p && p->getType()->isPointerTy() && p->getType()->getPointerElementType()->isStructTy())) {
+            return nullptr;
+        }
+        //Create a new outside object.
+        //OutsideObject *newObj = new OutsideObject(p, p->getType()->getContainedType(0));
+        OutsideObject *newObj = new OutsideObject(p, p->getType()->getPointerElementType());
+        //All outside objects are generated automatically.
+        newObj->auto_generated = true;
+        //Set up point-to records inside the AliasObject.
+        PointerPointsTo *newPointsTo = new PointerPointsTo();
+        newPointsTo->targetPointer = p;
+        newPointsTo->fieldId = 0;
+        newPointsTo->dstfieldId = 0;
+        newPointsTo->targetObject = newObj;
+        newObj->pointersPointsTo.insert(newObj->pointersPointsTo.end(),newPointsTo);
+        //Set up point-to records in the global state.
+        std::map<Value *, std::set<PointerPointsTo*>*> *currPointsTo = this->currState.getPointsToInfo(this->currFuncCallSites);
+        std::set<PointerPointsTo *> *newPointsToSet = new std::set<PointerPointsTo *>();
+        newPointsToSet->insert(newPointsToSet->end(), newPointsTo);
+        (*currPointsTo)[p] = newPointsToSet;
+        //Need to taint it?
+        if (taint) {
+            TaintFlag *currFlag = new TaintFlag(p, true);
+            newObj->taintAllFieldsWithTag(currFlag);
+        }
+        return newObj;
+    }
 
     std::set<PointerPointsTo*>* AliasAnalysisVisitor::getPointsToObjects(Value *srcPointer) {
         // Get points to objects set of the srcPointer at the entry of the instruction
@@ -410,6 +442,13 @@ namespace DRCHECKER {
             // Index a structure.
             if (ConstantInt *CI = dyn_cast<ConstantInt>(gep->getOperand(2))) {
                 unsigned long structFieldId = CI->getZExtValue();
+#ifdef CREATE_DUMMY_OBJ_IF_NULL
+                //hz: try to create dummy objects if there is no point-to information about the pointer variable,
+                //since it can be an outside global variable. (e.g. platform_device).
+                if(!hasPointsToObjects(srcPointer)) {
+                    this->createOutsideObj(srcPointer,true);
+                }
+#endif
                 if(hasPointsToObjects(srcPointer)) {
 #ifdef DEBUG_GET_ELEMENT_PTR
                     dbgs() << "Has Points to information for:";
@@ -454,6 +493,13 @@ namespace DRCHECKER {
                     }
                 }
                 //Ignore the index.
+#ifdef CREATE_DUMMY_OBJ_IF_NULL
+                //hz: try to create dummy objects if there is no point-to information about the pointer variable,
+                //since it can be an outside global variable. (e.g. platform_device).
+                if(!hasPointsToObjects(srcPointer)) {
+                    this->createOutsideObj(srcPointer,true);
+                }
+#endif
                 if (hasPointsToObjects(srcPointer)) {
                     std::set<PointerPointsTo *> *srcPointsTo = getPointsToObjects(srcPointer);
                     std::set<PointerPointsTo *> *newPointsToInfo = makePointsToCopy(I, gep, srcPointsTo, -1);
@@ -499,6 +545,13 @@ namespace DRCHECKER {
             // OK, we are de-referencing a structure.
             if (ConstantInt *CI = dyn_cast<ConstantInt>(I.getOperand(2))) {
                 unsigned long structFieldId = CI->getZExtValue();
+#ifdef CREATE_DUMMY_OBJ_IF_NULL
+                //hz: try to create dummy objects if there is no point-to information about the pointer variable,
+                //since it can be an outside global variable. (e.g. platform_device).
+                if(!hasPointsToObjects(srcPointer)) {
+                    this->createOutsideObj(srcPointer,true);
+                }
+#endif
                 if(hasPointsToObjects(srcPointer)) {
 #ifdef DEBUG_GET_ELEMENT_PTR
                     dbgs() << "Has Points to information for:";
@@ -530,6 +583,12 @@ namespace DRCHECKER {
                 }
                 srcPointer = I.getOperand(i);
 
+#ifdef DEBUG_GET_ELEMENT_PTR
+                dbgs() << "GEP instruction for array, operand: " << i << "\n";
+                srcPointer->print(dbgs());
+                dbgs() << "\n";
+#endif
+
                 // OK, we are not indexing a struct. This means, we are indexing an array
                 //ConstantInt *CI = dyn_cast<ConstantInt>(I.getOperand(1));
                 // OK, we are trying to access an array, first number should be constant, actually it should be zero
@@ -553,6 +612,13 @@ namespace DRCHECKER {
                     }
                 }
                 //Ignore the index.
+#ifdef CREATE_DUMMY_OBJ_IF_NULL
+                //hz: try to create dummy objects if there is no point-to information about the pointer variable,
+                //since it can be an outside global variable. (e.g. platform_device).
+                if(!hasPointsToObjects(srcPointer)) {
+                    this->createOutsideObj(srcPointer,true);
+                }
+#endif
                 if (hasPointsToObjects(srcPointer)) {
                     std::set<PointerPointsTo *> *srcPointsTo = getPointsToObjects(srcPointer);
                     std::set<PointerPointsTo *> *newPointsToInfo = makePointsToCopy(&I, &I, srcPointsTo, -1);

@@ -354,7 +354,7 @@ namespace DRCHECKER {
             }
         }*/
 
-        void fetchPointsToObjects(long srcfieldId, std::set<std::pair<long, AliasObject*>> &dstObjects,
+        virtual void fetchPointsToObjects(long srcfieldId, std::set<std::pair<long, AliasObject*>> &dstObjects,
                                   Instruction *targetInstr = nullptr, bool create_arg_obj=false) {
             /***
              * Get all objects pointed by field identified by srcfieldID
@@ -376,7 +376,7 @@ namespace DRCHECKER {
                 }
             }
             // if there are no objects that this field points to, generate a dummy object.
-            if(!hasObjects && (create_arg_obj || this->isFunctionArg())) {
+            if(!hasObjects && (create_arg_obj || this->isFunctionArg() || this->isOutsideObject())) {
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
                 dbgs() << "Creating a new dynamic AliasObject at:";
                 targetInstr->print(dbgs());
@@ -618,6 +618,14 @@ namespace DRCHECKER {
             return false;
         }
 
+        //hz: add for new subclass.
+        virtual bool isOutsideObject() {
+            /***
+             * Returns True if this object is an Outside object.
+             */
+            return false;
+        }
+
         virtual long getArraySize() {
             /***
              *  Returns array size, if this is array object.
@@ -759,6 +767,109 @@ namespace DRCHECKER {
         }
     };
 
+    //hz: create a new GlobalObject for a pointer Value w/o point-to information, this
+    //can be used for driver function argument like FILE * which is defined outside the driver module.
+    class OutsideObject : public AliasObject {
+    public:
+        //hz: the pointer to the outside object.
+        Value *targetVar;
+        OutsideObject(Value* outVal, Type *outVarType) {
+            this->targetVar = outVal;
+            this->targetType = outVarType;
+        }
+        OutsideObject(OutsideObject *origOutsideVar): AliasObject(origOutsideVar) {
+            this->targetVar = origOutsideVar->targetVar;
+            this->targetType = origOutsideVar->targetType;
+        }
+        AliasObject* makeCopy() {
+            return new OutsideObject(this);
+        }
+        Value* getOutsidePtr() {
+            return this->targetVar;
+        }
+
+        bool isOutsideObject() {
+            return true;
+        }
+
+        //OutsideObject specific version of "fetchPointsToObjects", we need to consider the type of each field.
+        virtual void fetchPointsToObjects(long srcfieldId, std::set<std::pair<long, AliasObject*>> &dstObjects,
+                                  Instruction *targetInstr = nullptr, bool create_arg_obj=false) {
+            /***
+             * Get all objects pointed by field identified by srcfieldID
+             *
+             * i.e if a field does not point to any object.
+             * Automatically generate an object and link it with srcFieldId
+             */
+            bool hasObjects = false;
+#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
+            dbgs() << "In AliasObject fetch pointsTo object\n";
+#endif
+            for(ObjectPointsTo *obj:pointsTo) {
+                if(obj->fieldId == srcfieldId) {
+                    auto p = std::make_pair(obj->dstfieldId, obj->targetObject);
+                    if(std::find(dstObjects.begin(), dstObjects.end(), p) == dstObjects.end()) {
+                        dstObjects.insert(dstObjects.end(), p);
+                        hasObjects = true;
+                    }
+                }
+            }
+            //NOTE: "pointsTo" should only store point-to information for the pointer fields.
+            //So if "hasObjects" is false, we need to first ensure that the field is a pointer before creating new objects.
+            Type *ety = this->targetType->getStructElementType(srcfieldId);
+            if (!ety->isPointerTy()) {
+                //The field is not a pointer, we cannot create an object pointed to by it.
+                return;
+            }
+            // if there are no objects that this pointer field points to, generate a dummy object.
+            if(!hasObjects && (create_arg_obj || this->isFunctionArg() || this->isOutsideObject())) {
+#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
+                dbgs() << "Creating a new dynamic AliasObject at:";
+                targetInstr->print(dbgs());
+                dbgs() << "\n";
+#endif
+                OutsideObject *newObj = new OutsideObject(targetInstr,ety->getPointerElementType());
+                ObjectPointsTo *newPointsToObj = new ObjectPointsTo();
+                newPointsToObj->propogatingInstruction = targetInstr;
+                newPointsToObj->targetObject = newObj;
+                newPointsToObj->fieldId = srcfieldId;
+                // this is the field of the newly created object to which
+                // new points to points to
+                newPointsToObj->dstfieldId = 0;
+                newObj->auto_generated = true;
+
+                // get the taint for the field and add that taint to the newly created object
+                std::set<TaintFlag*> *fieldTaint = getFieldTaintInfo(srcfieldId);
+#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
+                dbgs() << "Trying to get taint for field:" << srcfieldId << " for object:" << this << "\n";
+#endif
+                //TODO: debug add this info
+                if(fieldTaint != nullptr) {
+#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
+                    dbgs() << "Adding taint for field:" << srcfieldId << " for object:" << newObj << "\n";
+#endif
+                    for(auto existingTaint:*fieldTaint) {
+                        TaintFlag *newTaint = new TaintFlag(existingTaint,targetInstr,targetInstr);
+                        newObj->taintAllFieldsWithTag(newTaint);
+                    }
+                } else {
+                    // if all the contents are tainted?
+                    if(this->all_contents_tainted) {
+                        dbgs() << "Trying to get field from an object whose contents are fully tainted\n";
+                        assert(this->all_contents_taint_flag != nullptr);
+                        TaintFlag *newTaint = new TaintFlag(this->all_contents_taint_flag,targetInstr,targetInstr);
+                        newObj->taintAllFieldsWithTag(newTaint);
+                    }
+                }
+
+                //insert the newly create object.
+                pointsTo.push_back(newPointsToObj);
+
+                dstObjects.insert(dstObjects.end(), std::make_pair(0, newObj));
+            }
+        }
+    };
+
     class HeapLocation : public AliasObject {
     public:
         Function *targetFunction;
@@ -888,7 +999,9 @@ namespace DRCHECKER {
             v = ((DRCHECKER::FunctionArgument*)this)->targetArgument;
         }else if (this->isFunctionLocal()){
             v = ((DRCHECKER::FunctionLocalVariable*)this)->targetVar;
-        } //TODO: HeapAllocation
+        }else if (this->isOutsideObject()){
+            v = ((DRCHECKER::OutsideObject*)this)->targetVar;
+        }//TODO: HeapAllocation
         return v;
     }
 

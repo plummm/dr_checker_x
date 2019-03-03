@@ -46,6 +46,7 @@ namespace DRCHECKER {
 #define DEVATTR_STORE "DEVSTORE"
 #define V4L2_IOCTL_FUNC "V4IOCTL"
 #define NULL_ARG "NULL_ARG"
+#define MY_IOCTL "MY_IOCTL"
 
     std::map<Value *, std::set<PointerPointsTo*>*> GlobalState::globalVariables;
     std::map<Function *, std::set<BasicBlock*>*> GlobalState::loopExitBlocks;
@@ -432,6 +433,12 @@ namespace DRCHECKER {
                 taintedArgs.insert(targetFunction->arg_size() - 1);
                 // first argument is the file pointer
                 pointerArgs.insert(0);
+                is_handled = true;
+            }
+            //hz: We want to set all global variables as taint source,
+            //for ioctl() in driver code, the FILE pointer should also
+            //be regarded as a global variable.
+            if(functionType == MY_IOCTL) {
                 is_handled = true;
             }
             if(functionType == READ_HDR || functionType == WRITE_HDR) {

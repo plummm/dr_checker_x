@@ -5,6 +5,7 @@
 #ifndef PROJECT_ALIASANALYSISVISITOR_H
 #define PROJECT_ALIASANALYSISVISITOR_H
 
+#include "AliasObject.h"
 #include "ModuleState.h"
 #include "CFGUtils.h"
 #include "VisitorCallback.h"
@@ -178,6 +179,9 @@ namespace DRCHECKER {
         void handleMemcpyFunction(std::vector<long> &memcpyArgs, CallInst &I);
 
         void handleInlinePointerOperand(Instruction &currIns, Value **srcPointer);
+
+        //hz: A helper method to create and (taint) a new OutsideObject.
+        OutsideObject* createOutsideObj(Value *p, bool taint);
     };
 
 }
