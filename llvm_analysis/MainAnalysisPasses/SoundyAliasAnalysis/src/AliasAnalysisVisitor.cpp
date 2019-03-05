@@ -338,6 +338,13 @@ namespace DRCHECKER {
         std::set<Value*> allVals;
         allVals.insert(allVals.end(), I.getOperand(0));
         allVals.insert(allVals.end(), I.getOperand(1));
+#ifdef CREATE_DUMMY_OBJ_IF_NULL
+        for (Value *v : allVals) {
+            if (!hasPointsToObjects(v)) {
+                this->createOutsideObj(v,true);
+            }
+        }
+#endif
         std::set<PointerPointsTo*>* finalPointsToInfo = mergePointsTo(allVals, &I);
         if(finalPointsToInfo != nullptr) {
             // Update the points to object of the current instruction.
@@ -376,6 +383,13 @@ namespace DRCHECKER {
         for(unsigned i=0;i<I.getNumIncomingValues(); i++) {
             allVals.insert(allVals.end(), I.getIncomingValue(i));
         }
+#ifdef CREATE_DUMMY_OBJ_IF_NULL
+        for (Value *v : allVals) {
+            if (!hasPointsToObjects(v)) {
+                this->createOutsideObj(v,true);
+            }
+        }
+#endif
 
         std::set<PointerPointsTo*>* finalPointsToInfo = mergePointsTo(allVals, &I);
         if(finalPointsToInfo != nullptr) {
@@ -404,6 +418,13 @@ namespace DRCHECKER {
         std::set<Value*> allVals;
         allVals.insert(allVals.end(), I.getTrueValue());
         allVals.insert(allVals.end(), I.getFalseValue());
+#ifdef CREATE_DUMMY_OBJ_IF_NULL
+        for (Value *v : allVals) {
+            if (!hasPointsToObjects(v)) {
+                this->createOutsideObj(v,true);
+            }
+        }
+#endif
 
         std::set<PointerPointsTo*>* finalPointsToInfo = mergePointsTo(allVals, &I);
         if(finalPointsToInfo != nullptr) {
@@ -654,7 +675,20 @@ namespace DRCHECKER {
             }
         }
 
-        if(!hasPointsToObjects(srcPointer) && !hasPointsToObjects(srcPointer->stripPointerCasts())) {
+        // strip pointer casts. if we cannot find any points to for the srcPointer.
+        if(!hasPointsToObjects(srcPointer)) {
+            srcPointer = srcPointer->stripPointerCasts();
+        }
+
+#ifdef CREATE_DUMMY_OBJ_IF_NULL
+        //hz: try to create dummy objects if there is no point-to information about the pointer variable,
+        //since it can be an outside global variable. (e.g. platform_device).
+        if(!hasPointsToObjects(srcPointer)) {
+            this->createOutsideObj(srcPointer,true);
+        }
+#endif
+
+        if(!hasPointsToObjects(srcPointer)) {
 #ifdef DEBUG_LOAD_INSTR
             errs() << "Load instruction does not point to any object.";
             I.print(errs());
@@ -662,12 +696,6 @@ namespace DRCHECKER {
 #endif
             return;
         }
-
-        // strip pointer casts. if we cannot find any points to for the srcPointer.
-        if(!hasPointsToObjects(srcPointer)) {
-            srcPointer = srcPointer->stripPointerCasts();
-        }
-
 
         // srcPointer should have pointsTo information.
         //assert(hasPointsToObjects(srcPointer));
@@ -759,12 +787,19 @@ namespace DRCHECKER {
             //hz: get field-sensitive point-to information for this GEP operator and record it in the global status.
             targetValue = visitGetElementPtrOperator(&I,gep);
         }
-        if(hasPointsToObjects(targetValue) || hasPointsToObjects(targetValue->stripPointerCasts())) {
+        // handle pointer casts
+        if(!hasPointsToObjects(targetValue)) {
+            targetValue = targetValue->stripPointerCasts();
+        }
+#ifdef CREATE_DUMMY_OBJ_IF_NULL
+        //hz: try to create dummy objects if there is no point-to information about the pointer variable,
+        //since it can be an outside global variable. (e.g. platform_device).
+        if(!hasPointsToObjects(targetValue)) {
+            this->createOutsideObj(targetValue,true);
+        }
+#endif
+        if(hasPointsToObjects(targetValue)) {
 
-            // handle pointer casts
-            if(!hasPointsToObjects(targetValue)) {
-                targetValue = targetValue->stripPointerCasts();
-            }
             // Get the src points to information.
             std::set<PointerPointsTo *> *srcPointsTo = getPointsToObjects(targetValue);
 
