@@ -776,10 +776,22 @@ namespace DRCHECKER {
         OutsideObject(Value* outVal, Type *outVarType) {
             this->targetVar = outVal;
             this->targetType = outVarType;
+            dbgs() << "\n--------NEW O----------\n";
+            this->targetVar->print(dbgs());
+            dbgs() << "\n";
+            this->targetType->print(dbgs());
+            dbgs() << "\n";
+            dbgs() << "\n------------------\n";
         }
         OutsideObject(OutsideObject *origOutsideVar): AliasObject(origOutsideVar) {
             this->targetVar = origOutsideVar->targetVar;
             this->targetType = origOutsideVar->targetType;
+            dbgs() << "\n--------COPY O----------\n";
+            this->targetVar->print(dbgs());
+            dbgs() << "\n";
+            this->targetType->print(dbgs());
+            dbgs() << "\n";
+            dbgs() << "\n------------------\n";
         }
         AliasObject* makeCopy() {
             return new OutsideObject(this);
@@ -814,6 +826,23 @@ namespace DRCHECKER {
                     }
                 }
             }
+            assert(this->targetType);
+            dbgs() << "\n*******************\n";
+            if (targetInstr){
+                targetInstr->print(dbgs());
+            }
+            dbgs() << "\n";
+            this->targetType->print(dbgs());
+            dbgs() << "\n";
+            if (this->targetVar){
+                this->targetVar->print(dbgs());
+                if(dyn_cast<Instruction>(this->targetVar)){
+                    dbgs() << "\n";
+                    dyn_cast<Instruction>(this->targetVar)->getFunction()->print(dbgs());
+                }
+            }
+            dbgs() << "\n*******************\n";
+            assert(this->targetType->isStructTy());
             //NOTE: "pointsTo" should only store point-to information for the pointer fields.
             //So if "hasObjects" is false, we need to first ensure that the field is a pointer before creating new objects.
             Type *ety = this->targetType->getStructElementType(srcfieldId);

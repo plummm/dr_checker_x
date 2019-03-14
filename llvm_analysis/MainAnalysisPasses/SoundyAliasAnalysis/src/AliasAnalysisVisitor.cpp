@@ -23,10 +23,26 @@ namespace DRCHECKER {
 
     //hz: A helper method to create and (taint) a new OutsideObject.
     OutsideObject* AliasAnalysisVisitor::createOutsideObj(Value *p, bool taint) {
+#ifdef CREATE_DUMMY_OBJ_IF_NULL
+        errs() << "#####Alias Analysis in createOutsideObj() for: ";
+        if(p){
+            p->print(errs());
+            errs() << "  |  ";
+            errs() << p->getName().str();
+        }
+        errs() << "\n";
+#endif
         //First do some sanity checks, we need to make sure that "p" is a structure pointer.
         if (!(p && p->getType()->isPointerTy() && p->getType()->getPointerElementType()->isStructTy())) {
             return nullptr;
         }
+        //Don't create OutsideObject for null ptr.
+        if (p->getName().str().empty()){
+            return nullptr;
+        }
+#ifdef CREATE_DUMMY_OBJ_IF_NULL
+        errs() << "Try to create new outside object.\n";
+#endif
         //Create a new outside object.
         //OutsideObject *newObj = new OutsideObject(p, p->getType()->getContainedType(0));
         OutsideObject *newObj = new OutsideObject(p, p->getType()->getPointerElementType());
@@ -286,12 +302,14 @@ namespace DRCHECKER {
                     // we are trying to cast into non-void type?
                     // change the type of the object.
                     Type *currSrcType = newPointsToObj->targetObject->targetType;
-                    if(!dstType->isVoidTy() && currSrcType->isPointerTy() && currSrcType->getContainedType(0)->isIntegerTy(8)) {
-                        // No need to make copy
-                        if(dstType->isPointerTy()) {
-                            dstType = dstType->getContainedType(0);
+                    if(!dstType->isVoidTy()) {
+                        if((currSrcType->isPointerTy() && currSrcType->getContainedType(0)->isIntegerTy(8)) || currSrcType->isIntegerTy(8)){
+                            // No need to make copy
+                            if(dstType->isPointerTy()) {
+                                dstType = dstType->getContainedType(0);
+                            }
+                            newPointsToObj->targetObject->targetType = dstType;
                         }
-                        newPointsToObj->targetObject->targetType = dstType;
                     }
                     newPointsToInfo->insert(newPointsToInfo->end(), newPointsToObj);
                 }
@@ -438,7 +456,7 @@ namespace DRCHECKER {
     //It will try to analyze and record the point-to information in the global state for each GEP operator.
     Value* AliasAnalysisVisitor::visitGetElementPtrOperator(Instruction *I, GEPOperator *gep) {
 #ifdef DEBUG_GET_ELEMENT_PTR
-        dbgs() << "In :visitGetElementPtrOperator()\n";
+        dbgs() << "Alias Analysis, in :visitGetElementPtrOperator()\n";
 #endif
         //Null pointer or we have processed it before.
         if(!gep || hasPointsToObjects(gep)){
@@ -549,11 +567,15 @@ namespace DRCHECKER {
          *  This is tricky instruction.
          *  this is where accessing structure fields happen.
          */
+#ifdef DEBUG_GET_ELEMENT_PTR
+        dbgs() << "Alias Analysis, in :visitGetElementPtrInst()\n";
+#endif
         Value* srcPointer = I.getPointerOperand();
         GEPOperator *gep = dyn_cast<GEPOperator>(I.getPointerOperand());
         if(gep && gep->getNumOperands() > 0 && gep->getPointerOperand()) {
             srcPointer = gep->getPointerOperand();
-            //hz: TODO: consider this again.
+            //hz: TODO: consider this again, if a GEP operator is embedded in a GEP instruction,
+            //then basically we need to perform GEP operator first, then a load, then the GEP instruction?
             //hz: recursively deal with the GEP operator.
             //srcPointer = visitGetElementPtrOperator(&I,gep);
         } else {
@@ -663,20 +685,36 @@ namespace DRCHECKER {
 
     void AliasAnalysisVisitor::visitLoadInst(LoadInst &I) {
 
+#ifdef DEBUG_LOAD_INSTR
+        errs() << "Alias Analysis, in visitLoadInst() for instr: ";
+        I.print(errs());
+        errs() << "\n";
+#endif
         Value* srcPointer = I.getPointerOperand();
         GEPOperator *gep = dyn_cast<GEPOperator>(I.getPointerOperand());
         if(gep && gep->getNumOperands() > 0 && gep->getPointerOperand()) {
+#ifdef DEBUG_LOAD_INSTR
+            errs() << "There is a GEP operator: ";
+            gep->print(errs());
+            errs() << "\n";
+#endif
             //srcPointer = gep->getPointerOperand();
             //hz: to get the field sensitive point-to information and record it for the GEP operator value.
             srcPointer = visitGetElementPtrOperator(&I,gep);
         } else {
             if(!hasPointsToObjects(srcPointer)) {
+#ifdef DEBUG_LOAD_INSTR
+                errs() << "No point-to info, try to strip the pointer casts.\n";
+#endif
                 srcPointer = srcPointer->stripPointerCasts();
             }
         }
 
         // strip pointer casts. if we cannot find any points to for the srcPointer.
         if(!hasPointsToObjects(srcPointer)) {
+#ifdef DEBUG_LOAD_INSTR
+            errs() << "No point-to info, try to strip the pointer casts.\n";
+#endif
             srcPointer = srcPointer->stripPointerCasts();
         }
 
@@ -787,6 +825,7 @@ namespace DRCHECKER {
             //hz: get field-sensitive point-to information for this GEP operator and record it in the global status.
             targetValue = visitGetElementPtrOperator(&I,gep);
         }
+        Value *targetValue_pre_strip = targetValue; 
         // handle pointer casts
         if(!hasPointsToObjects(targetValue)) {
             targetValue = targetValue->stripPointerCasts();
@@ -795,7 +834,9 @@ namespace DRCHECKER {
         //hz: try to create dummy objects if there is no point-to information about the pointer variable,
         //since it can be an outside global variable. (e.g. platform_device).
         if(!hasPointsToObjects(targetValue)) {
-            this->createOutsideObj(targetValue,true);
+            if(this->createOutsideObj(targetValue_pre_strip,true)){
+                targetValue = targetValue_pre_strip;
+            }
         }
 #endif
         if(hasPointsToObjects(targetValue)) {
