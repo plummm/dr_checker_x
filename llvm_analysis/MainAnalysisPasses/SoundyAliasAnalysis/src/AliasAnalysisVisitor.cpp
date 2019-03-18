@@ -20,10 +20,11 @@ namespace DRCHECKER {
 //#define MAX_ALIAS_OBJ 50
 //hz: Enable creating new objects on the fly when the pointer points to nothing.
 #define CREATE_DUMMY_OBJ_IF_NULL
+#define DEBUG_CREATE_DUMMY_OBJ_IF_NULL
 
     //hz: A helper method to create and (taint) a new OutsideObject.
     OutsideObject* AliasAnalysisVisitor::createOutsideObj(Value *p, bool taint) {
-#ifdef CREATE_DUMMY_OBJ_IF_NULL
+#ifdef DEBUG_CREATE_DUMMY_OBJ_IF_NULL
         errs() << "#####Alias Analysis in createOutsideObj() for: ";
         if(p){
             p->print(errs());
@@ -40,7 +41,7 @@ namespace DRCHECKER {
         if (p->getName().str().empty()){
             return nullptr;
         }
-#ifdef CREATE_DUMMY_OBJ_IF_NULL
+#ifdef DEBUG_CREATE_DUMMY_OBJ_IF_NULL
         errs() << "Try to create new outside object.\n";
 #endif
         //Create a new outside object.
@@ -140,6 +141,12 @@ namespace DRCHECKER {
             if(visitedObjects.find(currPointsToObj->targetObject) == visitedObjects.end()) {
                 PointerPointsTo *newPointsToObj = new PointerPointsTo();
                 newPointsToObj->propogatingInstruction = propInstruction;
+                //hz: 'dstField' is a complex issue, we first apply original logic to set the default "dstfieldId", then
+                //make some modifications if possible:
+                //(1) if src pointer points to a non-struct field in the src object, we can try to update "dstField" with the arg "fieldId".
+                //(2) if src points to an embedded struct field in the src object, then the arg "fieldId" indexes into the embedded struct
+                //instead of the src object... We need special handling here.
+                //----------ORIGINAL-----------
                 if(fieldId >= 0) {
                     newPointsToObj->dstfieldId = fieldId;
                 } else {
@@ -148,6 +155,42 @@ namespace DRCHECKER {
                 newPointsToObj->fieldId = 0;
                 newPointsToObj->targetObject = currPointsToObj->targetObject;
                 newPointsToObj->targetPointer = srcPointer;
+                //----------ORIGINAL-----------
+                //----------MOD----------
+                long host_dstFieldId = currPointsToObj->dstfieldId;
+                //if src points to field 0 in the host object, it possibly means the src pointer points to the host obj itself instead of a certain field.
+                if(currPointsToObj->targetObject && host_dstFieldId > 0){
+                    Type *host_type = currPointsToObj->targetObject->targetType;
+                    if(host_type->isPointerTy()){
+                        host_type = host_type->getPointerElementType();
+                    }
+                    if(host_type->isStructTy() && host_type->getStructNumElements() > host_dstFieldId){
+                        Type *src_fieldTy = host_type->getStructElementType(host_dstFieldId);
+                        if(src_fieldTy && src_fieldTy->isStructTy()){
+                            //Ok, the src points to a struct embedded in the host object, we cannot just use
+                            //the arg "fieldId" as "dstfieldId" of the host object because it's an offset into the embedded struct.
+                            //Basically, we need to create a separate TargetObject representing this embedded struct,
+                            OutsideObject *newObj = this->createOutsideObj(srcPointer,false);
+                            if(newObj){
+                                //This new TargetObject should also be tainted according to the host object taint flags.
+                                std::set<TaintFlag*> *src_taintFlags =  currPointsToObj->targetObject->getFieldTaintInfo(host_dstFieldId);
+                                if(src_taintFlags){
+                                    for(TaintFlag *currTaintFlag:*src_taintFlags){
+                                        newObj->taintAllFieldsWithTag(currTaintFlag);
+                                    }
+                                }
+                                newPointsToObj->targetObject = newObj;
+                                if(fieldId >= 0){
+                                    newPointsToObj->dstfieldId = fieldId;
+                                }else{
+                                    //Is this possible??
+                                    newPointsToObj->dstfieldId = 0;
+                                }
+                            }
+                        }
+                    }
+                }
+                //----------MOD----------
                 visitedObjects.insert(visitedObjects.begin(), newPointsToObj->targetObject);
                 newPointsToInfo->insert(newPointsToInfo->begin(), newPointsToObj);
             }
