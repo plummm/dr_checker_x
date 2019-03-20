@@ -827,13 +827,13 @@ namespace DRCHECKER {
                 }
             }
             assert(this->targetType);
-            dbgs() << "\n*******************\n";
+            dbgs() << "\n*********fetchPointsToObjects(Outside Object)**********\n Current Inst: ";
             if (targetInstr){
                 targetInstr->print(dbgs());
             }
-            dbgs() << "\n";
+            dbgs() << "\n Object Type: ";
             this->targetType->print(dbgs());
-            dbgs() << "\n";
+            dbgs() << "\n Object Ptr: ";
             if (this->targetVar){
                 this->targetVar->print(dbgs());
                 if(dyn_cast<Instruction>(this->targetVar)){
@@ -841,6 +841,7 @@ namespace DRCHECKER {
                     dyn_cast<Instruction>(this->targetVar)->getFunction()->print(dbgs());
                 }
             }
+            dbgs() << "\n Target Field: " << srcfieldId;
             dbgs() << "\n*******************\n";
             assert(this->targetType->isStructTy());
             //NOTE: "pointsTo" should only store point-to information for the pointer fields.
