@@ -767,18 +767,28 @@ namespace DRCHECKER {
         } else {
             if(!hasPointsToObjects(srcPointer)) {
 #ifdef DEBUG_LOAD_INSTR
-                errs() << "No point-to info, try to strip the pointer casts.\n";
+                errs() << "No point-to info, try to strip the pointer casts -0.\n";
 #endif
                 srcPointer = srcPointer->stripPointerCasts();
+#ifdef DEBUG_LOAD_INSTR
+                errs() << "After strip, the pointer is: ";
+                srcPointer->print(errs());
+                errs() << "\n";
+#endif
             }
         }
 
         // strip pointer casts. if we cannot find any points to for the srcPointer.
         if(!hasPointsToObjects(srcPointer)) {
 #ifdef DEBUG_LOAD_INSTR
-            errs() << "No point-to info, try to strip the pointer casts.\n";
+            errs() << "No point-to info, try to strip the pointer casts -1.\n";
 #endif
             srcPointer = srcPointer->stripPointerCasts();
+#ifdef DEBUG_LOAD_INSTR
+            errs() << "After strip, the pointer is: ";
+            srcPointer->print(errs());
+            errs() << "\n";
+#endif
         }
 
 #ifdef CREATE_DUMMY_OBJ_IF_NULL
@@ -863,7 +873,9 @@ namespace DRCHECKER {
             // points to set is empty.
             // Make sure that we are not trying to load a pointer.
             if(!this->inside_loop) {
-                assert(!I.getType()->isPointerTy());
+                //hz: if we reach here, possibly the previously stripped pointer is incorrect,
+                //instead of the assert, we'd better ignore this and hope later analysis can create an OutsideObject for current LoadInst.
+                //assert(!I.getType()->isPointerTy());
             }
         }
 

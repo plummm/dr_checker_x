@@ -847,8 +847,8 @@ namespace DRCHECKER {
             //NOTE: "pointsTo" should only store point-to information for the pointer fields.
             //So if "hasObjects" is false, we need to first ensure that the field is a pointer before creating new objects.
             Type *ety = this->targetType->getStructElementType(srcfieldId);
-            if (!ety->isPointerTy()) {
-                //The field is not a pointer, we cannot create an object pointed to by it.
+            if (!ety->isPointerTy() || !ety->getPointerElementType()->isStructTy()) {
+                //The field is not a pointer, or it doen't point to a struct, we cannot create an object pointed to by it.
                 return;
             }
             // if there are no objects that this pointer field points to, generate a dummy object.
