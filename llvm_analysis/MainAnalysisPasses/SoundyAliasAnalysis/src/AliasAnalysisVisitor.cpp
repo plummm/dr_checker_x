@@ -334,7 +334,7 @@ namespace DRCHECKER {
         Type* srcType = I.getSrcTy();
 
 #ifdef DEBUG_CAST_INSTR
-        dbgs() << "AliasAnalysis, visit Call inst: ";
+        dbgs() << "AliasAnalysis, visit Cast inst: ";
         I.print(dbgs());
         dbgs() << "\n";
         dbgs() << "Src type: ";
@@ -344,6 +344,11 @@ namespace DRCHECKER {
         dbgs() << "\n";
 #endif
         Value* srcOperand = I.getOperand(0);
+#ifdef DEBUG_CAST_INSTR
+        dbgs() << "srcOperand: ";
+        srcOperand->print(dbgs()); 
+        dbgs() << "\n";
+#endif
         // handle inline casting.
         if(!hasPointsToObjects(srcOperand)) {
             srcOperand = srcOperand->stripPointerCasts();
@@ -370,6 +375,11 @@ namespace DRCHECKER {
                     // we are trying to cast into non-void type?
                     // change the type of the object.
                     Type *currSrcType = newPointsToObj->targetObject->targetType;
+#ifdef DEBUG_CAST_INSTR
+                    dbgs() << "currSrcType of the target object: ";
+                    currSrcType->print(dbgs()); 
+                    dbgs() << "\n";
+#endif
                     if(!dstType->isVoidTy()) {
                         if((currSrcType->isPointerTy() && currSrcType->getContainedType(0)->isIntegerTy(8)) || currSrcType->isIntegerTy(8)){
                             // No need to make copy
@@ -383,9 +393,9 @@ namespace DRCHECKER {
                             //hz: we also need to properly handle the taint information.
                             if (currSrcType->isStructTy() && dstType->isPointerTy() && dstType->getPointerElementType()->isStructTy()){
 #ifdef DEBUG_CAST_INSTR
-                                dbgs() << "About to copy src object to dst object of different type.\n";
+                                dbgs() << "About to copy src object to dst object of a different type.\n";
 #endif
-                                AliasObject *newTargetObj = x_type_obj_copy(currPointsToObj->targetObject,dstType);
+                                AliasObject *newTargetObj = this->x_type_obj_copy(newPointsToObj->targetObject,dstType->getPointerElementType());
                                 if (newTargetObj){
                                     newPointsToObj->targetObject = newTargetObj;
                                 }else{
@@ -440,6 +450,17 @@ namespace DRCHECKER {
 
     //hz: make a copy for the src AliasObject of a different type. 
     AliasObject* AliasAnalysisVisitor::x_type_obj_copy(AliasObject *srcObj, Type *dstType) {
+#ifdef DEBUG_CAST_INSTR
+        dbgs() << "In AliasAnalysisVisitor::x_type_obj_copy, srcObj type: ";
+        if(srcObj){
+            srcObj->targetType->print(dbgs());
+        }
+        dbgs() << " dstType: ";
+        if(dstType){
+            dstType->print(dbgs());
+        }
+        dbgs() << "\n";
+#endif
         if (!srcObj || !dstType){
             return nullptr;
         }
