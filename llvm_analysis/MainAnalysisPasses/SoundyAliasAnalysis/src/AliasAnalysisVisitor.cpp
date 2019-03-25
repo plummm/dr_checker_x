@@ -7,7 +7,7 @@ namespace DRCHECKER {
 
 #define DEBUG_GET_ELEMENT_PTR
 //#define DEBUG_ALLOCA_INSTR
-//#define DEBUG_CAST_INSTR
+#define DEBUG_CAST_INSTR
 //#define DEBUG_BINARY_INSTR
 //#define DEBUG_PHI_INSTR
 #define DEBUG_LOAD_INSTR
@@ -333,10 +333,25 @@ namespace DRCHECKER {
         Type* dstType = I.getDestTy();
         Type* srcType = I.getSrcTy();
 
+#ifdef DEBUG_CAST_INSTR
+        dbgs() << "AliasAnalysis, visit Call inst: ";
+        I.print(dbgs());
+        dbgs() << "\n";
+        dbgs() << "Src type: ";
+        srcType->print(dbgs());
+        dbgs() << " Dst type: ";
+        dstType->print(dbgs());
+        dbgs() << "\n";
+#endif
         Value* srcOperand = I.getOperand(0);
         // handle inline casting.
         if(!hasPointsToObjects(srcOperand)) {
             srcOperand = srcOperand->stripPointerCasts();
+#ifdef DEBUG_CAST_INSTR
+            dbgs() << "Src operand doesn't point to any objects, after strip, it becomes: ";
+            srcOperand->print(dbgs()); 
+            dbgs() << "\n";
+#endif
         }
 
         if(dstType->isPointerTy() || hasPointsToObjects(srcOperand)) {
@@ -362,7 +377,30 @@ namespace DRCHECKER {
                                 dstType = dstType->getContainedType(0);
                             }
                             newPointsToObj->targetObject->targetType = dstType;
+                        }else{
+                            //hz: what if src pointer is not i8*?
+                            //hz: we need make a copy of original targetObject and change its type to dstType,
+                            //hz: we also need to properly handle the taint information.
+                            if (currSrcType->isStructTy() && dstType->isPointerTy() && dstType->getPointerElementType()->isStructTy()){
+#ifdef DEBUG_CAST_INSTR
+                                dbgs() << "About to copy src object to dst object of different type.\n";
+#endif
+                                AliasObject *newTargetObj = x_type_obj_copy(currPointsToObj->targetObject,dstType);
+                                if (newTargetObj){
+                                    newPointsToObj->targetObject = newTargetObj;
+                                }else{
+                                    //TODO: what to do now..
+#ifdef DEBUG_CAST_INSTR
+                                    dbgs() << "x_type_obj_copy failed..\n";
+#endif
+                                }
+                            }
                         }
+                    }else{
+                        //TODO: hz: what if dst pointer is void?
+#ifdef DEBUG_CAST_INSTR
+                        dbgs() << "dstType is void...\n";
+#endif
                     }
                     newPointsToInfo->insert(newPointsToInfo->end(), newPointsToObj);
                 }
@@ -372,6 +410,8 @@ namespace DRCHECKER {
 #endif
                 this->updatePointsToObjects(&I, newPointsToInfo);
             } else {
+                //hz: TODO: do we need to create new OutsideObject here of the dstType?
+                //
                 // we are type casting to a pointer and there is no points to information for
                 // the srcOperand, what should be done here?
                 // Should we leave empty?
@@ -396,6 +436,50 @@ namespace DRCHECKER {
 #endif
             }
         }
+    }
+
+    //hz: make a copy for the src AliasObject of a different type. 
+    AliasObject* AliasAnalysisVisitor::x_type_obj_copy(AliasObject *srcObj, Type *dstType) {
+        if (!srcObj || !dstType){
+            return nullptr;
+        }
+        Type *srcType = srcObj->targetType;
+        if(!srcType->isStructTy() || !dstType->isStructTy()){
+            return nullptr;
+        }
+        AliasObject *newObj = srcObj->makeCopy();
+        //We are far from done...
+        //First, we need to change the object type.
+        newObj->targetType = dstType;
+        //Then, we need to properly propagate the field taint information.
+        //NOTE that the AliasObject member function makeCopy() doesn't copy the field taint information, we need to do it ourselves.
+        unsigned srcElemNum = srcType->getStructNumElements();
+        unsigned dstElemNum = dstType->getStructNumElements();
+        newObj->all_contents_tainted = srcObj->all_contents_tainted;
+        newObj->all_contents_taint_flag = srcObj->all_contents_taint_flag;
+        //Copy field taint from src obj to dst obj, but we shouldn't copy taint for fields that don't exist in dst obj.
+        for(auto currFieldTaint:srcObj->taintedFields){
+            if (currFieldTaint->fieldId < dstElemNum){
+                newObj->taintedFields.insert(newObj->taintedFields.end(),currFieldTaint);
+            }
+        }
+        //If srcElemNum < dstElemNum, below code will taint the extra fields automatically when necessary.
+        //No worry about repeatedly adding the same taint flags because "taintAllFields" has an existence test for taint flags.
+        if (srcObj->all_contents_tainted){
+            //Our heuristic is that if src object is all-content-tainted, then possibly we should also treat the dst object as all-field-tainted.
+            if (srcObj->all_contents_taint_flag){
+                newObj->taintAllFields(srcObj->all_contents_taint_flag);
+            }else{
+                //Is this possible?
+                //TODO
+                errs() << "AliasAnalysisVisitor::x_type_obj_copy: all contents tainted but w/o all_contents_taint_flag.\n";
+                if (srcElemNum < dstElemNum){
+                    //We will possibly lose some field taint here, we'd better take a break and see what happened...
+                    assert(false);
+                }
+            }
+        }
+        return newObj;
     }
 
     void AliasAnalysisVisitor::visitBinaryOperator(BinaryOperator &I) {

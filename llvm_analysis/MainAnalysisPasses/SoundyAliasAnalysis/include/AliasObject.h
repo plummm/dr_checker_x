@@ -836,10 +836,12 @@ namespace DRCHECKER {
             dbgs() << "\n Object Ptr: ";
             if (this->targetVar){
                 this->targetVar->print(dbgs());
+                /*
                 if(dyn_cast<Instruction>(this->targetVar)){
                     dbgs() << "\n";
                     dyn_cast<Instruction>(this->targetVar)->getFunction()->print(dbgs());
                 }
+                */
             }
             dbgs() << "\n Target Field: " << srcfieldId;
             dbgs() << "\n*******************\n";

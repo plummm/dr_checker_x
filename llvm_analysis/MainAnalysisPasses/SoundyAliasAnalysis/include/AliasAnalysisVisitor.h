@@ -182,6 +182,9 @@ namespace DRCHECKER {
 
         //hz: A helper method to create and (taint) a new OutsideObject.
         OutsideObject* createOutsideObj(Value *p, bool taint);
+
+        //hz: make a copy for the src AliasObject of a different type. 
+        AliasObject* x_type_obj_copy(AliasObject *srcObj, Type *dstType);
     };
 
 }
