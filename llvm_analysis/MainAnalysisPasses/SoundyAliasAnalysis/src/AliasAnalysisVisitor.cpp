@@ -161,18 +161,48 @@ namespace DRCHECKER {
                 //----------ORIGINAL-----------
                 //----------MOD----------
                 long host_dstFieldId = currPointsToObj->dstfieldId;
-                //if src points to field 0 in the host object, it possibly means the src pointer points to the host obj itself instead of a certain field.
-                if(currPointsToObj->targetObject && host_dstFieldId > 0){
+                GEPOperator *gep = (propInstruction ? dyn_cast<GEPOperator>(propInstruction) : nullptr);
+                //"basePointerType" refers to the type of the pointer operand in the original GEP instruction/opearator, during whose visit we
+                //call this makePointsToCopy().
+                Type *basePointerType = (gep ? gep->getPointerOperand()->getType() : nullptr);
+                Type *basePointToType = (basePointerType ? basePointerType->getPointerElementType() : nullptr);
+#ifdef DEBUG_GET_ELEMENT_PTR
+                dbgs() << "AliasAnalysisVisitor::makePointsToCopy, basePointerType: ";
+                if(basePointerType){
+                    basePointerType->print(dbgs());
+                }
+                dbgs() << "\n";
+#endif
+                //hz: the following several "if" try to decide whether we will actually index into an embedded struct in the host struct.
+                if(currPointsToObj->targetObject && basePointToType && basePointToType->isStructTy()){
                     Type *host_type = currPointsToObj->targetObject->targetType;
                     if(host_type->isPointerTy()){
                         host_type = host_type->getPointerElementType();
                     }
-                    if(host_type->isStructTy() && host_type->getStructNumElements() > host_dstFieldId){
+#ifdef DEBUG_GET_ELEMENT_PTR
+                    dbgs() << "host_type: ";
+                    if(host_type){
+                        host_type->print(dbgs());
+                    }
+                    dbgs() << " host_dstFieldId: " << host_dstFieldId;
+                    dbgs() << "\n";
+#endif
+                    if(host_type->isStructTy() && host_type->getStructNumElements() > host_dstFieldId && host_type != basePointToType){
                         Type *src_fieldTy = host_type->getStructElementType(host_dstFieldId);
-                        if(src_fieldTy && src_fieldTy->isStructTy()){
+#ifdef DEBUG_GET_ELEMENT_PTR
+                        dbgs() << "src_fieldTy: ";
+                        if(src_fieldTy){
+                            src_fieldTy->print(dbgs());
+                        }
+                        dbgs() << "\n";
+#endif
+                        if(src_fieldTy && src_fieldTy->isStructTy() && src_fieldTy == basePointToType){
                             //Ok, the src points to a struct embedded in the host object, we cannot just use
                             //the arg "fieldId" as "dstfieldId" of the host object because it's an offset into the embedded struct.
-                            //Basically, we need to create a separate TargetObject representing this embedded struct,
+                            //We have two candidate methods here:
+                            //(1) Create a separate TargetObject representing this embedded struct, then make the pointer operand in original GEP point to it.
+                            //(2) Directly create an outside object for the resulted pointer of this GEP. (i.e. the parameter "srcPointer")
+                            //TODO: we now use (2) as it seems easier, may try (1) later.
                             OutsideObject *newObj = this->createOutsideObj(srcPointer,false);
                             if(newObj){
                                 //This new TargetObject should also be tainted according to the host object taint flags.
