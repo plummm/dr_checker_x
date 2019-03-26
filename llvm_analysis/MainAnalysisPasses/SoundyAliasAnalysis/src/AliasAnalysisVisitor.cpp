@@ -94,11 +94,13 @@ namespace DRCHECKER {
          *  This also takes care of freeing the elements if they are already present.
          */
 
+        dbgs() << "updatePointsToObjects: newPointsToInfo: " << newPointsToInfo->size();
         std::map<Value *, std::set<PointerPointsTo*>*>* targetPointsToMap = this->currState.getPointsToInfo(this->currFuncCallSites);
         auto prevPointsToSet = targetPointsToMap->find(srcPointer);
         if(prevPointsToSet != targetPointsToMap->end()) {
             // OK, there are some previous values for this
             std::set<PointerPointsTo*>* existingPointsTo = prevPointsToSet->second;
+            dbgs() << " existingPointsTo: " << existingPointsTo->size();
             for(PointerPointsTo *currPointsTo: *newPointsToInfo) {
                 assert(existingPointsTo != nullptr);
                 // for each points to, see if we already have that information, if yes, ignore it.
@@ -115,9 +117,11 @@ namespace DRCHECKER {
             delete(newPointsToInfo);
 
         } else {
+            dbgs() << " existingPointsTo: 0";
             assert(newPointsToInfo != nullptr);
             (*targetPointsToMap)[srcPointer] = newPointsToInfo;
         }
+        dbgs() << " After update: " << (*targetPointsToMap)[srcPointer]->size() << "\n";
     }
 
     bool AliasAnalysisVisitor::hasPointsToObjects(Value *srcPointer) {
@@ -139,6 +143,9 @@ namespace DRCHECKER {
         // set of all visited objects.
         // to avoid added duplicate pointsto objects
         std::set<AliasObject*> visitedObjects;
+#ifdef DEBUG_GET_ELEMENT_PTR
+        dbgs() << "AliasAnalysisVisitor::makePointsToCopy, elements in *srcPointsTo: " << srcPointsTo->size() << " \n";
+#endif
         for(PointerPointsTo *currPointsToObj:*srcPointsTo) {
             // if the target object is not visited, then add into points to info.
             if(visitedObjects.find(currPointsToObj->targetObject) == visitedObjects.end()) {
@@ -189,14 +196,26 @@ namespace DRCHECKER {
 #endif
                     if(host_type->isStructTy() && host_type->getStructNumElements() > host_dstFieldId && host_type != basePointToType){
                         Type *src_fieldTy = host_type->getStructElementType(host_dstFieldId);
+                        //It's also possible that the field is an array of a certain struct, if so, we should also regard this field as
+                        //a "struct" field (i.e. the first struct in the array).
+                        Type *src_fieldTy_arrElem = nullptr; 
+                        if(src_fieldTy && src_fieldTy->isArrayTy()){
+                            src_fieldTy_arrElem = src_fieldTy->getArrayElementType();
+                        }
 #ifdef DEBUG_GET_ELEMENT_PTR
                         dbgs() << "src_fieldTy: ";
                         if(src_fieldTy){
                             src_fieldTy->print(dbgs());
                         }
+                        if(src_fieldTy_arrElem){
+                            dbgs() << "src_fieldTy_arrElem: ";
+                            src_fieldTy_arrElem->print(dbgs());
+                        }
                         dbgs() << "\n";
 #endif
-                        if(src_fieldTy && src_fieldTy->isStructTy() && src_fieldTy == basePointToType){
+                        if( (src_fieldTy && src_fieldTy == basePointToType) || 
+                            (src_fieldTy_arrElem && src_fieldTy_arrElem == basePointToType)
+                          ){
                             //Ok, the src points to a struct embedded in the host object, we cannot just use
                             //the arg "fieldId" as "dstfieldId" of the host object because it's an offset into the embedded struct.
                             //We have two candidate methods here:
@@ -213,28 +232,49 @@ namespace DRCHECKER {
                                     }
                                 }
                                 newPointsToObj->targetObject = newObj;
+                                //Since now the newObj directly represents the final resulted object of this GEP (instead of the embedded struct),
+                                //we will set the dstField to 0.
+                                newPointsToObj->dstfieldId = 0;
+                                /*
                                 if(fieldId >= 0){
                                     newPointsToObj->dstfieldId = fieldId;
                                 }else{
                                     //Is this possible??
                                     newPointsToObj->dstfieldId = 0;
                                 }
+                                */
                             }else{
                                 //We cannot create the new OutsideObject, it's possibly because the target pointer doesn't point to a struct.
                                 //In this case, rather than using the original wrong logic, we'd better make it point to nothing.
+#ifdef DEBUG_GET_ELEMENT_PTR
                                 errs() << "In makePointsToCopy(): cannot create OutsideObject for: ";
                                 srcPointer->print(errs());
                                 errs() << "\n";
-                                continue;
+#endif
+                                goto next;
                             }
                         }
                     }
                 }
                 //----------MOD----------
-                visitedObjects.insert(visitedObjects.begin(), newPointsToObj->targetObject);
+#ifdef DEBUG_GET_ELEMENT_PTR
+                dbgs() << "Assign points-to object: ";
+                if(newPointsToObj->targetObject){
+                    if(newPointsToObj->targetObject->targetType){
+                        newPointsToObj->targetObject->targetType->print(dbgs());
+                    }
+                }
+                dbgs() << " | dstField: " << newPointsToObj->dstfieldId << "\n";
+
+#endif
                 newPointsToInfo->insert(newPointsToInfo->begin(), newPointsToObj);
+next:
+                visitedObjects.insert(visitedObjects.begin(), currPointsToObj->targetObject);
             }
         }
+#ifdef DEBUG_GET_ELEMENT_PTR
+        dbgs() << "makePointsToCopy: returned newPointsToInfo size: " << newPointsToInfo->size() << "\n";
+#endif
         return newPointsToInfo;
     }
 
@@ -645,6 +685,9 @@ namespace DRCHECKER {
     Value* AliasAnalysisVisitor::visitGetElementPtrOperator(Instruction *I, GEPOperator *gep) {
 #ifdef DEBUG_GET_ELEMENT_PTR
         dbgs() << "Alias Analysis, in :visitGetElementPtrOperator()\n";
+        dbgs() << "AliasAnalysisVisitor::visitGetElementPtrOperator(): ";
+        I->print(dbgs());
+        dbgs() << "\n";
 #endif
         //Null pointer or we have processed it before.
         if(!gep || hasPointsToObjects(gep)){
@@ -760,7 +803,9 @@ namespace DRCHECKER {
          *  this is where accessing structure fields happen.
          */
 #ifdef DEBUG_GET_ELEMENT_PTR
-        dbgs() << "Alias Analysis, in :visitGetElementPtrInst()\n";
+        dbgs() << "AliasAnalysisVisitor::visitGetElementPtrInst(): ";
+        I.print(dbgs());
+        dbgs() << "\n";
 #endif
         Value* srcPointer = I.getPointerOperand();
         GEPOperator *gep = dyn_cast<GEPOperator>(I.getPointerOperand());
