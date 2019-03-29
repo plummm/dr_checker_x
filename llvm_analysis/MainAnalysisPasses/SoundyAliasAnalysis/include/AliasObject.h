@@ -82,6 +82,7 @@ namespace DRCHECKER {
     };
 
 
+    int isSameObj(AliasObject*,AliasObject*);
     /***
      * Handles the pointer point to relation.
      */
@@ -109,6 +110,17 @@ namespace DRCHECKER {
         bool isIdenticalPointsTo(const ObjectPointsTo *that) const {
             if(that != nullptr && that->getTargetType() == PointerPointsTo::TYPE_CONST) {
                 PointerPointsTo* actualObj = (PointerPointsTo*)that;
+                /*
+                //hz: a simple hacking here to avoid duplicated outside objects.
+                if(this->dstfieldId != actualObj->dstfieldId){
+                    return false;
+                }
+                //negative return value means undecided.
+                int r = isSameObj(this->targetObject,actualObj->targetObject);
+                if(r>=0){
+                    return r;
+                }
+                */
                 return this->targetPointer == actualObj->targetPointer &&
                        this->targetObject == actualObj->targetObject &&
                        this->fieldId == actualObj->fieldId &&
@@ -684,6 +696,18 @@ namespace DRCHECKER {
         }
     };
 
+    /*
+    //int PointerPointsTo::isSameObj(AliasObject *o0,AliasObject *o1) const{
+    int isSameObj(AliasObject *o0,AliasObject *o1){
+        if(o0 && o1){
+            if(o0->isOutsideObject() && o1->isOutsideObject()){
+                return o0->targetType == o1->targetType ? 1 : 0;
+            }
+        }
+        return -1;
+    }
+    */
+
     class FunctionLocalVariable : public AliasObject {
     public:
         Function *targetFunction;
@@ -796,7 +820,7 @@ namespace DRCHECKER {
         AliasObject* makeCopy() {
             return new OutsideObject(this);
         }
-        Value* getOutsidePtr() {
+        Value* getObjectPtr() {
             return this->targetVar;
         }
 
@@ -1024,6 +1048,8 @@ namespace DRCHECKER {
 
     //hz: get the llvm::Value behind this AliasObject.
     Value * AliasObject::getValue() {
+        return this->getObjectPtr();
+        /*
         Value *v = nullptr;
         if (this->isGlobalObject()){
             v = ((DRCHECKER::GlobalObject*)this)->targetVar;
@@ -1035,6 +1061,7 @@ namespace DRCHECKER {
             v = ((DRCHECKER::OutsideObject*)this)->targetVar;
         }//TODO: HeapAllocation
         return v;
+        */
     }
 
 

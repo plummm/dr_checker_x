@@ -94,22 +94,103 @@ namespace DRCHECKER {
          *  This also takes care of freeing the elements if they are already present.
          */
 
-        dbgs() << "updatePointsToObjects: newPointsToInfo: " << newPointsToInfo->size();
+        dbgs() << "updatePointsToObjects for : ";
+        srcPointer->print(dbgs());
+        dbgs() << "\nnewPointsToInfo: " << newPointsToInfo->size();
+        if(!newPointsToInfo || newPointsToInfo->size() <= 0){
+            //nothing to update.
+            return;
+        }
+        bool dbg = (newPointsToInfo->size() > 2);
         std::map<Value *, std::set<PointerPointsTo*>*>* targetPointsToMap = this->currState.getPointsToInfo(this->currFuncCallSites);
         auto prevPointsToSet = targetPointsToMap->find(srcPointer);
+        //hz: slightly change the logic here in case that "newPointsToInfo" contains some duplicated items.
+        if(prevPointsToSet == targetPointsToMap->end()) {
+            (*targetPointsToMap)[srcPointer] = new std::set<PointerPointsTo*>;
+        }
+        prevPointsToSet = targetPointsToMap->find(srcPointer);
         if(prevPointsToSet != targetPointsToMap->end()) {
             // OK, there are some previous values for this
             std::set<PointerPointsTo*>* existingPointsTo = prevPointsToSet->second;
-            dbgs() << " existingPointsTo: " << existingPointsTo->size();
+            assert(existingPointsTo != nullptr);
+            dbgs() << " existingPointsTo: " << existingPointsTo->size() << "\n";
             for(PointerPointsTo *currPointsTo: *newPointsToInfo) {
-                assert(existingPointsTo != nullptr);
+                if(dbg){
+                    dbgs() << "^^^^^^^^^^^^^^^ currPointsTo: ";
+                    currPointsTo->targetObject->targetType->print(dbgs());
+                    dbgs() << " | " << currPointsTo->dstfieldId << "\n";
+                    dbgs() << "#existingPointsTo: " << existingPointsTo->size() << "\n";
+                }
                 // for each points to, see if we already have that information, if yes, ignore it.
-                if(std::find_if(existingPointsTo->begin(), existingPointsTo->end(), [currPointsTo](const PointerPointsTo *n) {
+                if(std::find_if(existingPointsTo->begin(), existingPointsTo->end(), [currPointsTo,dbg](const PointerPointsTo *n) {
+                    //hz: a simple hack here to avoid duplicated objects.
+                    if(dbg){
+                        dbgs() << "----------------------------\n";
+                    }
+                    if(currPointsTo->dstfieldId != n->dstfieldId){
+                        if(dbg){
+                            dbgs() << "dstField mismatch: " << n->dstfieldId << "\n";
+                        }
+                        return false;
+                    }
+                    AliasObject *o0 = currPointsTo->targetObject;
+                    AliasObject *o1 = n->targetObject;
+                    if(dbg){
+                        dbgs() << (o0?"t":"f") << (o1?"t":"f") << (o0?(o0->isOutsideObject()?"t":"f"):"n") << (o1?(o1->isOutsideObject()?"t":"f"):"n") << "\n";
+                    }
+                    if(o0 && o1){
+                        if(dbg){
+                            dbgs() << "Ty0: ";
+                            o0->targetType->print(dbgs());
+                            dbgs() << " Ty1: ";
+                            o1->targetType->print(dbgs());
+                            dbgs() << "\n";
+                        }
+                        if(o0->targetType != o1->targetType){
+                            if(dbg){
+                                dbgs() << "Target obj type mismatch!\n";
+                            }
+                            return false;
+                        }
+                        //Ok, now these two points-to have the same target obj type and dst field, what then?
+                        //We will further look at the object ptr of the target AliasObject, if they are also the same, we regard these 2 objs the same.
+                        Value *v0 = o0->getObjectPtr();
+                        Value *v1 = o1->getObjectPtr();
+                        if(dbg){
+                            dbgs() << "Ptr0: ";
+                            if(v0){
+                                v0->print(dbgs());
+                            }
+                            dbgs() << " Ptr1: ";
+                            if(v1){
+                                v1->print(dbgs());
+                            }
+                            dbgs() << "RES: " << (v0==v1?"T":"F") << "\n";
+                        }
+                        if(v0 || v1){
+                            return (v0 == v1);
+                        }
+                    }else if(o0 || o1){
+                        //One is null but the other is not, obviously not the same.
+                        if(dbg){
+                            dbgs() << "One of the 2 objs is null\n";
+                        }
+                        return false;
+                    }
+                    if(dbg){
+                        dbgs() << "Default Cmp\n";;
+                    }
                     return  n->isIdenticalPointsTo(currPointsTo);
                 }) == existingPointsTo->end()) {
+                    if(dbg){
+                        dbgs() << "############# Inserted!!!\n";
+                    }
                     existingPointsTo->insert(existingPointsTo->end(), currPointsTo);
                 } else {
                     //delete the points to object, as we already have a similar pointsTo object.
+                    if(dbg){
+                        dbgs() << "############# Duplicated!!!\n";
+                    }
                     delete (currPointsTo);
                 }
             }
@@ -117,9 +198,15 @@ namespace DRCHECKER {
             delete(newPointsToInfo);
 
         } else {
+            errs() << "Impossible to reach here...\n";
+            assert(false);
+            /*
             dbgs() << " existingPointsTo: 0";
             assert(newPointsToInfo != nullptr);
-            (*targetPointsToMap)[srcPointer] = newPointsToInfo;
+            if(newPointsToInfo->size() > 0){
+                (*targetPointsToMap)[srcPointer] = newPointsToInfo;
+            }
+            */
         }
         dbgs() << " After update: " << (*targetPointsToMap)[srcPointer]->size() << "\n";
     }
