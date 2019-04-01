@@ -28,6 +28,8 @@
 #include "llvm/Support/CommandLine.h"
 #include "bug_detectors/BugDetectorDriver.h"
 #include "PointsToUtils.h"
+#include <chrono>
+#include <ctime>
 
 
 using namespace llvm;
@@ -166,6 +168,9 @@ namespace DRCHECKER {
             setupGlobals(m);
 
             dbgs() << "Provided Function Type:" << functionType << ", Function Name:" << checkFunctionName << "\n";
+            auto t_start = std::chrono::system_clock::now();
+            std::time_t start_time = std::chrono::system_clock::to_time_t(t_start);
+            dbgs() << "Anlysis starts at: " << std::ctime(&start_time) << "\n";
             // Call init functions.
             if(!skipInit) {
                 std::set<Function*> toAnalyzeInitFunctions;
@@ -252,11 +257,20 @@ namespace DRCHECKER {
                         dbgs() << "Starting Analyzing function:" << currFunction.getName() << "\n";
                         vis->analyze();
 
+                        auto t_now = std::chrono::system_clock::now();
+                        std::chrono::duration<double> elapsed_seconds = t_now - t_start;
+                        dbgs() << "Anlysis done in : " << elapsed_seconds.count() << "s\n";
+                        dbgs() << "Now start to dump the taint information...\n";
+
                         //hz: dump the taint information we require here.
                         std::error_code EC;
                         llvm::raw_fd_ostream o_taint("taint_info_" + checkFunctionName, EC);
                         currState.dumpTaintInfo(o_taint);
                         o_taint.close();
+
+                        auto t_end = std::chrono::system_clock::now();
+                        elapsed_seconds = t_end - t_now;
+                        dbgs() << "Taint info dumped in : " << elapsed_seconds.count() << "s\n";
 
                         /*
                         if(outputFile == "") {

@@ -118,6 +118,7 @@ namespace DRCHECKER {
         void visit(BasicBlock *BB) {
 
         }
+
     protected:
         // instructions where the warning has been generated.
         std::set<Instruction *> warnedInstructions;

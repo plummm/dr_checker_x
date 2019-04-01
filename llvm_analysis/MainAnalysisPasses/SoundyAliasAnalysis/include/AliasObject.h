@@ -19,6 +19,11 @@ using namespace llvm;
 #ifdef DEBUG
 #undef DEBUG
 #endif
+
+//hz: some debug output options.
+#define DEBUG_OUTSIDE_OBJ_CREATION
+#define DEBUG_FETCH_POINTS_TO_OBJECTS_OUTSIDE
+
 namespace DRCHECKER {
 //#define DEBUG_FUNCTION_ARG_OBJ_CREATION
 //#define DEBUG_FETCH_POINTS_TO_OBJECTS
@@ -800,22 +805,26 @@ namespace DRCHECKER {
         OutsideObject(Value* outVal, Type *outVarType) {
             this->targetVar = outVal;
             this->targetType = outVarType;
+#ifdef DEBUG_OUTSIDE_OBJ_CREATION
             dbgs() << "\n--------NEW O----------\n";
             this->targetVar->print(dbgs());
             dbgs() << "\n";
             this->targetType->print(dbgs());
             dbgs() << "\n";
             dbgs() << "\n------------------\n";
+#endif
         }
         OutsideObject(OutsideObject *origOutsideVar): AliasObject(origOutsideVar) {
             this->targetVar = origOutsideVar->targetVar;
             this->targetType = origOutsideVar->targetType;
+#ifdef DEBUG_OUTSIDE_OBJ_CREATION
             dbgs() << "\n--------COPY O----------\n";
             this->targetVar->print(dbgs());
             dbgs() << "\n";
             this->targetType->print(dbgs());
             dbgs() << "\n";
             dbgs() << "\n------------------\n";
+#endif
         }
         AliasObject* makeCopy() {
             return new OutsideObject(this);
@@ -851,6 +860,7 @@ namespace DRCHECKER {
                 }
             }
             assert(this->targetType);
+#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS_OUTSIDE
             dbgs() << "\n*********fetchPointsToObjects(Outside Object)**********\n Current Inst: ";
             if (targetInstr){
                 targetInstr->print(dbgs());
@@ -869,6 +879,7 @@ namespace DRCHECKER {
             }
             dbgs() << "\n Target Field: " << srcfieldId;
             dbgs() << "\n*******************\n";
+#endif
             assert(this->targetType->isStructTy());
             //NOTE: "pointsTo" should only store point-to information for the pointer fields.
             //So if "hasObjects" is false, we need to first ensure that the field is a pointer before creating new objects.
@@ -911,7 +922,9 @@ namespace DRCHECKER {
                 } else {
                     // if all the contents are tainted?
                     if(this->all_contents_tainted) {
+#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
                         dbgs() << "Trying to get field from an object whose contents are fully tainted\n";
+#endif
                         assert(this->all_contents_taint_flag != nullptr);
                         TaintFlag *newTaint = new TaintFlag(this->all_contents_taint_flag,targetInstr,targetInstr);
                         newObj->taintAllFieldsWithTag(newTaint);

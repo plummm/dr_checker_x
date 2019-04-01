@@ -33,6 +33,17 @@ namespace DRCHECKER {
             this -> fieldId = srcTag -> fieldId;
             this -> v = srcTag -> v;
         }
+
+        bool isTagEquals(TaintTag *dstTag) {
+            if (!dstTag){
+                return false;
+            }
+            if (this == dstTag){
+                return true;
+            }
+            return this->fieldId == dstTag->fieldId &&
+                   this->v == dstTag->v;
+        }
     };
 
     //Class that holds the taint flag
@@ -88,10 +99,24 @@ namespace DRCHECKER {
 
         bool isTaintEquals(const TaintFlag *dstTaint) const {
             if(dstTaint != nullptr) {
-                // we do not care about instruction trace here.
-                return this->targetInstr == dstTaint->targetInstr &&
-                        this->isTainted() == dstTaint->isTainted() &&
-                        this->instructionTrace == dstTaint->instructionTrace;
+                //hz: we don't care about in which specific paths the targetInst is tainted, what really matters
+                //are below properties:
+                //(1) the targetInst of this taintFlag
+                //(2) whether it's tainted or not
+                //(3) the taint source, which is wrapped in our TaintTag class.
+                //These are properties we consider when comparing two taint flags.
+                //Property (1) and (2)
+                if(this->targetInstr != dstTaint->targetInstr || this->isTainted() != dstTaint->isTainted()){
+                    return false;
+                }
+                //Property (3):
+                if(this->tag && dstTaint->tag){
+                    return this->tag->isTagEquals(dstTaint->tag);
+                }else if(this->tag || dstTaint->tag){
+                    //One has tag but the other doesn't.
+                    return false;
+                }
+                return true;
             }
             return false;
         }

@@ -10,8 +10,8 @@
 using namespace llvm;
 namespace DRCHECKER {
 
-#define DEBUG_CALL_INSTR
-#define DEBUG_RET_INSTR
+//#define DEBUG_CALL_INSTR
+//#define DEBUG_RET_INSTR
 #define DEBUG_LOAD_INSTR
 //#define DEBUG_CAST_INSTR
 //#define DEBUG
@@ -219,8 +219,7 @@ namespace DRCHECKER {
 
 
 #ifdef DEBUG_LOAD_INSTR
-        dbgs() << "In taint\n";
-        dbgs() << "Taint Analysis Visiting Load Instruction:";
+        dbgs() << "TaintAnalysisVisitor::visitLoadInst(): ";
         I.print(dbgs());
         dbgs() << "\n";
 #endif
@@ -327,6 +326,8 @@ namespace DRCHECKER {
         // if the value, we are trying to store is tainted? Then process, else
         // ignore.
         if(srcTaintInfo != nullptr) {
+
+            dbgs() << "TaintAnalysisVisitor::visitStoreInst: #srcTaintInfo: " << srcTaintInfo->size() << "\n";
 
             // create newTaintInfo set.
             std::set<TaintFlag *> *newTaintInfo = new std::set<TaintFlag *>();

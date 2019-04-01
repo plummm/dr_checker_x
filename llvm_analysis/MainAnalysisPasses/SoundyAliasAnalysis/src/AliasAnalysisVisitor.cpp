@@ -5,14 +5,13 @@
 
 namespace DRCHECKER {
 
-#define DEBUG_GET_ELEMENT_PTR
+//#define DEBUG_GET_ELEMENT_PTR
 //#define DEBUG_ALLOCA_INSTR
-#define DEBUG_CAST_INSTR
+//#define DEBUG_CAST_INSTR
 //#define DEBUG_BINARY_INSTR
 //#define DEBUG_PHI_INSTR
-#define DEBUG_LOAD_INSTR
-#define DEBUG_STORE_INSTR
-//#define DEBUG_BB_VISIT
+//#define DEBUG_LOAD_INSTR
+//#define DEBUG_STORE_INSTR
 //#define DEBUG_CALL_INSTR
 //#define STRICT_CAST
 //#define DEBUG_RET_INSTR
@@ -20,12 +19,13 @@ namespace DRCHECKER {
 //#define MAX_ALIAS_OBJ 50
 //hz: Enable creating new objects on the fly when the pointer points to nothing.
 #define CREATE_DUMMY_OBJ_IF_NULL
-#define DEBUG_CREATE_DUMMY_OBJ_IF_NULL
+//#define DEBUG_CREATE_DUMMY_OBJ_IF_NULL
+//#define DEBUG_UPDATE_POINTSTO
 
     //hz: A helper method to create and (taint) a new OutsideObject.
     OutsideObject* AliasAnalysisVisitor::createOutsideObj(Value *p, bool taint) {
 #ifdef DEBUG_CREATE_DUMMY_OBJ_IF_NULL
-        errs() << "#####Alias Analysis in createOutsideObj() for: ";
+        errs() << "AliasAnalysisVisitor::createOutsideObj(): ";
         if(p){
             p->print(errs());
             errs() << "  |  ";
@@ -93,15 +93,20 @@ namespace DRCHECKER {
          *
          *  This also takes care of freeing the elements if they are already present.
          */
-
+#ifdef DEBUG_UPDATE_POINTSTO
         dbgs() << "updatePointsToObjects for : ";
         srcPointer->print(dbgs());
         dbgs() << "\nnewPointsToInfo: " << newPointsToInfo->size();
+#endif
         if(!newPointsToInfo || newPointsToInfo->size() <= 0){
             //nothing to update.
             return;
         }
+#ifdef DEBUG_UPDATE_POINTSTO
         bool dbg = (newPointsToInfo->size() > 2);
+#else
+        bool dbg = false;
+#endif
         std::map<Value *, std::set<PointerPointsTo*>*>* targetPointsToMap = this->currState.getPointsToInfo(this->currFuncCallSites);
         auto prevPointsToSet = targetPointsToMap->find(srcPointer);
         //hz: slightly change the logic here in case that "newPointsToInfo" contains some duplicated items.
@@ -113,7 +118,9 @@ namespace DRCHECKER {
             // OK, there are some previous values for this
             std::set<PointerPointsTo*>* existingPointsTo = prevPointsToSet->second;
             assert(existingPointsTo != nullptr);
+#ifdef DEBUG_UPDATE_POINTSTO
             dbgs() << " existingPointsTo: " << existingPointsTo->size() << "\n";
+#endif
             for(PointerPointsTo *currPointsTo: *newPointsToInfo) {
                 if(dbg){
                     dbgs() << "^^^^^^^^^^^^^^^ currPointsTo: ";
@@ -198,7 +205,9 @@ namespace DRCHECKER {
             delete(newPointsToInfo);
 
         } else {
+#ifdef DEBUG_UPDATE_POINTSTO
             errs() << "Impossible to reach here...\n";
+#endif
             assert(false);
             /*
             dbgs() << " existingPointsTo: 0";
@@ -208,7 +217,9 @@ namespace DRCHECKER {
             }
             */
         }
+#ifdef DEBUG_UPDATE_POINTSTO
         dbgs() << " After update: " << (*targetPointsToMap)[srcPointer]->size() << "\n";
+#endif
     }
 
     bool AliasAnalysisVisitor::hasPointsToObjects(Value *srcPointer) {
@@ -1420,6 +1431,11 @@ next:
                                                          std::vector<Instruction *> *oldFuncCallSites,
                                                          std::vector<Instruction *> *callSiteContext) {
 
+#ifdef DEBUG_CALL_INSTR
+        dbgs() << "AliasAnalysisVisitor::visitCallInst(): ";
+        I.print(dbgs());
+        dbgs() << "\n";
+#endif
         std::string currFuncName = currFunc->getName().str();
         // if we do not have function definition
         // that means, it is a kernel internal function.
@@ -1522,7 +1538,6 @@ next:
 #endif
         }
     }
-
 
     void AliasAnalysisVisitor::printAliasAnalysisResults(llvm::raw_ostream& O) const {
         /***

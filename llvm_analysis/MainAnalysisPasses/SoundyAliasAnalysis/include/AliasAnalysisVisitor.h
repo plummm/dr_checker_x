@@ -13,6 +13,7 @@
 #include <llvm/IR/Operator.h>
 
 
+//#define DEBUG_ALIAS_INSTR_VISIT
 using namespace llvm;
 
 namespace DRCHECKER {
@@ -60,13 +61,16 @@ namespace DRCHECKER {
 
         virtual void setLoopIndicator(bool inside_loop);
 
+        /*
         virtual void visit(Instruction &I) {
 #ifdef DEBUG_ALIAS_INSTR_VISIT
-                dbgs() << "Visiting instruction(In AliasAnalysis):";
+            dbgs() << "Visiting instruction(In AliasAnalysis):";
             I.print(dbgs());
             dbgs() << "\n";
 #endif
         }
+        */
+
 
         // Implement the visitors
 

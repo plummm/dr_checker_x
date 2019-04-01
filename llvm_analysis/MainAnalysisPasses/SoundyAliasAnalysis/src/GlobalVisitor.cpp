@@ -13,7 +13,7 @@ namespace DRCHECKER {
 #define MAX_CALLSITE_DEPTH 5
 #define MAX_FUNC_PTR 5
 #define SMART_FUNCTION_PTR_RESOLVING
-//#define DEBUG_BB_VISIT
+#define DEBUG_BB_VISIT
 //#define DEBUG_CALL_INSTR
 
     // Basic visitor functions.
