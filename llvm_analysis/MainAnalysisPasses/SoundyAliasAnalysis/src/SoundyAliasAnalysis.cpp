@@ -11,6 +11,7 @@
 #include "ModuleState.h"
 #include <AliasObject.h>
 #include <iostream>
+#include <fstream>
 #include <llvm/Analysis/CallGraph.h>
 #include <FunctionChecker.h>
 #include <CFGUtils.h>
@@ -169,8 +170,8 @@ namespace DRCHECKER {
 
             dbgs() << "Provided Function Type:" << functionType << ", Function Name:" << checkFunctionName << "\n";
             auto t_start = std::chrono::system_clock::now();
-            std::time_t start_time = std::chrono::system_clock::to_time_t(t_start);
-            dbgs() << "Anlysis starts at: " << std::ctime(&start_time) << "\n";
+            dbgs() << "Anlysis starts at: ";
+            this->printCurTime();
             // Call init functions.
             if(!skipInit) {
                 std::set<Function*> toAnalyzeInitFunctions;
@@ -265,8 +266,21 @@ namespace DRCHECKER {
                         //hz: dump the taint information we require here.
                         std::error_code EC;
                         llvm::raw_fd_ostream o_taint("taint_info_" + checkFunctionName, EC);
+                        //Set a 5MB buffer to improve file I/O performance.
+                        o_taint.SetBufferSize(5*1024*1024);
                         currState.dumpTaintInfo(o_taint);
                         o_taint.close();
+
+                        //Write the taint info first to a in-mem string, then save it to the file, might be faster.
+                        /*
+                        std::string str_taint_inf;
+                        llvm::raw_string_ostream o_taint(str_taint_inf);
+                        currState.dumpTaintInfo(o_taint);
+                        std::ofstream outfile;
+                        outfile.open("taint_info_" + checkFunctionName);
+                        outfile << o_taint.str();
+                        outfile.close();
+                        */
 
                         auto t_end = std::chrono::system_clock::now();
                         elapsed_seconds = t_end - t_now;
@@ -308,6 +322,8 @@ namespace DRCHECKER {
                         */
 
                         //clean up
+                        dbgs() << "Clean up GlobalVisitor at: ";
+                        this->printCurTime();
                         delete(vis);
 
                         //((AliasAnalysisVisitor *)aliasVisitorCallback)->printAliasAnalysisResults(dbgs());
@@ -315,9 +331,21 @@ namespace DRCHECKER {
                 }
             }
             // explicitly delete references to global variables.
+            dbgs() << "Clean up global state at: ";
+            this->printCurTime();
             currState.cleanup();
             // clean up.
+            dbgs() << "Clean up DataLayout at: ";
+            this->printCurTime();
             delete(currDataLayout);
+            dbgs() << "All done: ";
+            this->printCurTime();
+        }
+
+        void printCurTime() {
+            auto t_now = std::chrono::system_clock::now();
+            std::time_t now_time = std::chrono::system_clock::to_time_t(t_now);
+            dbgs() << std::ctime(&now_time) << "\n";
         }
 
         void addAllVisitorAnalysis(GlobalState &targetState,

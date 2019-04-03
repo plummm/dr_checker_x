@@ -137,9 +137,9 @@ namespace DRCHECKER {
         std::vector<Instruction *> instructionTrace;
         void dumpInfo(raw_ostream &OS) {
 
-            OS << "Taint Flag for:";
-            this->targetInstr->print(OS);
-            OS << ", Tainted=" << this->isTainted() << "\n";
+            //OS << "Taint Flag for:";
+            //this->targetInstr->print(OS);
+            //OS << ", Tainted=" << this->isTainted() << "\n";
             OS << " Instruction Trace: [";
             for(std::vector<Instruction *>::iterator SI = this->instructionTrace.begin(); SI != this->instructionTrace.end(); ++SI) {
                 AAMDNodes targetMDNodes;

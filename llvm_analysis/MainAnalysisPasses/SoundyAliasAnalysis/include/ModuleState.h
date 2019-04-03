@@ -11,6 +11,10 @@
 #include "bug_detectors/warnings/VulnerabilityWarning.h"
 #include "RangeAnalysis.h"
 #include <set>
+#include <chrono>
+#include <ctime>
+
+#define DEBUG_TAINT_DUMP_PROGRESS
 
 
 using namespace llvm;
@@ -25,12 +29,10 @@ namespace DRCHECKER {
     public:
         std::vector<Instruction *> *callSites;
         void printContext(llvm::raw_ostream& O) {
-            //O << "\n  Call Context:";
             O << "\"context\":[";
             bool putComma = false;
             //std::string str;
             for(Instruction *currCallSite:*(this->callSites)) {
-                //O << "   ";
                 if(putComma) {
                     O << ",";
                 }
@@ -40,7 +42,6 @@ namespace DRCHECKER {
                 //std::string instrSt = InstructionUtils::escapeJsonString(rso.str());
 
                 O << "{\"instr\":\"";
-                //currCallSite->print(O);
                 //currCallSite->print(O);
                 //DILocation *instrLoc = currCallSite->getDebugLoc().get();
                 DILocation *instrLoc = InstructionUtils::getCorrectInstrLocation(currCallSite);
@@ -521,20 +522,40 @@ namespace DRCHECKER {
 
         //Dump all the taint information to the raw_ostream.
         void dumpTaintInfo(llvm::raw_ostream& O) {
+#ifdef DEBUG_TAINT_DUMP_PROGRESS
+            unsigned long total_ctx = taintInformation.size();
+            unsigned long n_ctx = 0;
+#endif
             for (auto const &it : taintInformation){
+#ifdef DEBUG_TAINT_DUMP_PROGRESS
+                ++n_ctx;
+                dbgs() << "Time for you by GuJingGong: ";
+                printCurTime();
+                dbgs() << n_ctx << "/" << total_ctx << " : ";
+#endif
+                //Does current context have any tainted values?
+                std::map<Value *, std::set<TaintFlag*>*>* vt = it.second;
+                if(!vt || vt->size() <= 0){
+#ifdef DEBUG_TAINT_DUMP_PROGRESS
+                    dbgs() << "0/0\n";
+#endif
+                    continue;
+                }
                 O << "<<<<<===============================================>>>>>\n";
                 //Dump current AnalysisContext.
                 it.first->printContext(O);
                 //Then all the Value-TaintFlag pairs.
-                std::map<Value *, std::set<TaintFlag*>*>* vt = it.second;
                 O << "\n";
-                if (vt == nullptr){
-                    continue;
-                }
+                unsigned long total_entry = vt->size();
+                unsigned long n_entry = 0;
                 for (auto const &jt : *vt){
+#ifdef DEBUG_TAINT_DUMP_PROGRESS
+                    ++n_entry;
+                    dbgs() << n_entry << "/" << total_entry << "..";
+#endif
                     //Dump the "Value" information.
                     O << "------------------Value------------------\n";
-                    jt.first->print(O,true);
+                    jt.first->print(O);
                     O << "\n";
                     //Dump the TaintFlag(s) for current value under current context.
                     std::set<TaintFlag*> *pflags = jt.second;
@@ -543,8 +564,17 @@ namespace DRCHECKER {
                         p->dumpInfo(O);
                     }
                 }
+#ifdef DEBUG_TAINT_DUMP_PROGRESS
+                dbgs() << "\n";
+#endif
             }
             return;
+        }
+
+        void printCurTime() {
+            auto t_now = std::chrono::system_clock::now();
+            std::time_t now_time = std::chrono::system_clock::to_time_t(t_now);
+            dbgs() << std::ctime(&now_time) << "\n";
         }
 
         // Range analysis helpers

@@ -12,10 +12,11 @@ namespace DRCHECKER {
 
 //#define DEBUG_CALL_INSTR
 //#define DEBUG_RET_INSTR
-#define DEBUG_LOAD_INSTR
+//#define DEBUG_LOAD_INSTR
 //#define DEBUG_CAST_INSTR
 //#define DEBUG
 //#define DEBUG_BIN_INSTR
+//#define DEBUG_LOAD_INSTR
 
     std::set<TaintFlag*>* TaintAnalysisVisitor::getTaintInfo(Value *targetVal) {
         return TaintUtils::getTaintInfo(this->currState, this->currFuncCallSites, targetVal);
@@ -327,7 +328,9 @@ namespace DRCHECKER {
         // ignore.
         if(srcTaintInfo != nullptr) {
 
+#ifdef DEBUG_LOAD_INSTR
             dbgs() << "TaintAnalysisVisitor::visitStoreInst: #srcTaintInfo: " << srcTaintInfo->size() << "\n";
+#endif
 
             // create newTaintInfo set.
             std::set<TaintFlag *> *newTaintInfo = new std::set<TaintFlag *>();
