@@ -142,9 +142,21 @@ namespace DRCHECKER {
             //OS << ", Tainted=" << this->isTainted() << "\n";
             OS << " Instruction Trace: [";
             for(std::vector<Instruction *>::iterator SI = this->instructionTrace.begin(); SI != this->instructionTrace.end(); ++SI) {
+                OS << (InstructionUtils::getInstructionName((*SI)));
+                DILocation *instrLoc = InstructionUtils::getCorrectInstrLocation(*SI);
+                OS << " ,lineno: ";
+                if (instrLoc != nullptr) {
+                    OS << instrLoc->getLine() << " ,file: ";
+                    OS << InstructionUtils::escapeJsonString(instrLoc->getFilename());
+                } else {
+                    OS << "-1";
+                }
+                OS << " | ";
+                /*
                 AAMDNodes targetMDNodes;
                 (*SI)->getAAMetadata(targetMDNodes, true);
                 OS << (InstructionUtils::getInstructionName((*SI))) << ": at line " << InstructionUtils::getLineNumber(**SI) << " ,";
+                */
             }
             OS << "]\n";
             //hz: dump tag information if any.
