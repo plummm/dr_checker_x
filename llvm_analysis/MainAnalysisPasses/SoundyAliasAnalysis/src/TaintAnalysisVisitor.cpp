@@ -328,7 +328,7 @@ namespace DRCHECKER {
         // ignore.
         if(srcTaintInfo != nullptr) {
 
-#ifdef DEBUG_LOAD_INSTR
+#ifdef DEBUG_STORE_INSTR
             dbgs() << "TaintAnalysisVisitor::visitStoreInst: #srcTaintInfo: " << srcTaintInfo->size() << "\n";
 #endif
 

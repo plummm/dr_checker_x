@@ -31,6 +31,7 @@
 #include "PointsToUtils.h"
 #include <chrono>
 #include <ctime>
+#include "ModAnalysisVisitor.h"
 
 
 using namespace llvm;
@@ -366,6 +367,12 @@ namespace DRCHECKER {
 
             // next add taint analysis.
             allCallbacks->insert(allCallbacks->end(), currVisCallback);
+
+            //hz: add the 3rd basic analysis: mod analysis to figure out which instructions can modify the global states.
+            currVisCallback = new ModAnalysisVisitor(targetState, toAnalyze, srcCallSites);
+
+            // next add mod analysis.
+            allCallbacks->insert(allCallbacks->end(), currVisCallback);
         }
 
         void getAnalysisUsage(AnalysisUsage &AU) const override {
@@ -578,6 +585,7 @@ namespace DRCHECKER {
                 std::set<PointerPointsTo*> *ps = it.second;
                 for(auto const &p : *ps){
                     p->targetObject->taintAllFieldsWithTag(currFlag);
+                    p->targetObject->is_taint_src = true;
                 }
             }
         }

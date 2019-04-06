@@ -189,7 +189,8 @@ namespace DRCHECKER {
 
         unsigned long id;
 
-
+        //hz: indicate whether this object is a taint source.
+        bool is_taint_src = false;
 
         unsigned long getID() const{
             return this->id;
@@ -209,6 +210,7 @@ namespace DRCHECKER {
             this->is_initialized = srcAliasObject->is_initialized;
             this->initializingInstructions.insert(srcAliasObject->initializingInstructions.begin(),
                                                   srcAliasObject->initializingInstructions.end());
+            //this->is_taint_src = srcAliasObject->is_taint_src;
 
         }
         AliasObject() {
@@ -910,7 +912,6 @@ namespace DRCHECKER {
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
                 dbgs() << "Trying to get taint for field:" << srcfieldId << " for object:" << this << "\n";
 #endif
-                //TODO: debug add this info
                 if(fieldTaint != nullptr) {
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
                     dbgs() << "Adding taint for field:" << srcfieldId << " for object:" << newObj << "\n";
@@ -919,6 +920,7 @@ namespace DRCHECKER {
                         TaintFlag *newTaint = new TaintFlag(existingTaint,targetInstr,targetInstr);
                         newObj->taintAllFieldsWithTag(newTaint);
                     }
+                    newObj->is_taint_src = true;
                 } else {
                     // if all the contents are tainted?
                     if(this->all_contents_tainted) {
@@ -928,6 +930,7 @@ namespace DRCHECKER {
                         assert(this->all_contents_taint_flag != nullptr);
                         TaintFlag *newTaint = new TaintFlag(this->all_contents_taint_flag,targetInstr,targetInstr);
                         newObj->taintAllFieldsWithTag(newTaint);
+                        newObj->is_taint_src = true;
                     }
                 }
 

@@ -23,6 +23,8 @@ namespace DRCHECKER {
     public:
         long fieldId;
         Value *v;
+        //Record all instructions that can possibly modify this taint source.
+        std::vector<Instruction *> mod_insts;
 
         TaintTag(long fieldId, Value *v) {
             this -> fieldId = fieldId;
@@ -32,6 +34,8 @@ namespace DRCHECKER {
         TaintTag(TaintTag *srcTag) {
             this -> fieldId = srcTag -> fieldId;
             this -> v = srcTag -> v;
+            this -> mod_insts.insert(mod_insts.begin(),
+                                     srcTag -> mod_insts.begin(), srcTag -> mod_insts.end());
         }
 
         bool isTagEquals(TaintTag *dstTag) {
@@ -41,8 +45,56 @@ namespace DRCHECKER {
             if (this == dstTag){
                 return true;
             }
+            //No need to compare mod_insts here since it's determined by other two fields.
             return this->fieldId == dstTag->fieldId &&
                    this->v == dstTag->v;
+        }
+
+        void insertModInst(Instruction *inst) {
+            if (!inst){
+                return;
+            }
+            //Detect duplication.
+            for (auto currInst : mod_insts){
+                if (currInst == inst){
+                    return;
+                }
+            }
+            mod_insts.push_back(inst);
+        }
+
+        void dumpInfo(raw_ostream &OS) {
+            OS << "Taint Tag:\n";
+            OS << "Value:\n";
+            if (this->V){
+                this->v->print(OS,true);
+            }
+            OS << "\nfieldId: " << this->fieldId << " \n";
+        }
+
+        void printModInsts(raw_ostream &OS) {
+            OS << "###Mod Instruction List###\n";
+            for (auto currInst : mod_insts) {
+                //Inst, BB, Function, and File
+                currInst->print(OS);
+                OS << " ,BB: ";
+                if (currInst->getParent()) {
+                    OS << currInst->getParent()->getName().str();
+                }
+                OS << " ,FUNC: ";
+                if (currInst->getFunction()) {
+                    OS << currInst->getFunction()->getName().str();
+                }
+                OS << " ,SRC: ";
+                DILocation *instrLoc = InstructionUtils::getCorrectInstrLocation(currInst);
+                if (instrLoc != nullptr) {
+                    OS << InstructionUtils::escapeJsonString(instrLoc->getFilename());
+                    OS << " @ " << instrLoc->getLine();
+                } else {
+                    OS << "-1";
+                }
+                OS << "\n";
+            }
         }
     };
 
@@ -161,10 +213,7 @@ namespace DRCHECKER {
             OS << "]\n";
             //hz: dump tag information if any.
             if (tag) {
-                OS << "Taint Tag:\n";
-                OS << "Value:\n";
-                tag->v->print(OS,true);
-                OS << "\nfieldId: " << tag->fieldId << " \n";
+                tag->dumpInfo(OS);
             }
 
         }

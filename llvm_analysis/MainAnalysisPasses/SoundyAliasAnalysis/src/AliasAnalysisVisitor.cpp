@@ -68,6 +68,7 @@ namespace DRCHECKER {
         if (taint) {
             TaintFlag *currFlag = new TaintFlag(p, true);
             newObj->taintAllFieldsWithTag(currFlag);
+            newObj->is_taint_src = true;
         }
         return newObj;
     }
