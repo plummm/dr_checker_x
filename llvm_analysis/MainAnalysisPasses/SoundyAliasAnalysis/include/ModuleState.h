@@ -526,6 +526,8 @@ namespace DRCHECKER {
             unsigned long total_ctx = taintInformation.size();
             unsigned long n_ctx = 0;
 #endif
+            //hz: the set of the unique taint tags.
+            std::set<TaintTag*> uniqTags;
             for (auto const &it : taintInformation){
 #ifdef DEBUG_TAINT_DUMP_PROGRESS
                 ++n_ctx;
@@ -561,13 +563,23 @@ namespace DRCHECKER {
                     std::set<TaintFlag*> *pflags = jt.second;
                     for (TaintFlag *p : *pflags){
                         O << "------------------Taint------------------\n";
-                        p->dumpInfo(O);
+                        p->dumpInfo(O,&uniqTags);
                     }
                 }
 #ifdef DEBUG_TAINT_DUMP_PROGRESS
                 dbgs() << "\n";
 #endif
             }
+            //print the mod_inst_list of all unique taint tags.
+            O << "++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n";
+            O << "+++++++++++++++++++++++MOD INST LIST++++++++++++++++++++++++++\n\n";
+            for (auto tag : uniqTags){
+                O << "--------------------------TAG--------------------------\n";
+                tag->dumpInfo(O);
+                O << "--------------------------MOD INSTS--------------------------\n";
+                tag->printModInsts(O);
+            }
+            O << "++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n";
             return;
         }
 

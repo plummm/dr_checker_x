@@ -66,7 +66,7 @@ namespace DRCHECKER {
         void dumpInfo(raw_ostream &OS) {
             OS << "Taint Tag:\n";
             OS << "Value:\n";
-            if (this->V){
+            if (this->v){
                 this->v->print(OS,true);
             }
             OS << "\nfieldId: " << this->fieldId << " \n";
@@ -187,7 +187,7 @@ namespace DRCHECKER {
         Value *targetInstr;
         // trace of instructions that resulted in this taint.
         std::vector<Instruction *> instructionTrace;
-        void dumpInfo(raw_ostream &OS) {
+        void dumpInfo(raw_ostream &OS, std::set<TaintTag*> *uniqTags) {
 
             //OS << "Taint Flag for:";
             //this->targetInstr->print(OS);
@@ -213,6 +213,10 @@ namespace DRCHECKER {
             OS << "]\n";
             //hz: dump tag information if any.
             if (tag) {
+                //TODO: is it enough to depend on the pointer value to filter out duplications?
+                if (uniqTags && uniqTags->find(tag) == uniqTags->end()) {
+                    uniqTags->insert(tag);
+                }
                 tag->dumpInfo(OS);
             }
 
