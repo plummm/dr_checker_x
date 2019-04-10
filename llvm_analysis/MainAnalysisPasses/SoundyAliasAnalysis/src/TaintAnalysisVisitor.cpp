@@ -17,6 +17,7 @@ namespace DRCHECKER {
 //#define DEBUG
 //#define DEBUG_BIN_INSTR
 //#define DEBUG_LOAD_INSTR
+#define DEBUG_TMP
 
     std::set<TaintFlag*>* TaintAnalysisVisitor::getTaintInfo(Value *targetVal) {
         return TaintUtils::getTaintInfo(this->currState, this->currFuncCallSites, targetVal);
@@ -317,6 +318,11 @@ namespace DRCHECKER {
     }
 
     void TaintAnalysisVisitor::visitStoreInst(StoreInst &I) {
+#ifdef DEBUG_TMP
+        dbgs() << "TaintAnalysisVisitor::visitStoreInst(): ";
+        I.print(dbgs());
+        dbgs() << "\n";
+#endif
         Value *srcPointer = I.getValueOperand();
         std::set<TaintFlag *> *srcTaintInfo = getTaintInfo(srcPointer);
         if(srcTaintInfo == nullptr) {

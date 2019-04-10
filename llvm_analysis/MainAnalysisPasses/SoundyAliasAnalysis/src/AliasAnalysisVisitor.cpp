@@ -21,6 +21,7 @@ namespace DRCHECKER {
 #define CREATE_DUMMY_OBJ_IF_NULL
 //#define DEBUG_CREATE_DUMMY_OBJ_IF_NULL
 //#define DEBUG_UPDATE_POINTSTO
+#define DEBUG_TMP
 
     //hz: A helper method to create and (taint) a new OutsideObject.
     OutsideObject* AliasAnalysisVisitor::createOutsideObj(Value *p, bool taint) {
@@ -69,6 +70,9 @@ namespace DRCHECKER {
             TaintFlag *currFlag = new TaintFlag(p, true);
             newObj->taintAllFieldsWithTag(currFlag);
             newObj->is_taint_src = true;
+#ifdef DEBUG_CREATE_DUMMY_OBJ_IF_NULL
+            dbgs() << "AliasAnalysisVisitor::createOutsideObj(): set |is_taint_src| for the outside obj.\n";
+#endif
         }
         return newObj;
     }
@@ -1161,6 +1165,11 @@ next:
     }
 
     void AliasAnalysisVisitor::visitStoreInst(StoreInst &I) {
+#ifdef DEBUG_TMP
+        dbgs() << "AliasAnalysisVisitor::visitStoreInst(): ";
+        I.print(dbgs());
+        dbgs() << "\n";
+#endif
         Value *targetPointer = I.getPointerOperand();
         GEPOperator *gep = dyn_cast<GEPOperator>(I.getPointerOperand());
         if(gep && gep->getNumOperands() > 0 && gep->getPointerOperand() && !dyn_cast<GetElementPtrInst>(I.getPointerOperand())) {

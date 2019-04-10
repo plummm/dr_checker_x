@@ -97,6 +97,13 @@ namespace DRCHECKER {
         }
     }
 
+    //hz: add support for switch inst.
+    void GlobalVisitor::visitSwitchInst(SwitchInst &I) {
+        for(VisitorCallback *currCallback:allCallbacks) {
+            currCallback->visitSwitchInst(I);
+        }
+    }
+
     void GlobalVisitor::processCalledFunction(CallInst &I, Function *currFunc) {
         std::string currFuncName = currFunc->getName().str();
 #ifdef DONOT_CARE_COMPLETION
@@ -279,6 +286,9 @@ namespace DRCHECKER {
 #endif
 #ifdef DEBUG_BB_VISIT
         dbgs() << "Starting to analyze BB:" << BB->getName().str() << ":at:"<< BB->getParent()->getName() << "\n";
+        dbgs() << "<<<<\n";
+        BB->print(dbgs());
+        dbgs() << ">>>>\n";
 #endif
         _super->visit(BB->begin(), BB->end());
     }

@@ -108,6 +108,8 @@ namespace DRCHECKER {
         virtual void visitICmpInst(ICmpInst &I);
         virtual void visitBranchInst(BranchInst &I);
 
+        //hz: add support for switch inst.
+        virtual void visitSwitchInst(SwitchInst &I);
 
         void visit(BasicBlock *BB);
 

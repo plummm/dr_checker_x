@@ -921,6 +921,9 @@ namespace DRCHECKER {
                         newObj->taintAllFieldsWithTag(newTaint);
                     }
                     newObj->is_taint_src = true;
+#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS_OUTSIDE
+                    dbgs() << "##Set |is_taint_src| to true.\n";
+#endif
                 } else {
                     // if all the contents are tainted?
                     if(this->all_contents_tainted) {
@@ -931,6 +934,9 @@ namespace DRCHECKER {
                         TaintFlag *newTaint = new TaintFlag(this->all_contents_taint_flag,targetInstr,targetInstr);
                         newObj->taintAllFieldsWithTag(newTaint);
                         newObj->is_taint_src = true;
+#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS_OUTSIDE
+                        dbgs() << "##Set |is_taint_src| to true.\n";
+#endif
                     }
                 }
 

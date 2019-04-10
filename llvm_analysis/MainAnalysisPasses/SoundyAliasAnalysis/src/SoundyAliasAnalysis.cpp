@@ -41,6 +41,7 @@ namespace DRCHECKER {
 //#define DEBUG_SCC_GRAPH
 //#define DEBUG_TRAVERSAL_ORDER
 //#define DEBUG_GLOBAL_VARIABLES
+#define DEBUG_GLOBAL_TAINT
 
 #define NETDEV_IOCTL "NETDEVIOCTL"
 #define READ_HDR "FileRead"
@@ -583,9 +584,38 @@ namespace DRCHECKER {
                 Value *v = it.first;
                 TaintFlag *currFlag = new TaintFlag(v, true);
                 std::set<PointerPointsTo*> *ps = it.second;
+                if (ps->size() <= 0) {
+                    continue;
+                }
+                if (v->getType()){
+                    Type *ty = v->getType();
+                    if (ty->isPointerTy()){
+                        ty = ty->getPointerElementType();
+                    }
+                    //Exclude certain types, e.g. function.
+                    if (ty->isFunctionTy() || ty->isLabelTy() || ty->isMetadataTy()){
+                        continue;
+                    }
+                    //TODO: exclude the const strings.
+                }
+#ifdef DEBUG_GLOBAL_TAINT
+                dbgs() << "addGlobalTaintSource(): Set the glob var as taint source: ";
+                v->print(dbgs());
+                dbgs() << "\n";
+#endif
                 for(auto const &p : *ps){
                     p->targetObject->taintAllFieldsWithTag(currFlag);
                     p->targetObject->is_taint_src = true;
+#ifdef DEBUG_GLOBAL_TAINT
+                    dbgs() << "addGlobalTaintSource(): Set the alias obj as taint source:\n";
+                    dbgs() << "Object Type: ";
+                    p->targetObject->targetType->print(dbgs());
+                    dbgs() << "\n Object Ptr: ";
+                    if (p->targetObject->getObjectPtr()){
+                        p->targetObject->getObjectPtr()->print(dbgs());
+                    }
+                    dbgs() << "\n";
+#endif
                 }
             }
         }

@@ -86,6 +86,11 @@ namespace DRCHECKER {
 
         }
 
+        //hz: support switch inst.
+        virtual void visitSwitchInst(SwitchInst &I) {
+
+        }
+
         /***
          *  Visit the call instruction, this function should setup a new CallBack
          *  which will be used the GlobalVisitor to analyze the corresponding function.
