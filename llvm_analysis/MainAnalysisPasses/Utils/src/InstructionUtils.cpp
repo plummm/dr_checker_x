@@ -186,5 +186,29 @@ namespace DRCHECKER {
         return -1;
     }
 
+    void InstructionUtils::printInst(Instruction *I, raw_ostream &OS) {
+        if (!I){
+            return;
+        }
+        //Inst, BB, Function, and File
+        I->print(OS);
+        OS << " ,BB: ";
+        if (I->getParent()) {
+            OS << I->getParent()->getName().str();
+        }
+        OS << " ,FUNC: ";
+        if (I->getFunction()) {
+            OS << I->getFunction()->getName().str();
+        }
+        OS << " ,SRC: ";
+        DILocation *instrLoc = InstructionUtils::getCorrectInstrLocation(I);
+        if (instrLoc != nullptr) {
+            OS << InstructionUtils::escapeJsonString(instrLoc->getFilename());
+            OS << " @ " << instrLoc->getLine();
+        } else {
+            OS << "N/A";
+        }
+        OS << "\n";
+    }
 
 }

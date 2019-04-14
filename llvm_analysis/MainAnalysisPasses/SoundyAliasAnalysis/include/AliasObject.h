@@ -513,8 +513,9 @@ namespace DRCHECKER {
             }
             if(!this->all_contents_tainted) {
                 this->all_contents_tainted = true;
-                //TODO: Do we need to put a special tag here?
-                this->all_contents_taint_flag = targetTaintFlag;
+                //"0" represents that we are not referring to a certain field.
+                TaintTag *all_taint_tag = new TaintTag(0,v);
+                this->all_contents_taint_flag = new TaintFlag(targetTaintFlag,all_taint_tag);
                 std::set<long> allAvailableFields = getAllAvailableFields();
 
                 // add the taint to all available fields.

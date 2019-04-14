@@ -5,13 +5,13 @@
 
 namespace DRCHECKER {
 
-//#define DEBUG_GET_ELEMENT_PTR
+#define DEBUG_GET_ELEMENT_PTR
 //#define DEBUG_ALLOCA_INSTR
 //#define DEBUG_CAST_INSTR
 //#define DEBUG_BINARY_INSTR
 //#define DEBUG_PHI_INSTR
 //#define DEBUG_LOAD_INSTR
-//#define DEBUG_STORE_INSTR
+#define DEBUG_STORE_INSTR
 //#define DEBUG_CALL_INSTR
 //#define STRICT_CAST
 //#define DEBUG_RET_INSTR
@@ -19,8 +19,8 @@ namespace DRCHECKER {
 //#define MAX_ALIAS_OBJ 50
 //hz: Enable creating new objects on the fly when the pointer points to nothing.
 #define CREATE_DUMMY_OBJ_IF_NULL
-//#define DEBUG_CREATE_DUMMY_OBJ_IF_NULL
-//#define DEBUG_UPDATE_POINTSTO
+#define DEBUG_CREATE_DUMMY_OBJ_IF_NULL
+#define DEBUG_UPDATE_POINTSTO
 #define DEBUG_TMP
 
     //hz: A helper method to create and (taint) a new OutsideObject.
@@ -39,10 +39,16 @@ namespace DRCHECKER {
 #endif
         //First do some sanity checks, we need to make sure that "p" is a structure pointer.
         if (!(p && p->getType()->isPointerTy() && p->getType()->getPointerElementType()->isStructTy())) {
+#ifdef DEBUG_CREATE_DUMMY_OBJ_IF_NULL
+            errs() << "It's not a struct pointer! Cannot create an outside object!\n";
+#endif
             return nullptr;
         }
         //Don't create OutsideObject for null ptr.
-        if (p->getName().str().empty()){
+        if (p->getName().str().empty() && !dyn_cast<Instruction>(p)){
+#ifdef DEBUG_CREATE_DUMMY_OBJ_IF_NULL
+            errs() << "Null value name! Cannot create an outside object!\n";
+#endif
             return nullptr;
         }
 #ifdef DEBUG_CREATE_DUMMY_OBJ_IF_NULL
@@ -127,12 +133,11 @@ namespace DRCHECKER {
             dbgs() << " existingPointsTo: " << existingPointsTo->size() << "\n";
 #endif
             for(PointerPointsTo *currPointsTo: *newPointsToInfo) {
-                if(dbg){
-                    dbgs() << "^^^^^^^^^^^^^^^ currPointsTo: ";
-                    currPointsTo->targetObject->targetType->print(dbgs());
-                    dbgs() << " | " << currPointsTo->dstfieldId << "\n";
-                    dbgs() << "#existingPointsTo: " << existingPointsTo->size() << "\n";
-                }
+#ifdef DEBUG_UPDATE_POINTSTO
+                dbgs() << "^^^^^^^^^^^^^^^ currPointsTo: ";
+                currPointsTo->targetObject->targetType->print(dbgs());
+                dbgs() << " | " << currPointsTo->dstfieldId << " ,is_taint_src: " << currPointsTo->targetObject->is_taint_src << "\n";
+#endif
                 // for each points to, see if we already have that information, if yes, ignore it.
                 if(std::find_if(existingPointsTo->begin(), existingPointsTo->end(), [currPointsTo,dbg](const PointerPointsTo *n) {
                     //hz: a simple hack here to avoid duplicated objects.
@@ -271,7 +276,8 @@ namespace DRCHECKER {
                 //----------ORIGINAL-----------
                 //----------MOD----------
                 long host_dstFieldId = currPointsToObj->dstfieldId;
-                GEPOperator *gep = (propInstruction ? dyn_cast<GEPOperator>(propInstruction) : nullptr);
+                //The arg "srcPointer" actually is not related to arg "srcPointsTo", it's indeed "dstPointer" that we need to copy point-to inf for.
+                GEPOperator *gep = (srcPointer ? dyn_cast<GEPOperator>(srcPointer) : nullptr);
                 //"basePointerType" refers to the type of the pointer operand in the original GEP instruction/opearator, during whose visit we
                 //call this makePointsToCopy().
                 Type *basePointerType = (gep ? gep->getPointerOperand()->getType() : nullptr);
@@ -324,9 +330,39 @@ namespace DRCHECKER {
                             //We have two candidate methods here:
                             //(1) Create a separate TargetObject representing this embedded struct, then make the pointer operand in original GEP point to it.
                             //(2) Directly create an outside object for the resulted pointer of this GEP. (i.e. the parameter "srcPointer")
-                            //TODO: we now use (2) as it seems easier, may try (1) later.
+                            //Method (1):
+                            OutsideObject *newObj = this->createOutsideObj(gep->getPointerOperand(),false);
+                            if(newObj){
+                                newObj->is_taint_src = currPointsToObj->targetObject->is_taint_src;
+                                //This new TargetObject should also be tainted according to the host object taint flags.
+                                std::set<TaintFlag*> *src_taintFlags =  currPointsToObj->targetObject->getFieldTaintInfo(host_dstFieldId);
+                                if(src_taintFlags){
+                                    for(TaintFlag *currTaintFlag:*src_taintFlags){
+                                        newObj->taintAllFieldsWithTag(currTaintFlag);
+                                    }
+                                }
+                                newPointsToObj->targetObject = newObj;
+                                if(fieldId >= 0){
+                                    newPointsToObj->dstfieldId = fieldId;
+                                }else{
+                                    //Is this possible??
+                                    newPointsToObj->dstfieldId = 0;
+                                }
+                            }else{
+                                //We cannot create the new OutsideObject, it's possibly because the target pointer doesn't point to a struct.
+                                //In this case, rather than using the original wrong logic, we'd better make it point to nothing.
+#ifdef DEBUG_GET_ELEMENT_PTR
+                                errs() << "In makePointsToCopy(): cannot create OutsideObject for: ";
+                                gep->getPointerOperand()->print(errs());
+                                errs() << "\n";
+#endif
+                                goto next;
+                            }
+                            /*
+                            //Method (2):
                             OutsideObject *newObj = this->createOutsideObj(srcPointer,false);
                             if(newObj){
+                                newObj->is_taint_src = currPointsToObj->targetObject->is_taint_src;
                                 //This new TargetObject should also be tainted according to the host object taint flags.
                                 std::set<TaintFlag*> *src_taintFlags =  currPointsToObj->targetObject->getFieldTaintInfo(host_dstFieldId);
                                 if(src_taintFlags){
@@ -338,14 +374,6 @@ namespace DRCHECKER {
                                 //Since now the newObj directly represents the final resulted object of this GEP (instead of the embedded struct),
                                 //we will set the dstField to 0.
                                 newPointsToObj->dstfieldId = 0;
-                                /*
-                                if(fieldId >= 0){
-                                    newPointsToObj->dstfieldId = fieldId;
-                                }else{
-                                    //Is this possible??
-                                    newPointsToObj->dstfieldId = 0;
-                                }
-                                */
                             }else{
                                 //We cannot create the new OutsideObject, it's possibly because the target pointer doesn't point to a struct.
                                 //In this case, rather than using the original wrong logic, we'd better make it point to nothing.
@@ -356,6 +384,7 @@ namespace DRCHECKER {
 #endif
                                 goto next;
                             }
+                            */
                         }
                     }
                 }
@@ -544,6 +573,7 @@ next:
                     PointerPointsTo *newPointsToObj = (PointerPointsTo*)currPointsToObj->makeCopy();
                     newPointsToObj->propogatingInstruction = &I;
                     newPointsToObj->targetPointer = &I;
+                    newPointsToObj->targetObject->is_taint_src = currPointsToObj->targetObject->is_taint_src;
                     // If the destination object is void type and
                     // we are trying to cast into non-void type?
                     // change the type of the object.
@@ -554,6 +584,7 @@ next:
                     dbgs() << "\n";
 #endif
                     if(!dstType->isVoidTy()) {
+                        //src type is i8* || i8
                         if((currSrcType->isPointerTy() && currSrcType->getContainedType(0)->isIntegerTy(8)) || currSrcType->isIntegerTy(8)){
                             // No need to make copy
                             if(dstType->isPointerTy()) {
@@ -651,6 +682,7 @@ next:
         unsigned dstElemNum = dstType->getStructNumElements();
         newObj->all_contents_tainted = srcObj->all_contents_tainted;
         newObj->all_contents_taint_flag = srcObj->all_contents_taint_flag;
+        newObj->is_taint_src = srcObj->is_taint_src;
         //Copy field taint from src obj to dst obj, but we shouldn't copy taint for fields that don't exist in dst obj.
         for(auto currFieldTaint:srcObj->taintedFields){
             if (currFieldTaint->fieldId < dstElemNum){
@@ -1165,7 +1197,7 @@ next:
     }
 
     void AliasAnalysisVisitor::visitStoreInst(StoreInst &I) {
-#ifdef DEBUG_TMP
+#ifdef DEBUG_STORE_INSTR
         dbgs() << "AliasAnalysisVisitor::visitStoreInst(): ";
         I.print(dbgs());
         dbgs() << "\n";
@@ -1173,17 +1205,33 @@ next:
         Value *targetPointer = I.getPointerOperand();
         GEPOperator *gep = dyn_cast<GEPOperator>(I.getPointerOperand());
         if(gep && gep->getNumOperands() > 0 && gep->getPointerOperand() && !dyn_cast<GetElementPtrInst>(I.getPointerOperand())) {
+#ifdef DEBUG_STORE_INSTR
+            dbgs() << "There is a GEP operator for targetPointer: ";
+            gep->print(dbgs());
+            dbgs() << "\n";
+#endif
             //targetPointer = gep->getPointerOperand();
             //hz: get field-sensitive point-to information for this GEP operator and record it in the global status.
             targetPointer = visitGetElementPtrOperator(&I,gep);
         } else {
             if(!hasPointsToObjects(targetPointer)) {
                 targetPointer = targetPointer->stripPointerCasts();
+#ifdef DEBUG_STORE_INSTR
+                dbgs() << "No point-to info for targetPointer, try to strip the pointer casts -0.\n";
+                dbgs() << "After strip, the targetPointer is: ";
+                targetPointer->print(dbgs());
+                dbgs() << "\n";
+#endif
             }
         }
         Value *targetValue = I.getValueOperand();
         gep = dyn_cast<GEPOperator>(targetValue);
         if(gep && gep->getNumOperands() > 0 && gep->getPointerOperand() && !dyn_cast<GetElementPtrInst>(targetValue)) {
+#ifdef DEBUG_STORE_INSTR
+            dbgs() << "There is a GEP operator for targetValue: ";
+            gep->print(dbgs());
+            dbgs() << "\n";
+#endif
             //targetValue = gep->getPointerOperand();
             //hz: get field-sensitive point-to information for this GEP operator and record it in the global status.
             targetValue = visitGetElementPtrOperator(&I,gep);
@@ -1192,12 +1240,26 @@ next:
         // handle pointer casts
         if(!hasPointsToObjects(targetValue)) {
             targetValue = targetValue->stripPointerCasts();
+#ifdef DEBUG_STORE_INSTR
+            dbgs() << "No point-to info for targetValue, try to strip the pointer casts -0.\n";
+            dbgs() << "After strip, the targetValue is: ";
+            targetValue->print(dbgs());
+            dbgs() << "\n";
+#endif
         }
 #ifdef CREATE_DUMMY_OBJ_IF_NULL
         //hz: try to create dummy objects if there is no point-to information about the pointer variable,
         //since it can be an outside global variable. (e.g. platform_device).
         if(!hasPointsToObjects(targetValue)) {
+#ifdef DEBUG_STORE_INSTR
+            dbgs() << "Still no point-to for targetValue, try to create an outside object for: ";
+            targetValue_pre_strip->print(dbgs());
+            dbgs() << "\n";
+#endif
             if(this->createOutsideObj(targetValue_pre_strip,true)){
+#ifdef DEBUG_STORE_INSTR
+                dbgs() << "Created successfully.\n";
+#endif
                 targetValue = targetValue_pre_strip;
             }
         }

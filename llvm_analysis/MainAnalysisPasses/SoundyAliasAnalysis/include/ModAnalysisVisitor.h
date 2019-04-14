@@ -13,7 +13,7 @@ using namespace llvm;
 
 namespace DRCHECKER {
 
-    #define DEBUG_MOD_INSTR_VISIT
+    //#define DEBUG_MOD_INSTR_VISIT
 
     /***
      * The main class that implements the modification analysis for global states.

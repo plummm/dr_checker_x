@@ -23,19 +23,36 @@ namespace DRCHECKER {
     public:
         long fieldId;
         Value *v;
-        //Record all instructions that can possibly modify this taint source.
-        std::vector<Instruction *> mod_insts;
+        Type *type;
+        //Record all instructions (w/ its call context) that can possibly modify this taint source.
+        std::map< Instruction *, std::vector<std::vector<Instruction*>*> > mod_insts;
 
         TaintTag(long fieldId, Value *v) {
             this -> fieldId = fieldId;
             this -> v = v;
+            this -> type = this->getTy();
         }
 
         TaintTag(TaintTag *srcTag) {
             this -> fieldId = srcTag -> fieldId;
             this -> v = srcTag -> v;
-            this -> mod_insts.insert(mod_insts.begin(),
-                                     srcTag -> mod_insts.begin(), srcTag -> mod_insts.end());
+            this -> type = srcTag -> type;
+            //This is content copy.
+            this -> mod_insts = srcTag -> mod_insts;
+        }
+
+        Type *getTy() {
+            if (!this->v){
+                return nullptr;
+            }
+            Type *ty = this->v->getType();
+            if (ty->isPointerTy()){
+                ty = ty->getPointerElementType();
+            }
+            if (ty->isStructTy() && this->fieldId < ty->getStructNumElements() && this->fieldId >= 0){
+                return ty->getStructElementType(this->fieldId);
+            }
+            return ty;
         }
 
         bool isTagEquals(TaintTag *dstTag) {
@@ -50,17 +67,32 @@ namespace DRCHECKER {
                    this->v == dstTag->v;
         }
 
-        void insertModInst(Instruction *inst) {
+        void insertModInst(Instruction *inst, std::vector<Instruction *> *call_ctx) {
             if (!inst){
                 return;
             }
-            //Detect duplication.
-            for (auto currInst : mod_insts){
-                if (currInst == inst){
-                    return;
+            std::vector<std::vector<Instruction*>*> *ctx_list;
+            if (this->mod_insts.find(inst) == this->mod_insts.end()){
+                //No records of this store inst yet.
+                ctx_list = new std::vector<std::vector<Instruction*>*>();
+                this->mod_insts[inst] = *ctx_list;
+            }
+            //Detect duplicated call contexts.
+            if (call_ctx){
+                ctx_list = &(this->mod_insts[inst]);
+                if(std::find_if(ctx_list->begin(), ctx_list->end(), [call_ctx](const std::vector<Instruction*> *ctx) {
+                    if (ctx->size() != call_ctx->size()){
+                        return false;
+                    }
+                    return (*ctx) == (*call_ctx);
+                }) == ctx_list->end()) {
+                    //Unique context, insert.
+                    //Make a copy of the passed call context vector since it may be changed.
+                    std::vector<Instruction*> *new_ctx = new std::vector<Instruction*>();
+                    new_ctx->insert(new_ctx->end(),call_ctx->begin(),call_ctx->end());
+                    ctx_list->push_back(new_ctx);
                 }
             }
-            mod_insts.push_back(inst);
         }
 
         void dumpInfo(raw_ostream &OS) {
@@ -70,30 +102,27 @@ namespace DRCHECKER {
                 this->v->print(OS,true);
             }
             OS << "\nfieldId: " << this->fieldId << " \n";
+            OS << "Type: ";
+            if (this->type){
+                this->type->print(OS);
+            }
+            OS << "\n";
         }
 
         void printModInsts(raw_ostream &OS) {
             OS << "###Mod Instruction List###\n";
-            for (auto currInst : mod_insts) {
-                //Inst, BB, Function, and File
-                currInst->print(OS);
-                OS << " ,BB: ";
-                if (currInst->getParent()) {
-                    OS << currInst->getParent()->getName().str();
+            for (auto e : mod_insts) {
+                //Print the mod inst itself.
+                OS << "------------INST------------\n";
+                InstructionUtils::printInst(e.first, OS);
+                //Print the context if any.
+                for (auto ctx : e.second) {
+                    OS << "------------CTX------------\n";
+                    //"ctx" is of type "std::vector<Instruction*>*".
+                    for (auto ctx_inst : *ctx) {
+                        InstructionUtils::printInst(ctx_inst, OS);
+                    }
                 }
-                OS << " ,FUNC: ";
-                if (currInst->getFunction()) {
-                    OS << currInst->getFunction()->getName().str();
-                }
-                OS << " ,SRC: ";
-                DILocation *instrLoc = InstructionUtils::getCorrectInstrLocation(currInst);
-                if (instrLoc != nullptr) {
-                    OS << InstructionUtils::escapeJsonString(instrLoc->getFilename());
-                    OS << " @ " << instrLoc->getLine();
-                } else {
-                    OS << "-1";
-                }
-                OS << "\n";
             }
         }
     };
@@ -192,7 +221,7 @@ namespace DRCHECKER {
             //OS << "Taint Flag for:";
             //this->targetInstr->print(OS);
             //OS << ", Tainted=" << this->isTainted() << "\n";
-            OS << " Instruction Trace: [";
+            OS << " Instruction Trace: [\n";
             for(std::vector<Instruction *>::iterator SI = this->instructionTrace.begin(); SI != this->instructionTrace.end(); ++SI) {
                 OS << (InstructionUtils::getInstructionName((*SI)));
                 DILocation *instrLoc = InstructionUtils::getCorrectInstrLocation(*SI);
@@ -203,7 +232,7 @@ namespace DRCHECKER {
                 } else {
                     OS << "-1";
                 }
-                OS << " | ";
+                OS << "\n";
                 /*
                 AAMDNodes targetMDNodes;
                 (*SI)->getAAMetadata(targetMDNodes, true);

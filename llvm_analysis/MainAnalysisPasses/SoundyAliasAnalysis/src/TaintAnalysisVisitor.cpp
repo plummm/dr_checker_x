@@ -318,7 +318,7 @@ namespace DRCHECKER {
     }
 
     void TaintAnalysisVisitor::visitStoreInst(StoreInst &I) {
-#ifdef DEBUG_TMP
+#ifdef DEBUG_STORE_INSTR
         dbgs() << "TaintAnalysisVisitor::visitStoreInst(): ";
         I.print(dbgs());
         dbgs() << "\n";

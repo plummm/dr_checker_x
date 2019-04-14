@@ -65,7 +65,7 @@ namespace DRCHECKER {
                         I.print(dbgs());
                         dbgs() << "\n";
 #endif
-                        existingTaint->tag->insertModInst(&I);
+                        existingTaint->tag->insertModInst(&I,this->currFuncCallSites);
                     }
                 }
             } else {
@@ -90,7 +90,7 @@ namespace DRCHECKER {
                     I.print(dbgs());
                     dbgs() << "\n";
 #endif
-                    dstObj->all_contents_taint_flag->tag->insertModInst(&I);
+                    dstObj->all_contents_taint_flag->tag->insertModInst(&I,this->currFuncCallSites);
                 }
             }
         }
