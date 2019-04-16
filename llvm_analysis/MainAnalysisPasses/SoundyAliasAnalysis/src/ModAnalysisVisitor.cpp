@@ -59,13 +59,18 @@ namespace DRCHECKER {
             if(fieldTaint != nullptr) {
                 for(auto existingTaint:*fieldTaint) {
                     if (existingTaint && existingTaint->tag){
+                        TaintTag *tag = existingTaint->tag;
+                        //We should only record the mod inst to the original taint tag of the taint src object. 
+                        if (tag->v != dstObj->getValue() || tag->fieldId != target_field) {
+                            continue;
+                        }
                         //Record current instruction in the tag mod inst list.
 #ifdef DEBUG_STORE_INST
                         dbgs() << "Add to mod_inst_list (fieldTaint): ";
                         I.print(dbgs());
                         dbgs() << "\n";
 #endif
-                        existingTaint->tag->insertModInst(&I,this->currFuncCallSites);
+                        tag->insertModInst(&I,this->currFuncCallSites);
                     }
                 }
             } else {
