@@ -69,6 +69,7 @@ namespace DRCHECKER {
                         dbgs() << "Add to mod_inst_list (fieldTaint): ";
                         I.print(dbgs());
                         dbgs() << "\n";
+                        tag->dumpInfo(dbgs());
 #endif
                         tag->insertModInst(&I,this->currFuncCallSites);
                     }

@@ -18,6 +18,8 @@
 using namespace llvm;
 namespace DRCHECKER {
 
+#define DEBUG_INSERT_MOD_INST
+
     //hz: Class that intends to identify a unique taint source.
     class TaintTag {
     public:
@@ -69,6 +71,9 @@ namespace DRCHECKER {
 
         void insertModInst(Instruction *inst, std::vector<Instruction *> *call_ctx) {
             if (!inst){
+#ifdef DEBUG_INSERT_MOD_INST
+                dbgs() << "insertModInst: null inst\n";
+#endif
                 return;
             }
             std::vector<std::vector<Instruction*>*> *ctx_list;
@@ -76,6 +81,9 @@ namespace DRCHECKER {
                 //No records of this store inst yet.
                 ctx_list = new std::vector<std::vector<Instruction*>*>();
                 this->mod_insts[inst] = *ctx_list;
+#ifdef DEBUG_INSERT_MOD_INST
+                dbgs() << "insertModInst: inst inserted!\n";
+#endif
             }
             //Detect duplicated call contexts.
             if (call_ctx){
@@ -91,12 +99,16 @@ namespace DRCHECKER {
                     std::vector<Instruction*> *new_ctx = new std::vector<Instruction*>();
                     new_ctx->insert(new_ctx->end(),call_ctx->begin(),call_ctx->end());
                     ctx_list->push_back(new_ctx);
+#ifdef DEBUG_INSERT_MOD_INST
+                    dbgs() << "insertModInst: ctx inserted!\n";
+#endif
                 }
             }
         }
 
         void dumpInfo(raw_ostream &OS) {
             OS << "Taint Tag:\n";
+            OS << "ID: " << static_cast<const void *>(this) << "\n";
             OS << "Value:\n";
             if (this->v){
                 this->v->print(OS,true);
@@ -111,7 +123,7 @@ namespace DRCHECKER {
 
         void printModInsts(raw_ostream &OS) {
             OS << "###Mod Instruction List###\n";
-            for (auto e : mod_insts) {
+            for (auto e : this->mod_insts) {
                 //Print the mod inst itself.
                 OS << "------------INST------------\n";
                 InstructionUtils::printInst(e.first, OS);
@@ -233,20 +245,15 @@ namespace DRCHECKER {
                     OS << "-1";
                 }
                 OS << "\n";
-                /*
-                AAMDNodes targetMDNodes;
-                (*SI)->getAAMetadata(targetMDNodes, true);
-                OS << (InstructionUtils::getInstructionName((*SI))) << ": at line " << InstructionUtils::getLineNumber(**SI) << " ,";
-                */
             }
             OS << "]\n";
             //hz: dump tag information if any.
-            if (tag) {
+            if (this->tag) {
                 //TODO: is it enough to depend on the pointer value to filter out duplications?
-                if (uniqTags && uniqTags->find(tag) == uniqTags->end()) {
-                    uniqTags->insert(tag);
+                if (uniqTags && uniqTags->find(this->tag) == uniqTags->end()) {
+                    uniqTags->insert(this->tag);
                 }
-                tag->dumpInfo(OS);
+                this->tag->dumpInfo(OS);
             }
 
         }
