@@ -5,7 +5,7 @@
 
 namespace DRCHECKER {
 
-//#define DEBUG_GET_ELEMENT_PTR
+#define DEBUG_GET_ELEMENT_PTR
 //#define DEBUG_ALLOCA_INSTR
 //#define DEBUG_CAST_INSTR
 //#define DEBUG_BINARY_INSTR
@@ -252,11 +252,12 @@ namespace DRCHECKER {
         // to avoid added duplicate pointsto objects
         std::set<AliasObject*> visitedObjects;
 #ifdef DEBUG_GET_ELEMENT_PTR
-        dbgs() << "AliasAnalysisVisitor::makePointsToCopy, elements in *srcPointsTo: " << srcPointsTo->size() << " \n";
+        dbgs() << "AliasAnalysisVisitor::makePointsToCopy(): elements in *srcPointsTo: " << srcPointsTo->size() << " \n";
 #endif
         for(PointerPointsTo *currPointsToObj:*srcPointsTo) {
+            AliasObject *hostObj = currPointsToObj->targetObject;
             // if the target object is not visited, then add into points to info.
-            if(visitedObjects.find(currPointsToObj->targetObject) == visitedObjects.end()) {
+            if(visitedObjects.find(hostObj) == visitedObjects.end()) {
                 PointerPointsTo *newPointsToObj = new PointerPointsTo();
                 newPointsToObj->propogatingInstruction = propInstruction;
                 //hz: 'dstField' is a complex issue, we first apply original logic to set the default "dstfieldId", then
@@ -271,7 +272,7 @@ namespace DRCHECKER {
                     newPointsToObj->dstfieldId = currPointsToObj->dstfieldId;
                 }
                 newPointsToObj->fieldId = 0;
-                newPointsToObj->targetObject = currPointsToObj->targetObject;
+                newPointsToObj->targetObject = hostObj;
                 newPointsToObj->targetPointer = srcPointer;
                 //----------ORIGINAL-----------
                 //----------MOD----------
@@ -283,15 +284,15 @@ namespace DRCHECKER {
                 Type *basePointerType = (gep ? gep->getPointerOperand()->getType() : nullptr);
                 Type *basePointToType = (basePointerType ? basePointerType->getPointerElementType() : nullptr);
 #ifdef DEBUG_GET_ELEMENT_PTR
-                dbgs() << "AliasAnalysisVisitor::makePointsToCopy, basePointerType: ";
+                dbgs() << "AliasAnalysisVisitor::makePointsToCopy(): basePointerType: ";
                 if(basePointerType){
                     basePointerType->print(dbgs());
                 }
                 dbgs() << "\n";
 #endif
                 //hz: the following several "if" try to decide whether we will actually index into an embedded struct in the host struct.
-                if(currPointsToObj->targetObject && basePointToType && basePointToType->isStructTy()){
-                    Type *host_type = currPointsToObj->targetObject->targetType;
+                if(hostObj && basePointToType && basePointToType->isStructTy()){
+                    Type *host_type = hostObj->targetType;
                     if(host_type->isPointerTy()){
                         host_type = host_type->getPointerElementType();
                     }
@@ -325,22 +326,43 @@ namespace DRCHECKER {
                         if( (src_fieldTy && src_fieldTy == basePointToType) || 
                             (src_fieldTy_arrElem && src_fieldTy_arrElem == basePointToType)
                           ){
+#ifdef DEBUG_GET_ELEMENT_PTR
+                            dbgs() << "AliasAnalysisVisitor::makePointsToCopy(): index into an embedded struct in the host object!\n";
+#endif
                             //Ok, the src points to a struct embedded in the host object, we cannot just use
                             //the arg "fieldId" as "dstfieldId" of the host object because it's an offset into the embedded struct.
                             //We have two candidate methods here:
                             //(1) Create a separate TargetObject representing this embedded struct, then make the pointer operand in original GEP point to it.
                             //(2) Directly create an outside object for the resulted pointer of this GEP. (i.e. the parameter "srcPointer")
                             //Method (1):
-                            OutsideObject *newObj = this->createOutsideObj(gep->getPointerOperand(),false);
-                            if(newObj){
-                                newObj->is_taint_src = currPointsToObj->targetObject->is_taint_src;
-                                //This new TargetObject should also be tainted according to the host object taint flags.
-                                std::set<TaintFlag*> *src_taintFlags =  currPointsToObj->targetObject->getFieldTaintInfo(host_dstFieldId);
-                                if(src_taintFlags){
-                                    for(TaintFlag *currTaintFlag:*src_taintFlags){
-                                        newObj->taintAllFieldsWithTag(currTaintFlag);
+                            AliasObject *newObj = nullptr;
+                            if (hostObj->embObjs.find(host_dstFieldId) != hostObj->embObjs.end()){
+#ifdef DEBUG_GET_ELEMENT_PTR
+                                dbgs() << "AliasAnalysisVisitor::makePointsToCopy(): find the previosuly created embed object!\n";
+#endif
+                                //We have created that embedded object previously.
+                                newObj = hostObj->embObjs[host_dstFieldId];
+                            }else{
+#ifdef DEBUG_GET_ELEMENT_PTR
+                                dbgs() << "AliasAnalysisVisitor::makePointsToCopy(): try to create a new embed object!\n";
+#endif
+                                //Need to create a new AliasObject for the embedded struct.
+                                newObj = this->createOutsideObj(gep->getPointerOperand(),false);
+                                //Properly taint it.
+                                if(newObj){
+                                    newObj->is_taint_src = hostObj->is_taint_src;
+                                    //This new TargetObject should also be tainted according to the host object taint flags.
+                                    std::set<TaintFlag*> *src_taintFlags = hostObj->getFieldTaintInfo(host_dstFieldId);
+                                    if(src_taintFlags){
+                                        for(TaintFlag *currTaintFlag:*src_taintFlags){
+                                            newObj->taintAllFieldsWithTag(currTaintFlag);
+                                        }
                                     }
+                                    //Record it in the "embObjs".
+                                    hostObj->embObjs[host_dstFieldId] = newObj;
                                 }
+                            }
+                            if(newObj){
                                 newPointsToObj->targetObject = newObj;
                                 if(fieldId >= 0){
                                     newPointsToObj->dstfieldId = fieldId;
@@ -352,39 +374,39 @@ namespace DRCHECKER {
                                 //We cannot create the new OutsideObject, it's possibly because the target pointer doesn't point to a struct.
                                 //In this case, rather than using the original wrong logic, we'd better make it point to nothing.
 #ifdef DEBUG_GET_ELEMENT_PTR
-                                errs() << "In makePointsToCopy(): cannot create OutsideObject for: ";
+                                errs() << "In makePointsToCopy(): cannot get or create embedded object for: ";
                                 gep->getPointerOperand()->print(errs());
                                 errs() << "\n";
 #endif
                                 goto next;
                             }
-                            /*
-                            //Method (2):
-                            OutsideObject *newObj = this->createOutsideObj(srcPointer,false);
-                            if(newObj){
-                                newObj->is_taint_src = currPointsToObj->targetObject->is_taint_src;
-                                //This new TargetObject should also be tainted according to the host object taint flags.
-                                std::set<TaintFlag*> *src_taintFlags =  currPointsToObj->targetObject->getFieldTaintInfo(host_dstFieldId);
-                                if(src_taintFlags){
-                                    for(TaintFlag *currTaintFlag:*src_taintFlags){
-                                        newObj->taintAllFieldsWithTag(currTaintFlag);
+                                /*
+                                //Method (2):
+                                OutsideObject *newObj = this->createOutsideObj(srcPointer,false);
+                                if(newObj){
+                                    newObj->is_taint_src = hostObj-->is_taint_src;
+                                    //This new TargetObject should also be tainted according to the host object taint flags.
+                                    std::set<TaintFlag*> *src_taintFlags =  hostObj->getFieldTaintInfo(host_dstFieldId);
+                                    if(src_taintFlags){
+                                        for(TaintFlag *currTaintFlag:*src_taintFlags){
+                                            newObj->taintAllFieldsWithTag(currTaintFlag);
+                                        }
                                     }
-                                }
-                                newPointsToObj->targetObject = newObj;
-                                //Since now the newObj directly represents the final resulted object of this GEP (instead of the embedded struct),
-                                //we will set the dstField to 0.
-                                newPointsToObj->dstfieldId = 0;
-                            }else{
-                                //We cannot create the new OutsideObject, it's possibly because the target pointer doesn't point to a struct.
-                                //In this case, rather than using the original wrong logic, we'd better make it point to nothing.
+                                    newPointsToObj->targetObject = newObj;
+                                    //Since now the newObj directly represents the final resulted object of this GEP (instead of the embedded struct),
+                                    //we will set the dstField to 0.
+                                    newPointsToObj->dstfieldId = 0;
+                                }else{
+                                    //We cannot create the new OutsideObject, it's possibly because the target pointer doesn't point to a struct.
+                                    //In this case, rather than using the original wrong logic, we'd better make it point to nothing.
 #ifdef DEBUG_GET_ELEMENT_PTR
-                                errs() << "In makePointsToCopy(): cannot create OutsideObject for: ";
-                                srcPointer->print(errs());
-                                errs() << "\n";
+                                    errs() << "In makePointsToCopy(): cannot create OutsideObject for: ";
+                                    srcPointer->print(errs());
+                                    errs() << "\n";
 #endif
-                                goto next;
-                            }
-                            */
+                                    goto next;
+                                }
+                                */
                         }
                     }
                 }
@@ -401,7 +423,7 @@ namespace DRCHECKER {
 #endif
                 newPointsToInfo->insert(newPointsToInfo->begin(), newPointsToObj);
 next:
-                visitedObjects.insert(visitedObjects.begin(), currPointsToObj->targetObject);
+                visitedObjects.insert(visitedObjects.begin(), hostObj);
             }
         }
 #ifdef DEBUG_GET_ELEMENT_PTR

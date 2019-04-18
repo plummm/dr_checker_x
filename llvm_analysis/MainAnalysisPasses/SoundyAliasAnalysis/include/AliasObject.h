@@ -23,6 +23,7 @@ using namespace llvm;
 //hz: some debug output options.
 #define DEBUG_OUTSIDE_OBJ_CREATION
 #define DEBUG_FETCH_POINTS_TO_OBJECTS_OUTSIDE
+#define ENABLE_SUB_OBJ_CACHE
 
 namespace DRCHECKER {
 //#define DEBUG_FUNCTION_ARG_OBJ_CREATION
@@ -192,6 +193,9 @@ namespace DRCHECKER {
         //hz: indicate whether this object is a taint source.
         bool is_taint_src = false;
 
+        //hz: This maps the field to the corresponding object (embedded) if the field is an embedded struct in the host object.
+        std::map<long,AliasObject*> embObjs;
+
         unsigned long getID() const{
             return this->id;
         }
@@ -211,6 +215,7 @@ namespace DRCHECKER {
             this->initializingInstructions.insert(srcAliasObject->initializingInstructions.begin(),
                                                   srcAliasObject->initializingInstructions.end());
             //this->is_taint_src = srcAliasObject->is_taint_src;
+            this->embObjs = srcAliasObject->embObjs;
 
         }
         AliasObject() {
@@ -851,19 +856,6 @@ namespace DRCHECKER {
              */
             bool hasObjects = false;
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-            dbgs() << "In AliasObject fetch pointsTo object\n";
-#endif
-            for(ObjectPointsTo *obj:pointsTo) {
-                if(obj->fieldId == srcfieldId) {
-                    auto p = std::make_pair(obj->dstfieldId, obj->targetObject);
-                    if(std::find(dstObjects.begin(), dstObjects.end(), p) == dstObjects.end()) {
-                        dstObjects.insert(dstObjects.end(), p);
-                        hasObjects = true;
-                    }
-                }
-            }
-            assert(this->targetType);
-#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS_OUTSIDE
             dbgs() << "\n*********fetchPointsToObjects(Outside Object)**********\n Current Inst: ";
             if (targetInstr){
                 targetInstr->print(dbgs());
@@ -883,6 +875,25 @@ namespace DRCHECKER {
             dbgs() << "\n Target Field: " << srcfieldId;
             dbgs() << "\n*******************\n";
 #endif
+            for(ObjectPointsTo *obj:pointsTo) {
+                if(obj->fieldId == srcfieldId) {
+                    auto p = std::make_pair(obj->dstfieldId, obj->targetObject);
+                    if(std::find(dstObjects.begin(), dstObjects.end(), p) == dstObjects.end()) {
+#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
+                        dbgs() << "Found an obj in |pointsTo| records.\n"
+                        obj->getValue()->print(dbgs());
+                        dbgs() << " | " << obj->dstfieldId << " | is_taint_src:" << obj->targetObject->is_taint_src << "\n";
+#endif
+                        dstObjects.insert(dstObjects.end(), p);
+                        hasObjects = true;
+                    }
+                }
+            }
+            if(hasObjects) {
+                return;
+            }
+            //Below we try to create a dummy object.
+            assert(this->targetType);
             assert(this->targetType->isStructTy());
             //NOTE: "pointsTo" should only store point-to information for the pointer fields.
             //So if "hasObjects" is false, we need to first ensure that the field is a pointer before creating new objects.
@@ -892,7 +903,7 @@ namespace DRCHECKER {
                 return;
             }
             // if there are no objects that this pointer field points to, generate a dummy object.
-            if(!hasObjects && (create_arg_obj || this->isFunctionArg() || this->isOutsideObject())) {
+            if(create_arg_obj || this->isFunctionArg() || this->isOutsideObject()) {
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
                 dbgs() << "Creating a new dynamic AliasObject at:";
                 targetInstr->print(dbgs());
