@@ -8,6 +8,7 @@
 #include "AliasObject.h"
 #include "ModuleState.h"
 #include "CFGUtils.h"
+#include "InstructionUtils.h"
 #include "VisitorCallback.h"
 #include <FunctionChecker.h>
 #include <llvm/IR/Operator.h>

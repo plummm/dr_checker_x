@@ -114,7 +114,8 @@ namespace DRCHECKER {
             return;
         }
 #ifdef DEBUG_UPDATE_POINTSTO
-        bool dbg = (newPointsToInfo->size() > 2);
+        //bool dbg = (newPointsToInfo->size() > 2);
+        bool dbg = false;
 #else
         bool dbg = false;
 #endif
@@ -133,11 +134,6 @@ namespace DRCHECKER {
             dbgs() << " existingPointsTo: " << existingPointsTo->size() << "\n";
 #endif
             for(PointerPointsTo *currPointsTo: *newPointsToInfo) {
-#ifdef DEBUG_UPDATE_POINTSTO
-                dbgs() << "^^^^^^^^^^^^^^^ currPointsTo: ";
-                currPointsTo->targetObject->targetType->print(dbgs());
-                dbgs() << " | " << currPointsTo->dstfieldId << " ,is_taint_src: " << currPointsTo->targetObject->is_taint_src << "\n";
-#endif
                 // for each points to, see if we already have that information, if yes, ignore it.
                 if(std::find_if(existingPointsTo->begin(), existingPointsTo->end(), [currPointsTo,dbg](const PointerPointsTo *n) {
                     //hz: a simple hack here to avoid duplicated objects.
@@ -202,6 +198,21 @@ namespace DRCHECKER {
                     if(dbg){
                         dbgs() << "############# Inserted!!!\n";
                     }
+#ifdef DEBUG_UPDATE_POINTSTO
+                    dbgs() << "Insert point-to: ";
+                    currPointsTo->targetObject->targetType->print(dbgs());
+                    dbgs() << " | " << currPointsTo->dstfieldId << " ,is_taint_src: " << currPointsTo->targetObject->is_taint_src << "\n";
+                    Value *tv = currPointsTo->targetObject->getValue();
+                    if (tv){
+                        dbgs() << "Inst/Val: ";
+                        if (dyn_cast<Instruction>(tv)){
+                            InstructionUtils::printInst(dyn_cast<Instruction>(tv),dbgs());
+                        }else{
+                            tv->print(dbgs());
+                            dbgs() << "\n";
+                        }
+                    }
+#endif
                     existingPointsTo->insert(existingPointsTo->end(), currPointsTo);
                 } else {
                     //delete the points to object, as we already have a similar pointsTo object.
