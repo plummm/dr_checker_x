@@ -120,7 +120,7 @@ namespace DRCHECKER {
 
         }
 
-        void visit(BasicBlock *BB) {
+        virtual void visit(BasicBlock *BB) {
 
         }
 

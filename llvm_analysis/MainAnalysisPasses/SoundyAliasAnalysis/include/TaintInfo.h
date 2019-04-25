@@ -18,7 +18,7 @@
 using namespace llvm;
 namespace DRCHECKER {
 
-#define DEBUG_INSERT_MOD_INST
+//#define DEBUG_INSERT_MOD_INST
 
     //hz: Class that intends to identify a unique taint source.
     class TaintTag {

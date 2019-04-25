@@ -290,6 +290,9 @@ namespace DRCHECKER {
         BB->print(dbgs());
         dbgs() << ">>>>\n";
 #endif
+        for(VisitorCallback *currCallback:allCallbacks) {
+            currCallback->visit(BB);
+        }
         _super->visit(BB->begin(), BB->end());
     }
 

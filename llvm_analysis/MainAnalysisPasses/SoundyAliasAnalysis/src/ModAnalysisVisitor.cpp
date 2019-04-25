@@ -10,9 +10,9 @@
 using namespace llvm;
 namespace DRCHECKER {
 
-    #define DEBUG_STORE_INST
+    //#define DEBUG_STORE_INST
     //#define DEBUG_CALL_INST
-    #define DEBUG_TMP
+    //#define DEBUG_TMP
 
     void ModAnalysisVisitor::visitStoreInst(StoreInst &I) {
 #ifdef DEBUG_TMP

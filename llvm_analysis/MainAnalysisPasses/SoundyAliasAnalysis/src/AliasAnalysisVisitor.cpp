@@ -5,7 +5,7 @@
 
 namespace DRCHECKER {
 
-#define DEBUG_GET_ELEMENT_PTR
+//#define DEBUG_GET_ELEMENT_PTR
 //#define DEBUG_ALLOCA_INSTR
 //#define DEBUG_CAST_INSTR
 //#define DEBUG_BINARY_INSTR
@@ -20,7 +20,7 @@ namespace DRCHECKER {
 //hz: Enable creating new objects on the fly when the pointer points to nothing.
 #define CREATE_DUMMY_OBJ_IF_NULL
 #define DEBUG_CREATE_DUMMY_OBJ_IF_NULL
-#define DEBUG_UPDATE_POINTSTO
+//#define DEBUG_UPDATE_POINTSTO
 #define DEBUG_TMP
 
     //hz: A helper method to create and (taint) a new OutsideObject.

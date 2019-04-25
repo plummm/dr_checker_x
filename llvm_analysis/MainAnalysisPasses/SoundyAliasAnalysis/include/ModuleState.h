@@ -99,6 +99,9 @@ namespace DRCHECKER {
         // Information needed for TaintAnalysis
         std::map<AnalysisContext*, std::map<Value *, std::set<TaintFlag*>*>*> taintInformation;
 
+        //hz: the mapping between BBs in a switch-case structure to the leading switch variable values. 
+        std::map<BasicBlock*,std::set<uint64_t>> switchMap;
+
         GlobalState(RangeAnalysis::RangeAnalysis *ra, DataLayout *currDataLayout) {
             this->range_analysis = ra;
             this->targetDataLayout = currDataLayout;

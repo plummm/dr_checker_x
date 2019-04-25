@@ -32,6 +32,7 @@
 #include <chrono>
 #include <ctime>
 #include "ModAnalysisVisitor.h"
+#include "SwitchAnalysisVisitor.h"
 
 
 using namespace llvm;
@@ -371,6 +372,12 @@ namespace DRCHECKER {
 
             //hz: add the 3rd basic analysis: mod analysis to figure out which instructions can modify the global states.
             currVisCallback = new ModAnalysisVisitor(targetState, toAnalyze, srcCallSites);
+
+            // next add mod analysis.
+            allCallbacks->insert(allCallbacks->end(), currVisCallback);
+
+            //hz: add the 4th basic analysis: switch analysis to figure out the mapping between "cmd" value and BBs in the ioctl().
+            currVisCallback = new SwitchAnalysisVisitor(targetState, toAnalyze, srcCallSites);
 
             // next add mod analysis.
             allCallbacks->insert(allCallbacks->end(), currVisCallback);

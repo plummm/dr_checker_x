@@ -111,7 +111,7 @@ namespace DRCHECKER {
         //hz: add support for switch inst.
         virtual void visitSwitchInst(SwitchInst &I);
 
-        void visit(BasicBlock *BB);
+        virtual void visit(BasicBlock *BB);
 
         // main analysis function.
         void analyze();
