@@ -54,9 +54,11 @@ namespace DRCHECKER {
 
         virtual void visit(BasicBlock *BB);
 
+        /*
         virtual VisitorCallback* visitCallInst(CallInst &I, Function *targetFunction,
                                                std::vector<Instruction *> *oldFuncCallSites,
                                                std::vector<Instruction *> *currFuncCallSites);
+        */
 
         std::set<BasicBlock*>* get_all_successors(BasicBlock*);
 
