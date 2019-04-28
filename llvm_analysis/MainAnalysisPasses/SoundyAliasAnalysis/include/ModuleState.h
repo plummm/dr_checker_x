@@ -579,7 +579,7 @@ namespace DRCHECKER {
             for (auto tag : uniqTags){
                 O << "--------------------------TAG--------------------------\n";
                 tag->dumpInfo(O);
-                tag->printModInsts(O);
+                tag->printModInsts(O,&(this->switchMap));
             }
             O << "++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n";
             return;

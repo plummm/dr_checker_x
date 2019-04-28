@@ -2,6 +2,9 @@
 // Created by machiry on 8/23/16.
 //
 
+#ifndef PROJECT_TAINTFLAG_H
+#define PROJECT_TAINTFLAG_H
+
 #include "llvm/Pass.h"
 #include "llvm/IR/Function.h"
 #include "llvm/Support/raw_ostream.h"
@@ -13,8 +16,6 @@
 #include "../../Utils/include/InstructionUtils.h"
 #include <vector>
 
-#ifndef PROJECT_TAINTFLAG_H
-#define PROJECT_TAINTFLAG_H
 using namespace llvm;
 namespace DRCHECKER {
 
@@ -121,7 +122,7 @@ namespace DRCHECKER {
             OS << "\n";
         }
 
-        void printModInsts(raw_ostream &OS) {
+        void printModInsts(raw_ostream &OS, std::map<BasicBlock*,std::set<uint64_t>> *switchMap) {
             OS << "###Mod Instruction List###\n";
             for (auto e : this->mod_insts) {
                 //Print the mod inst itself.
@@ -134,6 +135,26 @@ namespace DRCHECKER {
                     for (auto ctx_inst : *ctx) {
                         InstructionUtils::printInst(ctx_inst, OS);
                     }
+                    //Print out extra information about how to reach this instruction from the entry point in this call context.
+                    //E.g. what "cmd" value should we use for the entry-point ioctl()?
+                    //The very first instruction in the context is the same across all contexts (i.e. the first inst in the entry func)
+                    //So we should look at the 2nd inst.
+                    if (ctx->size() <= 1){
+                        continue;
+                    }
+                    BasicBlock *entry_bb = (*ctx)[1]->getParent();
+                    if(!entry_bb){
+                        continue;
+                    }
+                    if(switchMap->find(entry_bb) == switchMap->end()){
+                        //No constraint information about this basic block...
+                        continue;
+                    }
+                    OS << "-----EXT-----\n";
+                    for (auto cmd : (*switchMap)[entry_bb]){
+                        OS << cmd << ", ";
+                    }
+                    OS << "\n";
                 }
             }
         }

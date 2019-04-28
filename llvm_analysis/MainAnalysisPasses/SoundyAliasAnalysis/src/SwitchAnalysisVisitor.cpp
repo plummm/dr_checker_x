@@ -3,15 +3,24 @@
 //
 
 #include "SwitchAnalysisVisitor.h"
+#include "InstructionUtils.h"
 
 using namespace llvm;
 namespace DRCHECKER {
 
     //#define DEBUG_CALL_INST
+    #define DEBUG_VISIT_SWITCH_INST
 
     void SwitchAnalysisVisitor::visitSwitchInst(SwitchInst &I) {
+#ifdef DEBUG_VISIT_SWITCH_INST
+        dbgs() << "SwitchAnalysisVisitor::visitSwitchInst: \n";
+        InstructionUtils::printInst(&I,dbgs());
+#endif
         //Record the mapping from the switch variable values to dst basic blocks.
         if (!this->currState.switchMap.empty()){
+#ifdef DEBUG_VISIT_SWITCH_INST
+            dbgs() << "SwitchAnalysisVisitor::visitSwitchInst: We have visited one switch inst before!\n";
+#endif
             //This means we have visited a switch before, we now assume the 1st switch in the entry-ioctl() is our target.
             return;
         }
@@ -19,11 +28,24 @@ namespace DRCHECKER {
         Value *cond_var = I.getCondition();
         BasicBlock * def_bb = I.getDefaultDest();
         unsigned num = I.getNumCases();
+#ifdef DEBUG_VISIT_SWITCH_INST
+        dbgs() << "Cond Var: ";
+        cond_var->print(dbgs());
+        dbgs() << " Default BB: ";
+        if(def_bb){
+            dbgs() << def_bb->getName().str();
+        }
+        dbgs() << " #cases: " << num << "\n";
+#endif
         for(auto c : I.cases()){
             ConstantInt *val = c.getCaseValue();
             //int64_t c_val = val->getSExtValue();
             uint64_t c_val = val->getZExtValue();
             BasicBlock *bb = c.getCaseSuccessor();
+#ifdef DEBUG_VISIT_SWITCH_INST
+            dbgs() << "Cond Val: " << c_val;
+            dbgs() << " Dst BB: " << bb->getName().str() << "\n";
+#endif
             this->currState.switchMap[bb].insert(c_val);
             //TODO: We also need to add this case successor's successors to the map, since they can also be reached from current case value.
             std::set<BasicBlock*> *succs = this->get_all_successors(bb);
