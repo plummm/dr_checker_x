@@ -44,6 +44,17 @@ namespace DRCHECKER {
             this -> mod_insts = srcTag -> mod_insts;
         }
 
+        std::string getTypeStr() {
+            Type *ty = this->getTy();
+            if (!ty) {
+                return "unknown";
+            }
+            std::string str;
+            llvm::raw_string_ostream ss(str);
+            ty->print(ss);
+            return ss.str();
+        }
+
         Type *getTy() {
             if (!this->v){
                 return nullptr;

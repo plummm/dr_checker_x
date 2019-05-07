@@ -267,12 +267,17 @@ namespace DRCHECKER {
                         dbgs() << "Now start to dump the taint information...\n";
 
                         //hz: dump the taint information we require here.
+                        /*
                         std::error_code EC;
                         llvm::raw_fd_ostream o_taint("taint_info_" + checkFunctionName, EC);
                         //Set a 5MB buffer to improve file I/O performance.
                         o_taint.SetBufferSize(5*1024*1024);
                         currState.dumpTaintInfo(o_taint);
                         o_taint.close();
+                        */
+
+                        dbgs() << "Now start to serialize the taint information...\n";
+                        currState.serializeTaintInfo("taint_info_" + checkFunctionName + "_serialize");
 
                         //Write the taint info first to a in-mem string, then save it to the file, might be faster.
                         /*

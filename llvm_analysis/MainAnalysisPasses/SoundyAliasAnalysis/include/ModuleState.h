@@ -13,9 +13,23 @@
 #include <set>
 #include <chrono>
 #include <ctime>
+#include <fstream>
+#include "../../Utils/include/InstructionUtils.h"
+//for cereal serialization
+/*
+#include "cereal/archives/xml.hpp"
+//#include "../../cereal/archives/portable_binary.hpp"
+#include "cereal/types/map.hpp"
+#include "cereal/types/vector.hpp"
+#include "cereal/types/set.hpp"
+#include "cereal/types/tuple.hpp"
+#include "cereal/types/string.hpp"
+*/
+#include "../../Utils/include/json.hpp"
+using json = nlohmann::json;
 
 #define DEBUG_TAINT_DUMP_PROGRESS
-
+#define DEBUG_TAINT_SERIALIZE_PROGRESS
 
 using namespace llvm;
 
@@ -59,6 +73,7 @@ namespace DRCHECKER {
             }
             O << "\n]";
         }
+
     };
 
     /***
@@ -584,6 +599,137 @@ namespace DRCHECKER {
             O << "++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n";
             return;
         }
+
+        void serializeTaintInfo(std::string fn) {
+            //Store taint information in a map as below and then serialize it.
+            //module name -> func name -> BB names (whose last 'br' is affected by global states) -> ctx_id -> set<tag_id>
+            std::map<std::string,std::map<std::string,std::map<std::string,std::map<unsigned long,std::set<unsigned long>>>>> taintedBrs;
+            //Analysis context map, id -> callstack
+            std::map<unsigned long,std::vector<STR_INST>> analysisCtxMap;
+            //hz: the set of the unique taint tags.
+            std::set<TaintTag*> uniqTags;
+#ifdef DEBUG_TAINT_SERIALIZE_PROGRESS
+            dbgs() << "Serialize information about tainted branch IR...\n";
+            int a_ctx_cnt = 0;
+            int total_a_ctx = taintInformation.size();
+#endif
+            for (auto const &it : taintInformation){
+                //Does current context have any tainted values?
+#ifdef DEBUG_TAINT_SERIALIZE_PROGRESS
+                dbgs() << "Analysis Ctx " << (++a_ctx_cnt)  << "/" << total_a_ctx << ": ";
+                int br_cnt = 0;
+#endif
+                std::map<Value *, std::set<TaintFlag*>*>* vt = it.second;
+                if(!vt || vt->size() <= 0){
+                    continue;
+                }
+                unsigned long ctx_id = (unsigned long)&(*(it.first));
+                //Then all the Value-TaintFlag pairs.
+                bool any_br_taint = false;
+                for (auto const &jt : *vt){
+                    //Serialize the "Value" information.
+                    //Only care about the branch instruction (i.e. br)
+                    if (!dyn_cast<BranchInst>(jt.first)) {
+                        continue;
+                    }
+#ifdef DEBUG_TAINT_SERIALIZE_PROGRESS
+                    dbgs() << (++br_cnt) << " ";
+#endif
+                    any_br_taint = true;
+                    STR_INST *p_str_inst = InstructionUtils::getInstStrRep(dyn_cast<Instruction>(jt.first));
+                    //NOTE: TaintTag represents the taint src,
+                    //TaintFlag provides the path by which the taint src can taint current inst.
+                    //TODO: utilize the path inf in TaintFlag to filter out some 'store' insts (e.g. write after read) 
+                    std::set<TaintFlag*> *pflags = jt.second;
+                    for (TaintFlag *p : *pflags){
+                        //Here we assume that "br" is always the last instruction of a BB.
+                        taintedBrs[(*p_str_inst)[3]][(*p_str_inst)[2]][(*p_str_inst)[1]][ctx_id].insert((unsigned long)(p->tag));
+                        uniqTags.insert(p->tag);
+                    }
+                }
+                if (any_br_taint) {
+                    //Record current AnalysisContext.
+                    std::vector<STR_INST> *pctx = InstructionUtils::getStrCtx(it.first->callSites);
+                    analysisCtxMap[ctx_id] = *pctx;
+                }
+#ifdef DEBUG_TAINT_SERIALIZE_PROGRESS
+                dbgs() << "\n";
+#endif
+            }
+            //Ok, now store all uniq TaintTags in a map.
+            //id -> the ctx of the modify inst
+            std::map<unsigned long, std::vector<STR_INST>> modInstCtxMap;
+            //tag id -> type str -> mod -> func -> BB -> inst -> call ctx -> arg constraints (arg No. -> value set))
+            std::map<unsigned long,
+                     std::map<std::string,
+                                std::map<std::string,std::map<std::string,std::map<std::string,std::map<std::string,
+                                                                                                        std::map<unsigned long,std::map<unsigned, std::set<uint64_t>>>
+                                                                                                        >
+                                         >>>
+                               >
+                     > tagMap;
+#ifdef DEBUG_TAINT_SERIALIZE_PROGRESS
+            dbgs() << "Serialize information about taint tags and modification IRs...\n";
+            int tag_cnt = 0;
+            int total_tag_cnt = uniqTags.size();
+#endif
+            for (auto tag : uniqTags){
+#ifdef DEBUG_TAINT_SERIALIZE_PROGRESS
+                dbgs() << (++tag_cnt) << "/" << total_tag_cnt << "\n";
+#endif
+                unsigned long tag_id = (unsigned long)&(*tag);
+                std::string ty_str = tag->getTypeStr();
+                for (auto e : tag->mod_insts) {
+                    STR_INST *p_str_inst = InstructionUtils::getInstStrRep(e.first);
+                    //Iterate over the ctx of the mod inst.
+                    for (auto ctx : e.second) {
+                        //"ctx" is of type "std::vector<Instruction*>*".
+                        std::vector<STR_INST> *pctx = InstructionUtils::getStrCtx(ctx);
+                        modInstCtxMap[(unsigned long)pctx] = *pctx;
+                        std::map<unsigned, std::set<uint64_t>> *p_constraints;
+                        p_constraints = &(tagMap[tag_id][ty_str][(*p_str_inst)[3]][(*p_str_inst)[2]][(*p_str_inst)[1]][(*p_str_inst)[0]][(unsigned long)pctx]);
+                        //Fill in the constraints of func args if any.
+                        if (ctx->size() <= 1){
+                            continue;
+                        }
+                        BasicBlock *entry_bb = (*ctx)[1]->getParent();
+                        if((!entry_bb) || this->switchMap.find(entry_bb) == this->switchMap.end()){
+                            continue;
+                        }
+                        //TODO: we now simply assume that "cmd" is the 2nd arg of entry ioctl.
+                        (*p_constraints)[1] = this->switchMap[entry_bb];
+                    }
+                }
+            }
+#ifdef DEBUG_TAINT_SERIALIZE_PROGRESS
+            dbgs() << "Serialize to file...\n";
+#endif
+            /*
+            //Serialize all data structures with cereal.
+            std::ofstream outfile;
+            outfile.open(fn);
+            {
+                cereal::XMLOutputArchive oarchive(outfile);
+                oarchive(taintedBrs, analysisCtxMap, tagMap, modInstCtxMap);
+            }//archive goes out of scope, ensuring all contents are flushed.
+            outfile.close();
+            */
+            //Use "json for C++" to serialize...
+            std::ofstream outfile;
+            outfile.open(fn);
+            json j_taintedBrs(taintedBrs);
+            outfile << j_taintedBrs;
+            json j_analysisCtxMap(analysisCtxMap);
+            outfile << j_analysisCtxMap;
+            json j_tagMap(tagMap);
+            outfile << j_tagMap;
+            json j_modInstCtxMap(modInstCtxMap);
+            outfile << j_modInstCtxMap;
+            outfile.close();
+#ifdef DEBUG_TAINT_SERIALIZE_PROGRESS
+            dbgs() << "Serialization finished!\n";
+#endif
+		}
 
         void printCurTime() {
             auto t_now = std::chrono::system_clock::now();

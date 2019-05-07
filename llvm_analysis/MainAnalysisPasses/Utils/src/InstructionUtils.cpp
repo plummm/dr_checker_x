@@ -211,4 +211,41 @@ namespace DRCHECKER {
         OS << "\n";
     }
 
+    STR_INST* InstructionUtils::getInstStrRep(Instruction *I) {
+        if(!I){
+            return nullptr;
+        }
+        std::string inst,bb,func,mod;
+        std::string str;
+        llvm::raw_string_ostream ss(str);
+        ss << *I;
+        inst = ss.str();
+        if(I->getParent()){
+            bb = I->getParent()->getName().str();
+        }
+        if(I->getFunction()){
+            func = I->getFunction()->getName().str();
+        }
+        if(I->getModule()){
+            mod = I->getModule()->getName().str();
+        }
+        STR_INST *str_inst = new STR_INST;
+        str_inst->push_back(inst);
+        str_inst->push_back(bb);
+        str_inst->push_back(func);
+        str_inst->push_back(mod);
+        return str_inst;
+    }
+
+    std::vector<STR_INST>* InstructionUtils::getStrCtx(std::vector<Instruction*> *callSites) {
+        std::vector<STR_INST> *pvec = new std::vector<STR_INST>();
+        for(Instruction *currCallSite : *callSites) {
+            STR_INST *str_inst = InstructionUtils::getInstStrRep(currCallSite);
+            if(str_inst){
+                pvec->push_back(*str_inst);
+            }
+        }
+        return pvec;
+    }
+
 }

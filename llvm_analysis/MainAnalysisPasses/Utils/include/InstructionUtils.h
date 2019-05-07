@@ -19,6 +19,8 @@
 
 using namespace llvm;
 
+typedef std::vector<std::string> STR_INST;
+
 namespace DRCHECKER {
     class InstructionUtils {
         public:
@@ -83,6 +85,12 @@ namespace DRCHECKER {
 
         //Print the instruction with detailed src level debug info (e.g. file, line number).
         static void printInst(Instruction *I, raw_ostream &OS);
+
+        //Get a string representation of the instruction, including the str of the inst,bb,func,and module.
+        static STR_INST* getInstStrRep(Instruction *I);
+
+        //Get STR_INST vector for a call context.
+        static std::vector<STR_INST>* getStrCtx(std::vector<Instruction*> *callSites);
     };
 }
 #endif //PROJECT_INSTRUCTIONUTILS_H
