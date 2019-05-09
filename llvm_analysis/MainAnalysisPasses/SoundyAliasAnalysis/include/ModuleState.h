@@ -25,6 +25,7 @@
 #include "cereal/types/tuple.hpp"
 #include "cereal/types/string.hpp"
 */
+#include "ResType.h"
 #include "../../Utils/include/json.hpp"
 using json = nlohmann::json;
 
@@ -602,10 +603,8 @@ namespace DRCHECKER {
 
         void serializeTaintInfo(std::string fn) {
             //Store taint information in a map as below and then serialize it.
-            //module name -> func name -> BB names (whose last 'br' is affected by global states) -> ctx_id -> set<tag_id>
-            std::map<std::string,std::map<std::string,std::map<std::string,std::map<unsigned long,std::set<unsigned long>>>>> taintedBrs;
-            //Analysis context map, id -> callstack
-            std::map<unsigned long,std::vector<STR_INST>> analysisCtxMap;
+            TAINTED_BR_TY taintedBrs;
+            ANALYSIS_CTX_MAP_TY analysisCtxMap;
             //hz: the set of the unique taint tags.
             std::set<TaintTag*> uniqTags;
 #ifdef DEBUG_TAINT_SERIALIZE_PROGRESS
@@ -636,7 +635,7 @@ namespace DRCHECKER {
                     dbgs() << (++br_cnt) << " ";
 #endif
                     any_br_taint = true;
-                    STR_INST *p_str_inst = InstructionUtils::getInstStrRep(dyn_cast<Instruction>(jt.first));
+                    LOC_INF *p_str_inst = InstructionUtils::getInstStrRep(dyn_cast<Instruction>(jt.first));
                     //NOTE: TaintTag represents the taint src,
                     //TaintFlag provides the path by which the taint src can taint current inst.
                     //TODO: utilize the path inf in TaintFlag to filter out some 'store' insts (e.g. write after read) 
@@ -649,7 +648,7 @@ namespace DRCHECKER {
                 }
                 if (any_br_taint) {
                     //Record current AnalysisContext.
-                    std::vector<STR_INST> *pctx = InstructionUtils::getStrCtx(it.first->callSites);
+                    std::vector<LOC_INF> *pctx = InstructionUtils::getStrCtx(it.first->callSites);
                     analysisCtxMap[ctx_id] = *pctx;
                 }
 #ifdef DEBUG_TAINT_SERIALIZE_PROGRESS
@@ -657,17 +656,9 @@ namespace DRCHECKER {
 #endif
             }
             //Ok, now store all uniq TaintTags in a map.
-            //id -> the ctx of the modify inst
-            std::map<unsigned long, std::vector<STR_INST>> modInstCtxMap;
-            //tag id -> type str -> mod -> func -> BB -> inst -> call ctx -> arg constraints (arg No. -> value set))
-            std::map<unsigned long,
-                     std::map<std::string,
-                                std::map<std::string,std::map<std::string,std::map<std::string,std::map<std::string,
-                                                                                                        std::map<unsigned long,std::map<unsigned, std::set<uint64_t>>>
-                                                                                                        >
-                                         >>>
-                               >
-                     > tagMap;
+            MOD_INST_CTX_MAP_TY modInstCtxMap;
+            TAG_INFO_TY tagInfoMap;
+            TAG_MOD_MAP_TY tagModMap;
 #ifdef DEBUG_TAINT_SERIALIZE_PROGRESS
             dbgs() << "Serialize information about taint tags and modification IRs...\n";
             int tag_cnt = 0;
@@ -679,15 +670,16 @@ namespace DRCHECKER {
 #endif
                 unsigned long tag_id = (unsigned long)&(*tag);
                 std::string ty_str = tag->getTypeStr();
+                tagInfoMap[tag_id] = ty_str;
                 for (auto e : tag->mod_insts) {
-                    STR_INST *p_str_inst = InstructionUtils::getInstStrRep(e.first);
+                    LOC_INF *p_str_inst = InstructionUtils::getInstStrRep(e.first);
                     //Iterate over the ctx of the mod inst.
                     for (auto ctx : e.second) {
                         //"ctx" is of type "std::vector<Instruction*>*".
-                        std::vector<STR_INST> *pctx = InstructionUtils::getStrCtx(ctx);
+                        std::vector<LOC_INF> *pctx = InstructionUtils::getStrCtx(ctx);
                         modInstCtxMap[(unsigned long)pctx] = *pctx;
-                        std::map<unsigned, std::set<uint64_t>> *p_constraints;
-                        p_constraints = &(tagMap[tag_id][ty_str][(*p_str_inst)[3]][(*p_str_inst)[2]][(*p_str_inst)[1]][(*p_str_inst)[0]][(unsigned long)pctx]);
+                        ARG_CONSTRAINTS *p_constraints;
+                        p_constraints = &(tagModMap[tag_id][(*p_str_inst)[3]][(*p_str_inst)[2]][(*p_str_inst)[1]][(*p_str_inst)[0]][(unsigned long)pctx]);
                         //Fill in the constraints of func args if any.
                         if (ctx->size() <= 1){
                             continue;
@@ -710,21 +702,21 @@ namespace DRCHECKER {
             outfile.open(fn);
             {
                 cereal::XMLOutputArchive oarchive(outfile);
-                oarchive(taintedBrs, analysisCtxMap, tagMap, modInstCtxMap);
+                oarchive(taintedBrs, analysisCtxMap, tagModMap, tagInfoMap, modInstCtxMap);
             }//archive goes out of scope, ensuring all contents are flushed.
             outfile.close();
             */
             //Use "json for C++" to serialize...
             std::ofstream outfile;
             outfile.open(fn);
+
             json j_taintedBrs(taintedBrs);
-            outfile << j_taintedBrs;
             json j_analysisCtxMap(analysisCtxMap);
-            outfile << j_analysisCtxMap;
-            json j_tagMap(tagMap);
-            outfile << j_tagMap;
+            json j_tagModMap(tagModMap);
+            json j_tagInfoMap(tagInfoMap);
             json j_modInstCtxMap(modInstCtxMap);
-            outfile << j_modInstCtxMap;
+            
+            outfile << j_taintedBrs << j_analysisCtxMap << j_tagModMap << j_tagInfoMap << j_modInstCtxMap;
             outfile.close();
 #ifdef DEBUG_TAINT_SERIALIZE_PROGRESS
             dbgs() << "Serialization finished!\n";

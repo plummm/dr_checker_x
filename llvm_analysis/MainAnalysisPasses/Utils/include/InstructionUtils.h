@@ -19,7 +19,7 @@
 
 using namespace llvm;
 
-typedef std::vector<std::string> STR_INST;
+typedef std::vector<std::string> LOC_INF;
 
 namespace DRCHECKER {
     class InstructionUtils {
@@ -87,10 +87,10 @@ namespace DRCHECKER {
         static void printInst(Instruction *I, raw_ostream &OS);
 
         //Get a string representation of the instruction, including the str of the inst,bb,func,and module.
-        static STR_INST* getInstStrRep(Instruction *I);
+        static LOC_INF* getInstStrRep(Instruction *I);
 
-        //Get STR_INST vector for a call context.
-        static std::vector<STR_INST>* getStrCtx(std::vector<Instruction*> *callSites);
+        //Get LOC_INF vector for a call context.
+        static std::vector<LOC_INF>* getStrCtx(std::vector<Instruction*> *callSites);
     };
 }
 #endif //PROJECT_INSTRUCTIONUTILS_H

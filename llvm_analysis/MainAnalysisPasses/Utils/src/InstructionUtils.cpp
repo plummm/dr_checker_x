@@ -211,7 +211,7 @@ namespace DRCHECKER {
         OS << "\n";
     }
 
-    STR_INST* InstructionUtils::getInstStrRep(Instruction *I) {
+    LOC_INF* InstructionUtils::getInstStrRep(Instruction *I) {
         if(!I){
             return nullptr;
         }
@@ -229,7 +229,7 @@ namespace DRCHECKER {
         if(I->getModule()){
             mod = I->getModule()->getName().str();
         }
-        STR_INST *str_inst = new STR_INST;
+        LOC_INF *str_inst = new LOC_INF;
         str_inst->push_back(inst);
         str_inst->push_back(bb);
         str_inst->push_back(func);
@@ -237,10 +237,10 @@ namespace DRCHECKER {
         return str_inst;
     }
 
-    std::vector<STR_INST>* InstructionUtils::getStrCtx(std::vector<Instruction*> *callSites) {
-        std::vector<STR_INST> *pvec = new std::vector<STR_INST>();
+    std::vector<LOC_INF>* InstructionUtils::getStrCtx(std::vector<Instruction*> *callSites) {
+        std::vector<LOC_INF> *pvec = new std::vector<LOC_INF>();
         for(Instruction *currCallSite : *callSites) {
-            STR_INST *str_inst = InstructionUtils::getInstStrRep(currCallSite);
+            LOC_INF *str_inst = InstructionUtils::getInstStrRep(currCallSite);
             if(str_inst){
                 pvec->push_back(*str_inst);
             }
