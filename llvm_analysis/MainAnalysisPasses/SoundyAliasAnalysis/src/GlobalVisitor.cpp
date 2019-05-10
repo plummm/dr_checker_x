@@ -286,9 +286,11 @@ namespace DRCHECKER {
 #endif
 #ifdef DEBUG_BB_VISIT
         dbgs() << "Starting to analyze BB:" << BB->getName().str() << ":at:"<< BB->getParent()->getName() << "\n";
+        /*
         dbgs() << "<<<<\n";
         BB->print(dbgs());
         dbgs() << ">>>>\n";
+        */
 #endif
         for(VisitorCallback *currCallback:allCallbacks) {
             currCallback->visit(BB);

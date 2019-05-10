@@ -264,20 +264,21 @@ namespace DRCHECKER {
                         auto t_now = std::chrono::system_clock::now();
                         std::chrono::duration<double> elapsed_seconds = t_now - t_start;
                         dbgs() << "Anlysis done in : " << elapsed_seconds.count() << "s\n";
-                        dbgs() << "Now start to dump the taint information...\n";
 
-                        //hz: dump the taint information we require here.
-                        /*
+                        dbgs() << "Now start to serialize the taint information...\n";
+                        currState.serializeTaintInfo("taint_info_" + checkFunctionName + "_serialize");
+
+                        auto t_end0 = std::chrono::system_clock::now();
+                        elapsed_seconds = t_end0 - t_now;
+                        dbgs() << "Taint info serialized in : " << elapsed_seconds.count() << "s\n";
+                        
+                        dbgs() << "Now start to dump the taint information...\n";
                         std::error_code EC;
                         llvm::raw_fd_ostream o_taint("taint_info_" + checkFunctionName, EC);
                         //Set a 5MB buffer to improve file I/O performance.
                         o_taint.SetBufferSize(5*1024*1024);
                         currState.dumpTaintInfo(o_taint);
                         o_taint.close();
-                        */
-
-                        dbgs() << "Now start to serialize the taint information...\n";
-                        currState.serializeTaintInfo("taint_info_" + checkFunctionName + "_serialize");
 
                         //Write the taint info first to a in-mem string, then save it to the file, might be faster.
                         /*
@@ -290,8 +291,8 @@ namespace DRCHECKER {
                         outfile.close();
                         */
 
-                        auto t_end = std::chrono::system_clock::now();
-                        elapsed_seconds = t_end - t_now;
+                        auto t_end1 = std::chrono::system_clock::now();
+                        elapsed_seconds = t_end1 - t_end0;
                         dbgs() << "Taint info dumped in : " << elapsed_seconds.count() << "s\n";
 
                         /*

@@ -574,6 +574,10 @@ namespace DRCHECKER {
                     ++n_entry;
                     dbgs() << n_entry << "/" << total_entry << "..";
 #endif
+                    //Skip the non-br instructions
+                    if (!dyn_cast<BranchInst>(jt.first)) {
+                        continue;
+                    }
                     //Dump the "Value" information.
                     O << "------------------Value------------------\n";
                     jt.first->print(O);

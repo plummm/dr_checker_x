@@ -845,17 +845,8 @@ namespace DRCHECKER {
             return true;
         }
 
-        //OutsideObject specific version of "fetchPointsToObjects", we need to consider the type of each field.
-        virtual void fetchPointsToObjects(long srcfieldId, std::set<std::pair<long, AliasObject*>> &dstObjects,
-                                  Instruction *targetInstr = nullptr, bool create_arg_obj=false) {
-            /***
-             * Get all objects pointed by field identified by srcfieldID
-             *
-             * i.e if a field does not point to any object.
-             * Automatically generate an object and link it with srcFieldId
-             */
-            bool hasObjects = false;
-#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
+        virtual void fetchPointsToObjects_log(long srcfieldId, std::set<std::pair<long, AliasObject*>> &dstObjects,
+                                  Instruction *targetInstr, bool create_arg_obj) {
             dbgs() << "\n*********fetchPointsToObjects(Outside Object)**********\n Current Inst: ";
             if (targetInstr){
                 targetInstr->print(dbgs());
@@ -874,6 +865,20 @@ namespace DRCHECKER {
             }
             dbgs() << "\n Target Field: " << srcfieldId;
             dbgs() << "\n*******************\n";
+        }
+
+        //OutsideObject specific version of "fetchPointsToObjects", we need to consider the type of each field.
+        virtual void fetchPointsToObjects(long srcfieldId, std::set<std::pair<long, AliasObject*>> &dstObjects,
+                                  Instruction *targetInstr = nullptr, bool create_arg_obj=false) {
+            /***
+             * Get all objects pointed by field identified by srcfieldID
+             *
+             * i.e if a field does not point to any object.
+             * Automatically generate an object and link it with srcFieldId
+             */
+            bool hasObjects = false;
+#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
+            fetchPointsToObjects_log(srcfieldId, dstObjects, targetInstr, create_arg_obj);
 #endif
             for(ObjectPointsTo *obj:pointsTo) {
                 if(obj->fieldId == srcfieldId) {
@@ -895,6 +900,12 @@ namespace DRCHECKER {
             //Below we try to create a dummy object.
             assert(this->targetType);
             assert(this->targetType->isStructTy());
+            if (srcfieldId >= this->targetType->getStructNumElements()) {
+                //This is a serious bug possibly due to "cast" IR.
+                dbgs() << "!!! fetchPointsToObjects() outside: srcfieldId out of bound!\n";
+                fetchPointsToObjects_log(srcfieldId, dstObjects, targetInstr, create_arg_obj);
+                return;
+            }
             //NOTE: "pointsTo" should only store point-to information for the pointer fields.
             //So if "hasObjects" is false, we need to first ensure that the field is a pointer before creating new objects.
             Type *ety = this->targetType->getStructElementType(srcfieldId);
