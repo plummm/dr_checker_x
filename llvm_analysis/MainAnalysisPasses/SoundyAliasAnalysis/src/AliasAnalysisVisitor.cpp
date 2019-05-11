@@ -19,7 +19,7 @@ namespace DRCHECKER {
 //#define MAX_ALIAS_OBJ 50
 //hz: Enable creating new objects on the fly when the pointer points to nothing.
 #define CREATE_DUMMY_OBJ_IF_NULL
-#define DEBUG_CREATE_DUMMY_OBJ_IF_NULL
+//#define DEBUG_CREATE_DUMMY_OBJ_IF_NULL
 //#define DEBUG_UPDATE_POINTSTO
 #define DEBUG_TMP
 

@@ -4,6 +4,7 @@
 #include <CFGUtils.h>
 #include "PointsToUtils.h"
 #include "GlobalVisitor.h"
+#include "../../Utils/include/InstructionUtils.h"
 
 namespace DRCHECKER {
 
@@ -285,7 +286,7 @@ namespace DRCHECKER {
         }
 #endif
 #ifdef DEBUG_BB_VISIT
-        dbgs() << "Starting to analyze BB:" << BB->getName().str() << ":at:"<< BB->getParent()->getName() << "\n";
+        dbgs() << "Starting to analyze BB:" <<  BB->getName().str() << ":at:"<< BB->getParent()->getName() << "\n";
         /*
         dbgs() << "<<<<\n";
         BB->print(dbgs());

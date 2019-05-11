@@ -194,7 +194,7 @@ namespace DRCHECKER {
         I->print(OS);
         OS << " ,BB: ";
         if (I->getParent()) {
-            OS << I->getParent()->getName().str();
+            OS << InstructionUtils::getBBStrID(I->getParent());
         }
         OS << " ,FUNC: ";
         if (I->getFunction()) {
@@ -221,7 +221,7 @@ namespace DRCHECKER {
         ss << *I;
         inst = ss.str();
         if(I->getParent()){
-            bb = I->getParent()->getName().str();
+			bb = InstructionUtils::getBBStrID(I->getParent());
         }
         if(I->getFunction()){
             func = I->getFunction()->getName().str();
@@ -246,6 +246,24 @@ namespace DRCHECKER {
             }
         }
         return pvec;
+    }
+
+    std::string InstructionUtils::getBBStrID(BasicBlock* B) {
+        if (!B) {
+            return "";
+        }
+        if (!B->getName().empty())
+        	return B->getName().str();
+
+        //NOTE: "printAsOperand" is very expensive, so we set up the cache "BBNameMap" here.
+        if (InstructionUtils::BBNameMap.find(B) == InstructionUtils::BBNameMap.end()) {
+    	    std::string Str;
+    	    raw_string_ostream OS(Str);
+    	    B->printAsOperand(OS, false);
+            InstructionUtils::BBNameMap[B] = OS.str();
+    	    return OS.str();
+        }
+        return InstructionUtils::BBNameMap[B];
     }
 
 }

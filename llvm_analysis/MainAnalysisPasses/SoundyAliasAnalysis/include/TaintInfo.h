@@ -56,7 +56,7 @@ namespace DRCHECKER {
         }
 
         Type *getTy() {
-            if (!this->v){
+            if (!(this->v)){
                 return nullptr;
             }
             Type *ty = this->v->getType();
@@ -282,7 +282,7 @@ namespace DRCHECKER {
             //hz: dump tag information if any.
             if (this->tag) {
                 //TODO: is it enough to depend on the pointer value to filter out duplications?
-                if (uniqTags && uniqTags->find(this->tag) == uniqTags->end()) {
+                if (uniqTags) {
                     uniqTags->insert(this->tag);
                 }
                 this->tag->dumpInfo(OS);

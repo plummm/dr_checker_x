@@ -21,8 +21,8 @@ using namespace llvm;
 #endif
 
 //hz: some debug output options.
-#define DEBUG_OUTSIDE_OBJ_CREATION
-#define DEBUG_FETCH_POINTS_TO_OBJECTS_OUTSIDE
+//#define DEBUG_OUTSIDE_OBJ_CREATION
+//#define DEBUG_FETCH_POINTS_TO_OBJECTS_OUTSIDE
 #define ENABLE_SUB_OBJ_CACHE
 
 namespace DRCHECKER {
@@ -903,7 +903,7 @@ namespace DRCHECKER {
             if (srcfieldId >= this->targetType->getStructNumElements()) {
                 //This is a serious bug possibly due to "cast" IR.
                 dbgs() << "!!! fetchPointsToObjects() outside: srcfieldId out of bound!\n";
-                fetchPointsToObjects_log(srcfieldId, dstObjects, targetInstr, create_arg_obj);
+                //fetchPointsToObjects_log(srcfieldId, dstObjects, targetInstr, create_arg_obj);
                 return;
             }
             //NOTE: "pointsTo" should only store point-to information for the pointer fields.

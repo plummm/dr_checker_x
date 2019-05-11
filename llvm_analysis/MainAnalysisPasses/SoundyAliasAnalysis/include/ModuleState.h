@@ -619,7 +619,7 @@ namespace DRCHECKER {
             for (auto const &it : taintInformation){
                 //Does current context have any tainted values?
 #ifdef DEBUG_TAINT_SERIALIZE_PROGRESS
-                dbgs() << "Analysis Ctx " << (++a_ctx_cnt)  << "/" << total_a_ctx << ": ";
+                dbgs() << "Analysis Ctx " << (++a_ctx_cnt)  << "/" << total_a_ctx << ":\n";
                 int br_cnt = 0;
 #endif
                 std::map<Value *, std::set<TaintFlag*>*>* vt = it.second;
@@ -647,7 +647,20 @@ namespace DRCHECKER {
                     for (TaintFlag *p : *pflags){
                         //Here we assume that "br" is always the last instruction of a BB.
                         taintedBrs[(*p_str_inst)[3]][(*p_str_inst)[2]][(*p_str_inst)[1]][ctx_id].insert((unsigned long)(p->tag));
-                        uniqTags.insert(p->tag);
+                        if(p->tag && uniqTags.find(p->tag) == uniqTags.end()){
+                            //
+                            dbgs() << (unsigned long)(p->tag) << "\n";
+                            if(p->tag->v){
+                                p->tag->v->print(dbgs());
+                                dbgs() << "\n";
+                            }
+                            if(p->tag->type){
+                                p->tag->type->print(dbgs());
+                                dbgs() << "\n";
+                            }
+                            uniqTags.insert(p->tag);
+                            //
+                        }
                     }
                 }
                 if (any_br_taint) {
@@ -668,13 +681,29 @@ namespace DRCHECKER {
             int tag_cnt = 0;
             int total_tag_cnt = uniqTags.size();
 #endif
-            for (auto tag : uniqTags){
+            for (TaintTag *tag : uniqTags){
 #ifdef DEBUG_TAINT_SERIALIZE_PROGRESS
                 dbgs() << (++tag_cnt) << "/" << total_tag_cnt << "\n";
 #endif
-                unsigned long tag_id = (unsigned long)&(*tag);
-                std::string ty_str = tag->getTypeStr();
-                tagInfoMap[tag_id] = ty_str;
+                unsigned long tag_id;
+                try{
+                    tag_id = (unsigned long)tag;
+                    dbgs() << tag_id << "\n";
+                    if(tag->v){
+                        tag->v->print(dbgs());
+                        dbgs() << "\n";
+                    }
+                    if(tag->type){
+                        tag->type->print(dbgs());
+                        dbgs() << "\n";
+                    }
+                    const std::string& ty_str = tag->getTypeStr();
+                    tagInfoMap[tag_id] = ty_str;
+                }catch (const std::exception &exc){
+                    dbgs() << exc.what() << "\n";
+                }catch (...){
+                    dbgs() << "Unknown exception! tag->getTypeStr\n";
+                }
                 for (auto e : tag->mod_insts) {
                     LOC_INF *p_str_inst = InstructionUtils::getInstStrRep(e.first);
                     //Iterate over the ctx of the mod inst.
