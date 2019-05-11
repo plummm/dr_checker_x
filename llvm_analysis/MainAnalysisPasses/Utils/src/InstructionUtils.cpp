@@ -249,6 +249,7 @@ namespace DRCHECKER {
     }
 
     std::string InstructionUtils::getBBStrID(BasicBlock* B) {
+        static std::map<BasicBlock*,std::string> BBNameMap;
         if (!B) {
             return "";
         }
@@ -256,14 +257,14 @@ namespace DRCHECKER {
         	return B->getName().str();
 
         //NOTE: "printAsOperand" is very expensive, so we set up the cache "BBNameMap" here.
-        if (InstructionUtils::BBNameMap.find(B) == InstructionUtils::BBNameMap.end()) {
+        if (BBNameMap.find(B) == BBNameMap.end()) {
     	    std::string Str;
     	    raw_string_ostream OS(Str);
     	    B->printAsOperand(OS, false);
-            InstructionUtils::BBNameMap[B] = OS.str();
+            BBNameMap[B] = OS.str();
     	    return OS.str();
         }
-        return InstructionUtils::BBNameMap[B];
+        return BBNameMap[B];
     }
 
 }

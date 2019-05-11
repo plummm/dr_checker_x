@@ -269,6 +269,18 @@ namespace DRCHECKER {
             AliasObject *hostObj = currPointsToObj->targetObject;
             // if the target object is not visited, then add into points to info.
             if(visitedObjects.find(hostObj) == visitedObjects.end()) {
+                //Get type information about current point-to object.
+                Type *host_type = hostObj->targetType;
+                if(host_type->isPointerTy()){
+                    host_type = host_type->getPointerElementType();
+                }
+                //hz: we should first check whether the passed-in "fieldId" exceeds current host object's limit...
+                if (fieldId > 0 && host_type->isStructTy() && host_type->getStructNumElements() <= fieldId) {
+                    visitedObjects.insert(visitedObjects.begin(), hostObj);
+                    continue;
+                    //"goto" cannot cross variable initialization...
+                    //goto next;
+                }
                 PointerPointsTo *newPointsToObj = new PointerPointsTo();
                 newPointsToObj->propogatingInstruction = propInstruction;
                 //hz: 'dstField' is a complex issue, we first apply original logic to set the default "dstfieldId", then
@@ -303,10 +315,6 @@ namespace DRCHECKER {
 #endif
                 //hz: the following several "if" try to decide whether we will actually index into an embedded struct in the host struct.
                 if(hostObj && basePointToType && basePointToType->isStructTy()){
-                    Type *host_type = hostObj->targetType;
-                    if(host_type->isPointerTy()){
-                        host_type = host_type->getPointerElementType();
-                    }
 #ifdef DEBUG_GET_ELEMENT_PTR
                     dbgs() << "host_type: ";
                     if(host_type){
