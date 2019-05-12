@@ -52,10 +52,6 @@ namespace DRCHECKER {
                     O << ",";
                 }
 
-                //llvm::raw_string_ostream rso(str);
-                //currCallSite->print(rso);
-                //std::string instrSt = InstructionUtils::escapeJsonString(rso.str());
-
                 O << "{\"instr\":\"";
                 //currCallSite->print(O);
                 //DILocation *instrLoc = currCallSite->getDebugLoc().get();
@@ -580,8 +576,7 @@ namespace DRCHECKER {
                     }
                     //Dump the "Value" information.
                     O << "------------------Value------------------\n";
-                    jt.first->print(O);
-                    O << "\n";
+                    O << InstructionUtils::getValueStr(jt.first) << "\n";
                     //Dump the TaintFlag(s) for current value under current context.
                     std::set<TaintFlag*> *pflags = jt.second;
                     for (TaintFlag *p : *pflags){

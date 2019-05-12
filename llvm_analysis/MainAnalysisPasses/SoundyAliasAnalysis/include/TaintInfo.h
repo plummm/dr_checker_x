@@ -123,12 +123,12 @@ namespace DRCHECKER {
             OS << "ID: " << static_cast<const void *>(this) << "\n";
             OS << "Value:\n";
             if (this->v){
-                this->v->print(OS,true);
+                OS << InstructionUtils::getValueStr(this->v);
             }
             OS << "\nfieldId: " << this->fieldId << " \n";
             OS << "Type: ";
             if (this->type){
-                this->type->print(OS);
+                OS << InstructionUtils::getTypeStr(this->type);
             }
             OS << "\n";
         }

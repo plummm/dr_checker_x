@@ -42,7 +42,7 @@ namespace DRCHECKER {
         if(I->hasName()) {
             return I->getName().str();
         } else {
-            return "No Name";
+            return "N/A";
         }
     }
 
@@ -94,10 +94,7 @@ namespace DRCHECKER {
     }
 
     std::string InstructionUtils::escapeValueString(Value *currInstr) {
-        std::string str;
-        llvm::raw_string_ostream rso(str);
-        currInstr->print(rso);
-        return InstructionUtils::escapeJsonString(rso.str());
+        return InstructionUtils::escapeJsonString(InstructionUtils::getValueStr(currInstr));
     }
 
     DILocation* getRecursiveDILoc(Instruction *currInst, std::string &funcFileName, std::set<BasicBlock*> &visitedBBs) {
@@ -186,13 +183,20 @@ namespace DRCHECKER {
         return -1;
     }
 
-    void InstructionUtils::printInst(Instruction *I, raw_ostream &OS) {
+    void InstructionUtils::printInst(Instruction *I, raw_ostream &ROS) {
+        static std::map<Instruction*,std::string> InstPrintMap;
         if (!I){
             return;
         }
+        if (InstPrintMap.find(I) != InstPrintMap.end()){
+            ROS << InstPrintMap[I];
+            return;
+        }
+        std::string str;
+        llvm::raw_string_ostream OS(str);
         //Inst, BB, Function, and File
-        I->print(OS);
-        OS << " ,BB: ";
+        std::string& inst = InstructionUtils::getValueStr(dyn_cast<Value>(I));
+        OS << inst << " ,BB: ";
         if (I->getParent()) {
             OS << InstructionUtils::getBBStrID(I->getParent());
         }
@@ -209,6 +213,8 @@ namespace DRCHECKER {
             OS << "N/A";
         }
         OS << "\n";
+        InstPrintMap[I] = OS.str();
+        ROS << OS.str();
     }
 
     LOC_INF* InstructionUtils::getInstStrRep(Instruction *I) {
@@ -216,10 +222,7 @@ namespace DRCHECKER {
             return nullptr;
         }
         std::string inst,bb,func,mod;
-        std::string str;
-        llvm::raw_string_ostream ss(str);
-        ss << *I;
-        inst = ss.str();
+        inst = InstructionUtils::getValueStr(dyn_cast<Value>(I));
         if(I->getParent()){
 			bb = InstructionUtils::getBBStrID(I->getParent());
         }
@@ -265,6 +268,38 @@ namespace DRCHECKER {
     	    return OS.str();
         }
         return BBNameMap[B];
+    }
+
+    //Set up a cache for the expensive "print" operation.
+    std::string& InstructionUtils::getValueStr(Value *v) {
+        static std::map<Value*,std::string> ValueNameMap;
+        if (ValueNameMap.find(v) == ValueNameMap.end()) {
+            if(v){
+                std::string str;
+                llvm::raw_string_ostream ss(str);
+                ss << *v;
+                ValueNameMap[v] = ss.str();
+            }else{
+                ValueNameMap[v] = "";
+            }
+        }
+        return ValueNameMap[v];
+    }
+
+    //Set up a cache for the expensive "print" operation specifically for Type.
+    std::string& InstructionUtils::getTypeStr(Type *v) {
+        static std::map<Type*,std::string> TypeNameMap;
+        if (TypeNameMap.find(v) == TypeNameMap.end()) {
+            if(v){
+                std::string str;
+                llvm::raw_string_ostream ss(str);
+                ss << *v;
+                TypeNameMap[v] = ss.str();
+            }else{
+                TypeNameMap[v] = "";
+            }
+        }
+        return TypeNameMap[v];
     }
 
 }

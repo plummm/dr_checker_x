@@ -268,19 +268,7 @@ namespace DRCHECKER {
         for(PointerPointsTo *currPointsToObj:*srcPointsTo) {
             AliasObject *hostObj = currPointsToObj->targetObject;
             // if the target object is not visited, then add into points to info.
-            if(visitedObjects.find(hostObj) == visitedObjects.end()) {
-                //Get type information about current point-to object.
-                Type *host_type = hostObj->targetType;
-                if(host_type->isPointerTy()){
-                    host_type = host_type->getPointerElementType();
-                }
-                //hz: we should first check whether the passed-in "fieldId" exceeds current host object's limit...
-                if (fieldId > 0 && host_type->isStructTy() && host_type->getStructNumElements() <= fieldId) {
-                    visitedObjects.insert(visitedObjects.begin(), hostObj);
-                    continue;
-                    //"goto" cannot cross variable initialization...
-                    //goto next;
-                }
+            if(hostObj && visitedObjects.find(hostObj) == visitedObjects.end()) {
                 PointerPointsTo *newPointsToObj = new PointerPointsTo();
                 newPointsToObj->propogatingInstruction = propInstruction;
                 //hz: 'dstField' is a complex issue, we first apply original logic to set the default "dstfieldId", then
@@ -299,6 +287,7 @@ namespace DRCHECKER {
                 newPointsToObj->targetPointer = srcPointer;
                 //----------ORIGINAL-----------
                 //----------MOD----------
+                bool is_emb = false;
                 long host_dstFieldId = currPointsToObj->dstfieldId;
                 //The arg "srcPointer" actually is not related to arg "srcPointsTo", it's indeed "dstPointer" that we need to copy point-to inf for.
                 GEPOperator *gep = (srcPointer ? dyn_cast<GEPOperator>(srcPointer) : nullptr);
@@ -306,127 +295,132 @@ namespace DRCHECKER {
                 //call this makePointsToCopy().
                 Type *basePointerType = (gep ? gep->getPointerOperand()->getType() : nullptr);
                 Type *basePointToType = (basePointerType ? basePointerType->getPointerElementType() : nullptr);
+                //Get type information about current point-to object.
+                Type *host_type = hostObj->targetType;
+                if (!host_type){
+                    //TODO: It's unlikely, but is this skip safe?
+                    goto fail_next;
+                }
+                if(host_type->isPointerTy()){
+                    host_type = host_type->getPointerElementType();
+                }
 #ifdef DEBUG_GET_ELEMENT_PTR
                 dbgs() << "AliasAnalysisVisitor::makePointsToCopy(): basePointerType: ";
                 if(basePointerType){
                     basePointerType->print(dbgs());
                 }
-                dbgs() << "\n";
+                dbgs() << "\nCur Points-to, host_type: ";
+                host_type->print(dbgs());
+                dbgs() << " host_dstFieldId: " << host_dstFieldId << "\n";
 #endif
                 //hz: the following several "if" try to decide whether we will actually index into an embedded struct in the host struct.
-                if(hostObj && basePointToType && basePointToType->isStructTy()){
-#ifdef DEBUG_GET_ELEMENT_PTR
-                    dbgs() << "host_type: ";
-                    if(host_type){
-                        host_type->print(dbgs());
+                if (basePointToType && basePointToType->isStructTy() && host_type->isStructTy() &&
+                    host_type->getStructNumElements() > host_dstFieldId && host_type != basePointToType)
+                {
+                    Type *src_fieldTy = host_type->getStructElementType(host_dstFieldId);
+                    //It's also possible that the field is an array of a certain struct, if so, we should also regard this field as
+                    //a "struct" field (i.e. the first struct in the array).
+                    Type *src_fieldTy_arrElem = nullptr; 
+                    if(src_fieldTy && src_fieldTy->isArrayTy()){
+                        src_fieldTy_arrElem = src_fieldTy->getArrayElementType();
                     }
-                    dbgs() << " host_dstFieldId: " << host_dstFieldId;
+#ifdef DEBUG_GET_ELEMENT_PTR
+                    dbgs() << "src_fieldTy: ";
+                    if(src_fieldTy){
+                        src_fieldTy->print(dbgs());
+                    }
+                    if(src_fieldTy_arrElem){
+                        dbgs() << "src_fieldTy_arrElem: ";
+                        src_fieldTy_arrElem->print(dbgs());
+                    }
                     dbgs() << "\n";
 #endif
-                    if(host_type->isStructTy() && host_type->getStructNumElements() > host_dstFieldId && host_type != basePointToType){
-                        Type *src_fieldTy = host_type->getStructElementType(host_dstFieldId);
-                        //It's also possible that the field is an array of a certain struct, if so, we should also regard this field as
-                        //a "struct" field (i.e. the first struct in the array).
-                        Type *src_fieldTy_arrElem = nullptr; 
-                        if(src_fieldTy && src_fieldTy->isArrayTy()){
-                            src_fieldTy_arrElem = src_fieldTy->getArrayElementType();
-                        }
+                    if( (src_fieldTy && src_fieldTy == basePointToType) || 
+                        (src_fieldTy_arrElem && src_fieldTy_arrElem == basePointToType)
+                      )
+                    {
+                        is_emb = true;
 #ifdef DEBUG_GET_ELEMENT_PTR
-                        dbgs() << "src_fieldTy: ";
-                        if(src_fieldTy){
-                            src_fieldTy->print(dbgs());
-                        }
-                        if(src_fieldTy_arrElem){
-                            dbgs() << "src_fieldTy_arrElem: ";
-                            src_fieldTy_arrElem->print(dbgs());
-                        }
-                        dbgs() << "\n";
+                        dbgs() << "AliasAnalysisVisitor::makePointsToCopy(): index into an embedded struct in the host object!\n";
 #endif
-                        if( (src_fieldTy && src_fieldTy == basePointToType) || 
-                            (src_fieldTy_arrElem && src_fieldTy_arrElem == basePointToType)
-                          ){
+                        //Ok, the src points to a struct embedded in the host object, we cannot just use
+                        //the arg "fieldId" as "dstfieldId" of the host object because it's an offset into the embedded struct.
+                        //We have two candidate methods here:
+                        //(1) Create a separate TargetObject representing this embedded struct, then make the pointer operand in original GEP point to it.
+                        //(2) Directly create an outside object for the resulted pointer of this GEP. (i.e. the parameter "srcPointer")
+                        //Method (1):
+                        AliasObject *newObj = nullptr;
+                        if (hostObj->embObjs.find(host_dstFieldId) != hostObj->embObjs.end()){
 #ifdef DEBUG_GET_ELEMENT_PTR
-                            dbgs() << "AliasAnalysisVisitor::makePointsToCopy(): index into an embedded struct in the host object!\n";
+                            dbgs() << "AliasAnalysisVisitor::makePointsToCopy(): find the previosuly created embed object!\n";
 #endif
-                            //Ok, the src points to a struct embedded in the host object, we cannot just use
-                            //the arg "fieldId" as "dstfieldId" of the host object because it's an offset into the embedded struct.
-                            //We have two candidate methods here:
-                            //(1) Create a separate TargetObject representing this embedded struct, then make the pointer operand in original GEP point to it.
-                            //(2) Directly create an outside object for the resulted pointer of this GEP. (i.e. the parameter "srcPointer")
-                            //Method (1):
-                            AliasObject *newObj = nullptr;
-                            if (hostObj->embObjs.find(host_dstFieldId) != hostObj->embObjs.end()){
+                            //We have created that embedded object previously.
+                            newObj = hostObj->embObjs[host_dstFieldId];
+                        }else{
 #ifdef DEBUG_GET_ELEMENT_PTR
-                                dbgs() << "AliasAnalysisVisitor::makePointsToCopy(): find the previosuly created embed object!\n";
+                            dbgs() << "AliasAnalysisVisitor::makePointsToCopy(): try to create a new embed object!\n";
 #endif
-                                //We have created that embedded object previously.
-                                newObj = hostObj->embObjs[host_dstFieldId];
-                            }else{
-#ifdef DEBUG_GET_ELEMENT_PTR
-                                dbgs() << "AliasAnalysisVisitor::makePointsToCopy(): try to create a new embed object!\n";
-#endif
-                                //Need to create a new AliasObject for the embedded struct.
-                                newObj = this->createOutsideObj(gep->getPointerOperand(),false);
-                                //Properly taint it.
-                                if(newObj){
-                                    newObj->is_taint_src = hostObj->is_taint_src;
-                                    //This new TargetObject should also be tainted according to the host object taint flags.
-                                    std::set<TaintFlag*> *src_taintFlags = hostObj->getFieldTaintInfo(host_dstFieldId);
-                                    if(src_taintFlags){
-                                        for(TaintFlag *currTaintFlag:*src_taintFlags){
-                                            newObj->taintAllFieldsWithTag(currTaintFlag);
-                                        }
-                                    }
-                                    //Record it in the "embObjs".
-                                    hostObj->embObjs[host_dstFieldId] = newObj;
-                                }
-                            }
+                            //Need to create a new AliasObject for the embedded struct.
+                            newObj = this->createOutsideObj(gep->getPointerOperand(),false);
+                            //Properly taint it.
                             if(newObj){
-                                newPointsToObj->targetObject = newObj;
-                                if(fieldId >= 0){
-                                    newPointsToObj->dstfieldId = fieldId;
-                                }else{
-                                    //Is this possible??
-                                    newPointsToObj->dstfieldId = 0;
+                                newObj->is_taint_src = hostObj->is_taint_src;
+                                //This new TargetObject should also be tainted according to the host object taint flags.
+                                std::set<TaintFlag*> *src_taintFlags = hostObj->getFieldTaintInfo(host_dstFieldId);
+                                if(src_taintFlags){
+                                    for(TaintFlag *currTaintFlag:*src_taintFlags){
+                                        newObj->taintAllFieldsWithTag(currTaintFlag);
+                                    }
                                 }
+                                //Record it in the "embObjs".
+                                hostObj->embObjs[host_dstFieldId] = newObj;
+                            }
+                        }
+                        if(newObj){
+                            newPointsToObj->targetObject = newObj;
+                            if(fieldId >= 0){
+                                newPointsToObj->dstfieldId = fieldId;
+                            }else{
+                                //Is this possible??
+                                newPointsToObj->dstfieldId = 0;
+                            }
+                        }else{
+                            //We cannot create the new OutsideObject, it's possibly because the target pointer doesn't point to a struct.
+                            //In this case, rather than using the original wrong logic, we'd better make it point to nothing.
+#ifdef DEBUG_GET_ELEMENT_PTR
+                            errs() << "In makePointsToCopy(): cannot get or create embedded object for: ";
+                            gep->getPointerOperand()->print(errs());
+                            errs() << "\n";
+#endif
+                            goto fail_next;
+                        }
+                            /*
+                            //Method (2):
+                            OutsideObject *newObj = this->createOutsideObj(srcPointer,false);
+                            if(newObj){
+                                newObj->is_taint_src = hostObj-->is_taint_src;
+                                //This new TargetObject should also be tainted according to the host object taint flags.
+                                std::set<TaintFlag*> *src_taintFlags =  hostObj->getFieldTaintInfo(host_dstFieldId);
+                                if(src_taintFlags){
+                                    for(TaintFlag *currTaintFlag:*src_taintFlags){
+                                        newObj->taintAllFieldsWithTag(currTaintFlag);
+                                    }
+                                }
+                                newPointsToObj->targetObject = newObj;
+                                //Since now the newObj directly represents the final resulted object of this GEP (instead of the embedded struct),
+                                //we will set the dstField to 0.
+                                newPointsToObj->dstfieldId = 0;
                             }else{
                                 //We cannot create the new OutsideObject, it's possibly because the target pointer doesn't point to a struct.
                                 //In this case, rather than using the original wrong logic, we'd better make it point to nothing.
 #ifdef DEBUG_GET_ELEMENT_PTR
-                                errs() << "In makePointsToCopy(): cannot get or create embedded object for: ";
-                                gep->getPointerOperand()->print(errs());
+                                errs() << "In makePointsToCopy(): cannot create OutsideObject for: ";
+                                srcPointer->print(errs());
                                 errs() << "\n";
 #endif
-                                goto next;
+                                goto fail_next;
                             }
-                                /*
-                                //Method (2):
-                                OutsideObject *newObj = this->createOutsideObj(srcPointer,false);
-                                if(newObj){
-                                    newObj->is_taint_src = hostObj-->is_taint_src;
-                                    //This new TargetObject should also be tainted according to the host object taint flags.
-                                    std::set<TaintFlag*> *src_taintFlags =  hostObj->getFieldTaintInfo(host_dstFieldId);
-                                    if(src_taintFlags){
-                                        for(TaintFlag *currTaintFlag:*src_taintFlags){
-                                            newObj->taintAllFieldsWithTag(currTaintFlag);
-                                        }
-                                    }
-                                    newPointsToObj->targetObject = newObj;
-                                    //Since now the newObj directly represents the final resulted object of this GEP (instead of the embedded struct),
-                                    //we will set the dstField to 0.
-                                    newPointsToObj->dstfieldId = 0;
-                                }else{
-                                    //We cannot create the new OutsideObject, it's possibly because the target pointer doesn't point to a struct.
-                                    //In this case, rather than using the original wrong logic, we'd better make it point to nothing.
-#ifdef DEBUG_GET_ELEMENT_PTR
-                                    errs() << "In makePointsToCopy(): cannot create OutsideObject for: ";
-                                    srcPointer->print(errs());
-                                    errs() << "\n";
-#endif
-                                    goto next;
-                                }
-                                */
-                        }
+                            */
                     }
                 }
                 //----------MOD----------
@@ -440,11 +434,22 @@ namespace DRCHECKER {
                 dbgs() << " | dstField: " << newPointsToObj->dstfieldId << "\n";
 
 #endif
-                newPointsToInfo->insert(newPointsToInfo->begin(), newPointsToObj);
-next:
+                if (newPointsToObj){
+                    //Insert the points-to info in two cases:
+                    //(1) It indexes into an embedded structure (that we have already properly handled)
+                    //(2) It's not an embedded structure, and the target field ID doesn't exceed the host structure's limit.
+                    if (is_emb || fieldId <= 0 || (!host_type->isStructTy()) || host_type->getStructNumElements() > fieldId){
+                        newPointsToInfo->insert(newPointsToInfo->begin(), newPointsToObj);
+                    }
+                }
                 visitedObjects.insert(visitedObjects.begin(), hostObj);
-            }
-        }
+                continue;
+fail_next:
+                delete newPointsToObj;
+                visitedObjects.insert(visitedObjects.begin(), hostObj);
+                continue;
+            }//if in visitedObjects
+        }//for
 #ifdef DEBUG_GET_ELEMENT_PTR
         dbgs() << "makePointsToCopy: returned newPointsToInfo size: " << newPointsToInfo->size() << "\n";
 #endif
