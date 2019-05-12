@@ -251,21 +251,21 @@ namespace DRCHECKER {
         return pvec;
     }
 
-    std::string InstructionUtils::getBBStrID(BasicBlock* B) {
+    std::string& InstructionUtils::getBBStrID(BasicBlock* B) {
         static std::map<BasicBlock*,std::string> BBNameMap;
-        if (!B) {
-            return "";
-        }
-        if (!B->getName().empty())
-        	return B->getName().str();
-
-        //NOTE: "printAsOperand" is very expensive, so we set up the cache "BBNameMap" here.
         if (BBNameMap.find(B) == BBNameMap.end()) {
-    	    std::string Str;
-    	    raw_string_ostream OS(Str);
-    	    B->printAsOperand(OS, false);
-            BBNameMap[B] = OS.str();
-    	    return OS.str();
+            if (B) {
+                if (!B->getName().empty()){
+                    BBNameMap[B] = B->getName().str();
+                }else{
+    	            std::string Str;
+    	            raw_string_ostream OS(Str);
+    	            B->printAsOperand(OS, false);
+                    BBNameMap[B] = OS.str();
+                }
+            }else{
+                BBNameMap[B] = "";
+            }
         }
         return BBNameMap[B];
     }

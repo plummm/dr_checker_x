@@ -93,7 +93,7 @@ namespace DRCHECKER {
         static std::vector<LOC_INF>* getStrCtx(std::vector<Instruction*> *callSites);
 
         //If the BB has a name then return it, otherwise return its numeric ID as shown in ".ll".
-        static std::string getBBStrID(BasicBlock*);
+        static std::string& getBBStrID(BasicBlock*);
 
         //Set up a cache for the expensive "print" operation for llvm::Value.
         static std::string& getValueStr(Value *v);
