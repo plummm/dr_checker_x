@@ -108,11 +108,9 @@ namespace DRCHECKER {
             }
         }
         //Analyze the update pattern.
-        /*
         if (!targetObjects.empty()) {
             this->analyzeModPattern(I, &targetObjects);
         }
-        */
         return;
     }
 
@@ -184,6 +182,7 @@ namespace DRCHECKER {
             }else {
                 std::map<std::string,int64_t> m;
                 int r;
+                int tainted_by_target = 0;
                 for (int i=0; i<2; i++) {
                     if (dyn_cast<llvm::Constant>(op[i])) {
                         //Ok get the constant value.
@@ -201,14 +200,35 @@ namespace DRCHECKER {
                         //(1) Simply see whether the variable is tainted by any combination in "targetObjects".
                         //(2) Trace back the IR and match the pattern "load x, obj->f; [cast...] ; arithmeticis"
                         //TODO: we now use (1)
+                        std::set<TaintFlag*>* taintFlags = TaintUtils::getTaintInfo(this->currState, this->currFuncCallSites, op[i]);
+                        if (!taintFlags) {
+                            return 0;
+                        }
+                        for(auto tf : *taintFlags) {
+                            if (!tf || !tf->tag) {
+                                continue;
+                            }
+                            TaintTag *tag = tf->tag;
+                            for (auto to : *targetObjects) {
+                                if (tag->v == to.second->getValue() && tag->fieldId == to.first) {
+                                    tainted_by_target = 1;
+                                    break;
+                                }
+                            }//Check whether it's in "targetObjects"
+                            if (tainted_by_target) {
+                                break;
+                            }
+                        }
                     } //variable op
                 }//for
+                //Reaching here, we must have already got the constant number, thus the final result is decided by
+                //whether the variable is from the global state.
+                return tainted_by_target;
             }
         }else {
             //both operands are not constant, we cannot recognize such patterns now.
             return 0;
         }
-        return 1;
     }
 
     //Idealy, we want to get the full formula of the variable to store, which requires baiscally a backward slicing
@@ -280,14 +300,24 @@ namespace DRCHECKER {
             }else if (dyn_cast<llvm::MulOperator>(v)) {
                 (*res)["MUL"] = cn;
             }else if (dyn_cast<llvm::ShlOperator>(v)) {
-                //
+                if (cn_o == 1) {
+                    (*res)["SHL"] = cn;
+                }
             }else if (dyn_cast<llvm::SubOperator>(v)) {
                 if (cn_o == 1) {
                     (*res)["SUB"] = cn;
                 }
             }
         }else if (dyn_cast<llvm::PossiblyExactOperator>(v)) {
-            //
+            if (dyn_cast<llvm::AShrOperator>(v) || dyn_cast<llvm::LShrOperator>(v)) {
+                if (cn_o == 1) {
+                    (*res)["SHR"] = cn;
+                }
+            }else if (dyn_cast<llvm::SDivOperator>(v) || dyn_cast<llvm::UDivOperator>(v)) {
+                if (cn_o == 1) {
+                    (*res)["DIV"] = cn;
+                }
+            }
         }else {
             //TODO: What else?
         }

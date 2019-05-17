@@ -8,6 +8,7 @@
 #include "ModuleState.h"
 #include "VisitorCallback.h"
 #include "TaintInfo.h"
+#include "TaintUtils.h"
 
 using namespace llvm;
 
