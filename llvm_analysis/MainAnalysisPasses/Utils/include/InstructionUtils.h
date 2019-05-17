@@ -14,12 +14,12 @@
 #include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/DebugInfo.h"
 #include "llvm/Analysis/AliasAnalysis.h"
+#include "llvm/IR/Operator.h"
 #include <string>
 #include <sstream>
+#include "../../SoundyAliasAnalysis/include/ResType.h"
 
 using namespace llvm;
-
-typedef std::vector<std::string> LOC_INF;
 
 namespace DRCHECKER {
     class InstructionUtils {
@@ -100,6 +100,14 @@ namespace DRCHECKER {
 
         //Set up a cache for the expensive "print" operation for llvm::Type.
         static std::string& getTypeStr(Type*);
+
+        static bool isScalar(Value*);
+
+        static int getConstantValue(Constant*,TRAIT*);
+
+        static Value *stripAllCasts4Scalar(Value*);
+
+        static void stripFuncNameSuffix(std::string *fn);
     };
 }
 #endif //PROJECT_INSTRUCTIONUTILS_H

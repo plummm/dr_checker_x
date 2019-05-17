@@ -1,8 +1,10 @@
 #ifndef _H_RESTYPE
 #define _H_RESTYPE
+
 #include <set>
 #include <map>
 #include <vector>
+#include <string>
 
 //Here some types used for static analysis result data exchange.
 //They are defined like some SQL DB tables, some primary keys (e.g. taint tag id) are shared acorss tables.
@@ -39,5 +41,11 @@ typedef std::map<ID_TY,std::string> TAG_INFO_TY;
 
 //id -> the ctx of the mod inst
 typedef std::map<ID_TY,std::vector<LOC_INF>> MOD_INST_CTX_MAP_TY;
+
+//pattern name -> numeric value (e.g. ADD -> 1, LT -> 0)
+typedef std::map<std::string,int64_t> TRAIT;
+
+//Update(Condition) pattern of a mod(br) instruction for a global state.
+typedef std::map<std::string,std::map<std::string,std::map<std::string,std::map<std::string,TRAIT>>>> INST_TRAIT_MAP;
 
 #endif

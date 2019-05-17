@@ -54,6 +54,16 @@ namespace DRCHECKER {
                                                std::vector<Instruction *> *oldFuncCallSites,
                                                std::vector<Instruction *> *currFuncCallSites);
 
+        void analyzeModPattern(StoreInst &I, std::set<std::pair<long, AliasObject*>> *targetObjects);
+
+        virtual void visitBranchInst(BranchInst &I);
+
+        void analyzeCmpPattern(BranchInst &I);
+
+        int verifyPatternExistence(Value* v, std::set<std::pair<long, AliasObject*>> *targetObjects, int64_t *cn, int64_t *cn_o);
+
+        int getArithmeticsInf(Value*,TRAIT*,int64_t,int64_t);
+
         //TODO: Are there instructions other than "store" that can update a variable? 
 
     }; //ModAnalysisVisitor class definition

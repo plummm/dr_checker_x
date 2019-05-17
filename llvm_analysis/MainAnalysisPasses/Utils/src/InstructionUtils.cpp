@@ -217,20 +217,40 @@ namespace DRCHECKER {
         ROS << OS.str();
     }
 
+    void InstructionUtils::stripFuncNameSuffix(std::string *fn) {
+        if (!fn) {
+            return;
+        }
+        std::size_t n = fn->rfind(".");
+        if (n != std::string::npos) {
+            fn->erase(n);
+        }
+        return;
+    }
+
     LOC_INF* InstructionUtils::getInstStrRep(Instruction *I) {
         if(!I){
             return nullptr;
         }
         std::string inst,bb,func,mod;
+        DILocation *instrLoc = InstructionUtils::getCorrectInstrLocation(I);
         inst = InstructionUtils::getValueStr(dyn_cast<Value>(I));
         if(I->getParent()){
 			bb = InstructionUtils::getBBStrID(I->getParent());
         }
         if(I->getFunction()){
             func = I->getFunction()->getName().str();
+            InstructionUtils::stripFuncNameSuffix(&func);
         }
-        if(I->getModule()){
-            mod = I->getModule()->getName().str();
+        //Put the file name.
+        if (instrLoc != nullptr) {
+            mod = instrLoc->getFilename();
+        } else {
+            if(I->getModule()){
+                mod = I->getModule()->getName().str();
+            }else{
+                //Is this possible?
+            }
         }
         LOC_INF *str_inst = new LOC_INF;
         str_inst->push_back(inst);
@@ -302,4 +322,65 @@ namespace DRCHECKER {
         return TypeNameMap[v];
     }
 
+    //hz: whether it's a scalar value.
+    //Although kernel doesn't use float numbers, we still consider it since we may extend Dr.Checker for general programs later.
+    bool InstructionUtils::isScalar(Value* v) {
+        if (!v) {
+            return false;
+        }
+        Type *ty = v->getType();
+        if (!ty) {
+            return false;
+        }
+        if (ty->isIntegerTy() || ty->isFloatingPointTy()) {
+            return true;
+        }
+        return false;
+    }
+
+    int InstructionUtils::getConstantValue(Constant* C, TRAIT* res) {
+        if (!C || !res) {
+            return 0;
+        }
+        if (dyn_cast<llvm::ConstantInt>(C)) {
+            (*res)["CONST_INT"] = (dyn_cast<llvm::ConstantInt>(C))->getSExtValue();
+            return 1;
+        }else if (dyn_cast<llvm::ConstantFP>(C)) {
+            //TODO: we need to put the float value in an "int64_t"
+            return 2;
+        }else if (dyn_cast<llvm::UndefValue>(C)) {
+            (*res)["CONST_UNDEF"] = 0;
+            return 3;
+        }else if (dyn_cast<llvm::ConstantExpr>(C)) {
+            //TODO: we need to evaluate the expr to a numeric value, how to do that?
+            return 4;
+        }else {
+            //Ignore other cases for now.
+            return 5;
+        }
+    }
+
+    Value* InstructionUtils::stripAllCasts4Scalar(Value* v) {
+        while (v) {
+            if (dyn_cast<llvm::CastInst>(v)) {
+                v = (dyn_cast<llvm::CastInst>(v))->getOperand(0);
+                continue;
+            }
+            if (dyn_cast<llvm::BitCastOperator>(v)) {
+                v = (dyn_cast<llvm::BitCastOperator>(v))->getOperand(0);
+                continue;
+            }
+            if (dyn_cast<llvm::PtrToIntOperator>(v)) {
+                //This means it's not a real scalar, but just converted from a pointer, we may ignore this case.
+                return nullptr;
+            }
+            if (dyn_cast<llvm::ZExtOperator>(v)) {
+                v = (dyn_cast<llvm::ZExtOperator>(v))->getOperand(0);
+                continue;
+            }
+            //It's currently not a cast inst.
+            break;
+        }
+        return v;
+    }
 }

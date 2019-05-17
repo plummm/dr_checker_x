@@ -114,6 +114,12 @@ namespace DRCHECKER {
         //hz: the mapping between BBs in a switch-case structure to the leading switch variable values. 
         std::map<BasicBlock*,std::set<uint64_t>> switchMap;
 
+        //hz: records the update pattern of the store insts, e.g., a = 0 or a++
+        std::map<StoreInst*,TRAIT> modTraitMap;
+
+        //hz: records the branch condition pattern, e.g., a == 0 or a > 1
+        std::map<BranchInst*,TRAIT> brTraitMap;
+
         GlobalState(RangeAnalysis::RangeAnalysis *ra, DataLayout *currDataLayout) {
             this->range_analysis = ra;
             this->targetDataLayout = currDataLayout;
