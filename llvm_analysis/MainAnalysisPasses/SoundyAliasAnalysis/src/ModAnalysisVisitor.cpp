@@ -348,17 +348,9 @@ namespace DRCHECKER {
                 break;
             }
         }
-        std::map<std::string,int64_t> m;
-        int r = InstructionUtils::getConstantValue(c,&m);
-        int cn;
-        if (m.find("CONST_INT") != m.end()) {
-            cn = m["CONST_INT"];
-        }else {
-            //TODO: We don't match these patterns now.
-            return;
-        }
         TRAIT *pt = &this->currState.brTraitMap[&I][this->actx->callSites];
         //Is the comparison against a function return value?
+        ///////////////////////////////////////////////////
         Value *v = cmpInst->getOperand(1-cn_o);
         v = InstructionUtils::stripAllCasts(v,false);
         if (v && dyn_cast<CallInst>(v)) {
@@ -367,6 +359,16 @@ namespace DRCHECKER {
                 (*pt)["RET_" + callee] = 0;
                 //TODO: in this case need we return?
             }
+        }
+        ///////////////////////////////////////////////////
+        std::map<std::string,int64_t> m;
+        int r = InstructionUtils::getConstantValue(c,&m);
+        int cn;
+        if (m.find("CONST_INT") != m.end()) {
+            cn = m["CONST_INT"];
+        }else {
+            //TODO: We don't match these patterns now.
+            return;
         }
         //Figure out its predicate.
         llvm::CmpInst::Predicate pred = cmpInst->getPredicate();
