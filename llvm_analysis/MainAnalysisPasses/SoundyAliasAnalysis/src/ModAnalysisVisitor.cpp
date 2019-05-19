@@ -78,7 +78,7 @@ namespace DRCHECKER {
                         dbgs() << "\n";
                         tag->dumpInfo(dbgs());
 #endif
-                        tag->insertModInst(&I,this->currFuncCallSites);
+                        tag->insertModInst(&I,this->actx->callSites);
                     }
                 }
             } else {
@@ -103,7 +103,7 @@ namespace DRCHECKER {
                     I.print(dbgs());
                     dbgs() << "\n";
 #endif
-                    dstObj->all_contents_taint_flag->tag->insertModInst(&I,this->currFuncCallSites);
+                    dstObj->all_contents_taint_flag->tag->insertModInst(&I,this->actx->callSites);
                 }
             }
         }
@@ -117,7 +117,7 @@ namespace DRCHECKER {
     //Analyze the modification pattern of current "store", e.g., a = 1 or a++?
     void ModAnalysisVisitor::analyzeModPattern(StoreInst &I, std::set<std::pair<long, AliasObject*>> *targetObjects) {
         if ( this->currState.modTraitMap.find(&I) != this->currState.modTraitMap.end() &&
-             this->currState.modTraitMap[&I].find(this->currFuncCallSites) != this->currState.modTraitMap[&I].end() ) 
+             this->currState.modTraitMap[&I].find(this->actx->callSites) != this->currState.modTraitMap[&I].end() ) 
         {
             //Already analyzed
             return;
@@ -131,7 +131,7 @@ namespace DRCHECKER {
         //Is it a const value?
         if (dyn_cast<llvm::Constant>(srcValue)) {
             //A direct assignment.
-            int r = InstructionUtils::getConstantValue(dyn_cast<llvm::Constant>(srcValue), &this->currState.modTraitMap[&I][this->currFuncCallSites]);
+            int r = InstructionUtils::getConstantValue(dyn_cast<llvm::Constant>(srcValue), &this->currState.modTraitMap[&I][this->actx->callSites]);
             return;
         }
         //Ok, it's not an const value, then how is it derived?
@@ -159,7 +159,7 @@ namespace DRCHECKER {
             return;
         }
         //Next figure out the arithmetics.
-        int r = this->getArithmeticsInf(srcValue,&this->currState.modTraitMap[&I][this->currFuncCallSites],cn,cn_o);
+        int r = this->getArithmeticsInf(srcValue,&this->currState.modTraitMap[&I][this->actx->callSites],cn,cn_o);
         return;
     }
     
@@ -357,16 +357,14 @@ namespace DRCHECKER {
             //TODO: We don't match these patterns now.
             return;
         }
-        TRAIT *pt = &this->currState.brTraitMap[&I][this->currFuncCallSites];
+        TRAIT *pt = &this->currState.brTraitMap[&I][this->actx->callSites];
         //Is the comparison against a function return value?
         Value *v = cmpInst->getOperand(1-cn_o);
         v = InstructionUtils::stripAllCasts(v,false);
         if (v && dyn_cast<CallInst>(v)) {
-            CallInst *callinst = dyn_cast<CallInst>(v);
-            //Get and record the callee name.
-            Function *callee = callinst->getCalledFunction();
-            if (callee) {
-                (*pt)["RET_" + callee->getName().str()] = 0;
+            std::string callee = InstructionUtils::getCalleeName(dyn_cast<CallInst>(v),true);
+            if (callee.size() > 0){
+                (*pt)["RET_" + callee] = 0;
                 //TODO: in this case need we return?
             }
         }
@@ -433,15 +431,19 @@ namespace DRCHECKER {
        I.print(dbgs());
        dbgs() << "\n";
 #endif
-        // if this is a kernel internal function.
-        if(currFunc->isDeclaration()) {
-            //this->handleKernelInternalFunction(I, currFunc);
-            return nullptr;
-        }
-        // create a new ModAnalysisVisitor
-        ModAnalysisVisitor *vis = new ModAnalysisVisitor(currState, currFunc, callSiteContext);
+       std::string n = InstructionUtils::getCalleeName(&I,true);
+       if (n.size() > 0) {
+           this->currState.calleeMap[n][&I].insert(this->actx->callSites);
+       }
+       // if this is a kernel internal function.
+       if(currFunc->isDeclaration()) {
+           //this->handleKernelInternalFunction(I, currFunc);
+           return nullptr;
+       }
+       // create a new ModAnalysisVisitor
+       ModAnalysisVisitor *vis = new ModAnalysisVisitor(currState, currFunc, callSiteContext);
 
-        return vis;
+       return vis;
     }
 
 }// namespace DRCHECKER

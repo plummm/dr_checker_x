@@ -120,6 +120,9 @@ namespace DRCHECKER {
         //hz: records the branch condition pattern, e.g., a == 0 or a > 1
         std::map<BranchInst*,std::map<std::vector<Instruction*>*,TRAIT>> brTraitMap;
 
+        //hz: func name -> call inst -> set of ctx ptr
+        std::map<std::string,std::map<CallInst*,std::set<std::vector<Instruction*>*>>> calleeMap;
+
         GlobalState(RangeAnalysis::RangeAnalysis *ra, DataLayout *currDataLayout) {
             this->range_analysis = ra;
             this->targetDataLayout = currDataLayout;

@@ -28,7 +28,7 @@ namespace DRCHECKER {
         Value *v;
         Type *type;
         //Record all instructions (w/ its call context) that can possibly modify this taint source.
-        std::map< Instruction *, std::vector<std::vector<Instruction*>*> > mod_insts;
+        std::map< Instruction *, std::set<std::vector<Instruction*>*> > mod_insts;
 
         TaintTag(long fieldId, Value *v) {
             this -> fieldId = fieldId;
@@ -81,6 +81,7 @@ namespace DRCHECKER {
                    this->v == dstTag->v;
         }
 
+        /*
         void insertModInst(Instruction *inst, std::vector<Instruction *> *call_ctx) {
             if (!inst){
 #ifdef DEBUG_INSERT_MOD_INST
@@ -116,6 +117,18 @@ namespace DRCHECKER {
 #endif
                 }
             }
+        }
+        */
+
+        //NOTE: we now assume a context can only be created once in AnalysisContext and thus the ptr "call_ctx" is different for different contexts.
+        void insertModInst(Instruction *inst, std::vector<Instruction *> *call_ctx) {
+            if (!inst || !call_ctx){
+#ifdef DEBUG_INSERT_MOD_INST
+                dbgs() << "insertModInst: null inst or call_ctx\n";
+#endif
+                return;
+            }
+            this->mod_insts[inst].insert(call_ctx);
         }
 
         void dumpInfo(raw_ostream &OS) {

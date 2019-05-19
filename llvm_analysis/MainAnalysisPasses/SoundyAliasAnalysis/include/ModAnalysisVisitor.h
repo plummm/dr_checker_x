@@ -24,6 +24,7 @@ namespace DRCHECKER {
     public:
         GlobalState &currState;
         Function *targetFunction;
+        AnalysisContext *actx;
 
         // context of the analysis, basically list of call sites
         std::vector<Instruction *> *currFuncCallSites;
@@ -35,7 +36,7 @@ namespace DRCHECKER {
             // Initialize the call site list
             this->currFuncCallSites = srcCallSites;
             // ensure that we have a context for current function.
-            targetState.getOrCreateContext(this->currFuncCallSites);
+            this->actx = targetState.getOrCreateContext(this->currFuncCallSites);
         }
 
         ~ModAnalysisVisitor() {

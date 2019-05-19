@@ -111,6 +111,8 @@ namespace DRCHECKER {
         static Value *stripAllCasts(Value*,bool);
 
         static void stripFuncNameSuffix(std::string *fn);
+
+        static std::string getCalleeName(CallInst*,bool);
     };
 }
 #endif //PROJECT_INSTRUCTIONUTILS_H

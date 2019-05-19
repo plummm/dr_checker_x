@@ -420,4 +420,19 @@ namespace DRCHECKER {
         }
         return v;
     }
+
+    std::string InstructionUtils::getCalleeName(CallInst* I, bool strip) {
+        if (!I) {
+            return "";
+        }
+        Function *callee = I->getCalledFunction();
+        if (callee) {
+            std::string n = callee->getName().str();
+            if (strip) {
+                InstructionUtils::stripFuncNameSuffix(&n);
+            }
+            return n;
+        }
+        return "";
+    }
 }
