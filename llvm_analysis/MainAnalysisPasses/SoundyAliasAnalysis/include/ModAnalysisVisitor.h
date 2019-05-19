@@ -59,8 +59,6 @@ namespace DRCHECKER {
 
         virtual void visitBranchInst(BranchInst &I);
 
-        void analyzeCmpPattern(BranchInst &I);
-
         int verifyPatternExistence(Value* v, std::set<std::pair<long, AliasObject*>> *targetObjects, int64_t *cn, int64_t *cn_o);
 
         int getArithmeticsInf(Value*,TRAIT*,int64_t,int64_t);

@@ -9,7 +9,7 @@
 //Here some types used for static analysis result data exchange.
 //They are defined like some SQL DB tables, some primary keys (e.g. taint tag id) are shared acorss tables.
 
-typedef unsigned long ID_TY;
+typedef uint64_t ID_TY;
 
 //names for: inst, bb, func, and module
 typedef std::vector<std::string> LOC_INF;
@@ -21,7 +21,7 @@ typedef std::map<unsigned, std::set<uint64_t>> ARG_CONSTRAINTS;
 typedef std::map<ID_TY,ARG_CONSTRAINTS> MOD_INF;
 
 //br's ctx_id -> set<tag_id> that taints this br
-typedef std::map<ID_TY,std::set<unsigned long>> ACTX_TAG_MAP;
+typedef std::map<ID_TY,std::set<ID_TY>> ACTX_TAG_MAP;
 
 //module name -> func name -> BB names (whose last 'br' is affected by global states) -> ACTX_TAG_MAP
 typedef std::map<std::string,std::map<std::string,std::map<std::string,ACTX_TAG_MAP>>> TAINTED_BR_TY;
@@ -46,6 +46,6 @@ typedef std::map<ID_TY,std::vector<LOC_INF>> MOD_INST_CTX_MAP_TY;
 typedef std::map<std::string,int64_t> TRAIT;
 
 //Update(Condition) pattern of a mod(br) instruction for a global state.
-typedef std::map<std::string,std::map<std::string,std::map<std::string,std::map<std::string,TRAIT>>>> INST_TRAIT_MAP;
+typedef std::map<ID_TY,TRAIT> INST_TRAIT_MAP;
 
 #endif

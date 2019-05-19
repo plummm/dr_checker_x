@@ -115,10 +115,10 @@ namespace DRCHECKER {
         std::map<BasicBlock*,std::set<uint64_t>> switchMap;
 
         //hz: records the update pattern of the store insts, e.g., a = 0 or a++
-        std::map<StoreInst*,TRAIT> modTraitMap;
+        std::map<StoreInst*,std::map<std::vector<Instruction*>*,TRAIT>> modTraitMap;
 
         //hz: records the branch condition pattern, e.g., a == 0 or a > 1
-        std::map<BranchInst*,TRAIT> brTraitMap;
+        std::map<BranchInst*,std::map<std::vector<Instruction*>*,TRAIT>> brTraitMap;
 
         GlobalState(RangeAnalysis::RangeAnalysis *ra, DataLayout *currDataLayout) {
             this->range_analysis = ra;
@@ -627,7 +627,7 @@ namespace DRCHECKER {
                 if(!vt || vt->size() <= 0){
                     continue;
                 }
-                unsigned long ctx_id = (unsigned long)&(*(it.first));
+                ID_TY ctx_id = (ID_TY)&(*(it.first));
                 //Then all the Value-TaintFlag pairs.
                 bool any_br_taint = false;
                 for (auto const &jt : *vt){
@@ -647,7 +647,7 @@ namespace DRCHECKER {
                     std::set<TaintFlag*> *pflags = jt.second;
                     for (TaintFlag *p : *pflags){
                         //Here we assume that "br" is always the last instruction of a BB.
-                        taintedBrs[(*p_str_inst)[3]][(*p_str_inst)[2]][(*p_str_inst)[1]][ctx_id].insert((unsigned long)(p->tag));
+                        taintedBrs[(*p_str_inst)[3]][(*p_str_inst)[2]][(*p_str_inst)[1]][ctx_id].insert((ID_TY)(p->tag));
                         if(p->tag){
                             uniqTags.insert(p->tag);
                         }
@@ -675,7 +675,7 @@ namespace DRCHECKER {
 #ifdef DEBUG_TAINT_SERIALIZE_PROGRESS
                 dbgs() << (++tag_cnt) << "/" << total_tag_cnt << "\n";
 #endif
-                unsigned long tag_id = (unsigned long)tag;
+                ID_TY tag_id = (ID_TY)tag;
                 /*
                     dbgs() << tag_id << "\n";
                     if(tag->v){
@@ -695,9 +695,9 @@ namespace DRCHECKER {
                     for (auto ctx : e.second) {
                         //"ctx" is of type "std::vector<Instruction*>*".
                         std::vector<LOC_INF> *pctx = InstructionUtils::getStrCtx(ctx);
-                        modInstCtxMap[(unsigned long)pctx] = *pctx;
+                        modInstCtxMap[(ID_TY)pctx] = *pctx;
                         ARG_CONSTRAINTS *p_constraints;
-                        p_constraints = &(tagModMap[tag_id][(*p_str_inst)[3]][(*p_str_inst)[2]][(*p_str_inst)[1]][(*p_str_inst)[0]][(unsigned long)pctx]);
+                        p_constraints = &(tagModMap[tag_id][(*p_str_inst)[3]][(*p_str_inst)[2]][(*p_str_inst)[1]][(*p_str_inst)[0]][(ID_TY)pctx]);
                         //Fill in the constraints of func args if any.
                         if (ctx->size() <= 1){
                             continue;

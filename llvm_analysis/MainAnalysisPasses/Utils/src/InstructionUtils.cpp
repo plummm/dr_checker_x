@@ -380,13 +380,19 @@ namespace DRCHECKER {
         }else if (dyn_cast<llvm::ConstantExpr>(C)) {
             //TODO: we need to evaluate the expr to a numeric value, how to do that?
             return 4;
+        }else if (dyn_cast<llvm::ConstantPointerNull>(C)) {
+            (*res)["CONST_NULLPTR"] = 0;
+            return 5;
+        }else if (dyn_cast<llvm::ConstantTokenNone>(C)) {
+            (*res)["CONST_NONETK"] = 0;
+            return 6;
         }else {
             //Ignore other cases for now.
-            return 5;
+            return 7;
         }
     }
 
-    Value* InstructionUtils::stripAllCasts4Scalar(Value* v) {
+    Value* InstructionUtils::stripAllCasts(Value* v, bool for_scalar) {
         while (v) {
             if (dyn_cast<llvm::CastInst>(v)) {
                 v = (dyn_cast<llvm::CastInst>(v))->getOperand(0);
@@ -397,8 +403,13 @@ namespace DRCHECKER {
                 continue;
             }
             if (dyn_cast<llvm::PtrToIntOperator>(v)) {
-                //This means it's not a real scalar, but just converted from a pointer, we may ignore this case.
-                return nullptr;
+                if (for_scalar) {
+                    //This means it's not a real scalar, but just converted from a pointer, we may ignore this case.
+                    return nullptr;
+                }else {
+                    v = (dyn_cast<llvm::PtrToIntOperator>(v))->getOperand(0);
+                    continue;
+                }
             }
             if (dyn_cast<llvm::ZExtOperator>(v)) {
                 v = (dyn_cast<llvm::ZExtOperator>(v))->getOperand(0);

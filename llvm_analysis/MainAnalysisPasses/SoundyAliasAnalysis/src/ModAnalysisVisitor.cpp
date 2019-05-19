@@ -116,7 +116,9 @@ namespace DRCHECKER {
 
     //Analyze the modification pattern of current "store", e.g., a = 1 or a++?
     void ModAnalysisVisitor::analyzeModPattern(StoreInst &I, std::set<std::pair<long, AliasObject*>> *targetObjects) {
-        if (this->currState.modTraitMap.find(&I) != this->currState.modTraitMap.end()) {
+        if ( this->currState.modTraitMap.find(&I) != this->currState.modTraitMap.end() &&
+             this->currState.modTraitMap[&I].find(this->currFuncCallSites) != this->currState.modTraitMap[&I].end() ) 
+        {
             //Already analyzed
             return;
         }
@@ -129,7 +131,7 @@ namespace DRCHECKER {
         //Is it a const value?
         if (dyn_cast<llvm::Constant>(srcValue)) {
             //A direct assignment.
-            int r = InstructionUtils::getConstantValue(dyn_cast<llvm::Constant>(srcValue), &currState.modTraitMap[&I]);
+            int r = InstructionUtils::getConstantValue(dyn_cast<llvm::Constant>(srcValue), &this->currState.modTraitMap[&I][this->currFuncCallSites]);
             return;
         }
         //Ok, it's not an const value, then how is it derived?
@@ -142,7 +144,7 @@ namespace DRCHECKER {
             return;
         }
         //First let's skip all potential cast instructions after the arithmetic instruction.
-        srcValue = InstructionUtils::stripAllCasts4Scalar(srcValue);
+        srcValue = InstructionUtils::stripAllCasts(srcValue,true);
         if (!srcValue) {
             //Maybe the origin is a pointer instead of a scalar, what else can cause this?
             return;
@@ -157,7 +159,7 @@ namespace DRCHECKER {
             return;
         }
         //Next figure out the arithmetics.
-        int r = this->getArithmeticsInf(srcValue,&currState.modTraitMap[&I],cn,cn_o);
+        int r = this->getArithmeticsInf(srcValue,&this->currState.modTraitMap[&I][this->currFuncCallSites],cn,cn_o);
         return;
     }
     
@@ -174,61 +176,54 @@ namespace DRCHECKER {
         llvm::Value* op[2];
         op[0] = u->getOperand(0);
         op[1] = u->getOperand(1);
-        if (dyn_cast<llvm::Constant>(op[0]) || dyn_cast<llvm::Constant>(op[1])) {
-            if (dyn_cast<llvm::Constant>(op[0]) && dyn_cast<llvm::Constant>(op[1])) {
-                //This should be impossible since in such case the value to store itself should be a constant.
-                //TODO: any exceptions?
-                return 0;
-            }else {
-                std::map<std::string,int64_t> m;
-                int r;
-                int tainted_by_target = 0;
-                for (int i=0; i<2; i++) {
-                    if (dyn_cast<llvm::Constant>(op[i])) {
-                        //Ok get the constant value.
-                        r = InstructionUtils::getConstantValue(dyn_cast<llvm::Constant>(op[i]),&m);
-                        (*cn_o) = i;
-                        if (m.find("CONST_INT") != m.end()) {
-                            (*cn) = m["CONST_INT"];
-                        }else {
-                            //TODO: We don't match these patterns now.
-                            return 0;
-                        }
-                    } /*constant op*/ else {
-                        //Decide whether the varible is indeed the global state, otherwise we cannot match the pattern.
-                        //We can do this in two ways:
-                        //(1) Simply see whether the variable is tainted by any combination in "targetObjects".
-                        //(2) Trace back the IR and match the pattern "load x, obj->f; [cast...] ; arithmeticis"
-                        //TODO: we now use (1)
-                        std::set<TaintFlag*>* taintFlags = TaintUtils::getTaintInfo(this->currState, this->currFuncCallSites, op[i]);
-                        if (!taintFlags) {
-                            return 0;
-                        }
-                        for(auto tf : *taintFlags) {
-                            if (!tf || !tf->tag) {
-                                continue;
-                            }
-                            TaintTag *tag = tf->tag;
-                            for (auto to : *targetObjects) {
-                                if (tag->v == to.second->getValue() && tag->fieldId == to.first) {
-                                    tainted_by_target = 1;
-                                    break;
-                                }
-                            }//Check whether it's in "targetObjects"
-                            if (tainted_by_target) {
-                                break;
-                            }
-                        }
-                    } //variable op
-                }//for
-                //Reaching here, we must have already got the constant number, thus the final result is decided by
-                //whether the variable is from the global state.
-                return tainted_by_target;
-            }
-        }else {
-            //both operands are not constant, we cannot recognize such patterns now.
+        if ((!dyn_cast<llvm::Constant>(op[0])) == (!dyn_cast<llvm::Constant>(op[1]))) {
+            //both operands are (not) constants, we cannot recognize such patterns now.
             return 0;
         }
+        std::map<std::string,int64_t> m;
+        int r;
+        int tainted_by_target = 0;
+        for (int i=0; i<2; i++) {
+            if (dyn_cast<llvm::Constant>(op[i])) {
+                //Ok get the constant value.
+                r = InstructionUtils::getConstantValue(dyn_cast<llvm::Constant>(op[i]),&m);
+                (*cn_o) = i;
+                if (m.find("CONST_INT") != m.end()) {
+                    (*cn) = m["CONST_INT"];
+                }else {
+                    //TODO: We don't match these patterns now.
+                    return 0;
+                }
+            } /*constant op*/ else {
+                //Decide whether the varible is indeed the global state, otherwise we cannot match the pattern.
+                //We can do this in two ways:
+                //(1) Simply see whether the variable is tainted by any combination in "targetObjects".
+                //(2) Trace back the IR and match the pattern "load x, obj->f; [cast...] ; arithmeticis"
+                //TODO: we now use (1)
+                std::set<TaintFlag*>* taintFlags = TaintUtils::getTaintInfo(this->currState, this->currFuncCallSites, op[i]);
+                if (!taintFlags) {
+                    return 0;
+                }
+                for(auto tf : *taintFlags) {
+                    if (!tf || !tf->tag) {
+                        continue;
+                    }
+                    TaintTag *tag = tf->tag;
+                    for (auto to : *targetObjects) {
+                        if (tag->v == to.second->getValue() && tag->fieldId == to.first) {
+                            tainted_by_target = 1;
+                            break;
+                        }
+                    }//Check whether it's in "targetObjects"
+                    if (tainted_by_target) {
+                        break;
+                    }
+                }
+            } //variable op
+        }//for
+        //Reaching here, we must have already got the constant number, thus the final result is decided by
+        //whether the variable is from the global state.
+        return tainted_by_target;
     }
 
     //Idealy, we want to get the full formula of the variable to store, which requires baiscally a backward slicing
@@ -326,11 +321,108 @@ namespace DRCHECKER {
 
     //Try to get the read pattern of the GV in the branch condition, e.g., a == 0 or a > 1?
     void ModAnalysisVisitor::visitBranchInst(BranchInst &I) {
-        //
-    }
-
-    void ModAnalysisVisitor::analyzeCmpPattern(BranchInst &I) {
-        //
+        //First figure out whether this br is tainted, no need to analyze untainted br.
+        std::set<TaintFlag*>* taintFlags = TaintUtils::getTaintInfo(this->currState, this->currFuncCallSites, &I);
+        if ((!taintFlags) || taintFlags->empty()) {
+            return;
+        }
+        //Try to identify the condition pattern.
+        //The general pattern we handle:
+        //<cond> = cmp ......
+        //br i1 <cond>, label <iftrue>, label <iffalse>
+        Value *condition = I.getCondition();
+        if (!condition || !dyn_cast<CmpInst>(condition)) {
+            return;
+        }
+        CmpInst *cmpInst = dyn_cast<CmpInst>(condition);
+        //TODO: we now only consider the case where one op is a variable while the other is a constant.
+        if ((!dyn_cast<Constant>(cmpInst->getOperand(0))) == (!dyn_cast<Constant>(cmpInst->getOperand(1)))) {
+            return;
+        }
+        int cn_o;
+        Constant *c;
+        for (int i=0; i<2; ++i) {
+            if (dyn_cast<Constant>(cmpInst->getOperand(i))) {
+                cn_o = i;
+                c = dyn_cast<Constant>(cmpInst->getOperand(i));
+                break;
+            }
+        }
+        std::map<std::string,int64_t> m;
+        int r = InstructionUtils::getConstantValue(c,&m);
+        int cn;
+        if (m.find("CONST_INT") != m.end()) {
+            cn = m["CONST_INT"];
+        }else {
+            //TODO: We don't match these patterns now.
+            return;
+        }
+        TRAIT *pt = &this->currState.brTraitMap[&I][this->currFuncCallSites];
+        //Is the comparison against a function return value?
+        Value *v = cmpInst->getOperand(1-cn_o);
+        v = InstructionUtils::stripAllCasts(v,false);
+        if (v && dyn_cast<CallInst>(v)) {
+            CallInst *callinst = dyn_cast<CallInst>(v);
+            //Get and record the callee name.
+            Function *callee = callinst->getCalledFunction();
+            if (callee) {
+                (*pt)["RET_" + callee->getName().str()] = 0;
+                //TODO: in this case need we return?
+            }
+        }
+        //Figure out its predicate.
+        llvm::CmpInst::Predicate pred = cmpInst->getPredicate();
+        switch(pred) {
+            case llvm::CmpInst::Predicate::FCMP_OEQ:
+            case llvm::CmpInst::Predicate::FCMP_UEQ:
+            case llvm::CmpInst::Predicate::ICMP_EQ:
+                (*pt)["=="] = cn;
+                break;
+            case llvm::CmpInst::Predicate::FCMP_OGT:
+            case llvm::CmpInst::Predicate::FCMP_UGT:
+            case llvm::CmpInst::Predicate::ICMP_UGT:
+            case llvm::CmpInst::Predicate::ICMP_SGT:
+            case llvm::CmpInst::Predicate::FCMP_OGE:
+            case llvm::CmpInst::Predicate::FCMP_UGE:
+            case llvm::CmpInst::Predicate::ICMP_UGE:
+            case llvm::CmpInst::Predicate::ICMP_SGE:
+                if (cn_o == 1) {
+                    (*pt)[">="] = cn;
+                }else {
+                    (*pt)["<="] = cn;
+                }
+                break;
+            case llvm::CmpInst::Predicate::FCMP_OLT:
+            case llvm::CmpInst::Predicate::FCMP_ULT:
+            case llvm::CmpInst::Predicate::ICMP_ULT:
+            case llvm::CmpInst::Predicate::ICMP_SLT:
+            case llvm::CmpInst::Predicate::FCMP_OLE:
+            case llvm::CmpInst::Predicate::FCMP_ULE:
+            case llvm::CmpInst::Predicate::ICMP_ULE:
+            case llvm::CmpInst::Predicate::ICMP_SLE:
+                if (cn_o == 1) {
+                    (*pt)["<="] = cn;
+                }else {
+                    (*pt)[">="] = cn;
+                }
+                break;
+            case llvm::CmpInst::Predicate::FCMP_ONE:
+            case llvm::CmpInst::Predicate::FCMP_UNE:
+            case llvm::CmpInst::Predicate::ICMP_NE:
+                (*pt)["!="] = cn;
+                break;
+            case llvm::CmpInst::Predicate::FCMP_TRUE:
+                //
+            case llvm::CmpInst::Predicate::FCMP_FALSE:
+                //
+            case llvm::CmpInst::Predicate::FCMP_ORD:
+                //
+            case llvm::CmpInst::Predicate::FCMP_UNO:
+                //
+            default:
+                break;
+        }
+        return;
     }
 
     VisitorCallback* ModAnalysisVisitor::visitCallInst(CallInst &I, Function *currFunc,

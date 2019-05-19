@@ -108,7 +108,7 @@ namespace DRCHECKER {
 
         static int getConstantValue(Constant*,TRAIT*);
 
-        static Value *stripAllCasts4Scalar(Value*);
+        static Value *stripAllCasts(Value*,bool);
 
         static void stripFuncNameSuffix(std::string *fn);
     };
