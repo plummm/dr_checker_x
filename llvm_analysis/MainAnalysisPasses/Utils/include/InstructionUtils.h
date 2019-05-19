@@ -95,6 +95,9 @@ namespace DRCHECKER {
         //If the BB has a name then return it, otherwise return its numeric ID as shown in ".ll".
         static std::string& getBBStrID(BasicBlock*);
 
+        //If the BB has a name then return it, otherwise return its order within its parent function BB iteration.
+        static std::string& getBBStrID_No(BasicBlock*);
+
         //Set up a cache for the expensive "print" operation for llvm::Value.
         static std::string& getValueStr(Value *v);
 

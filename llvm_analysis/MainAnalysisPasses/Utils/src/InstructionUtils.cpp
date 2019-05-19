@@ -198,7 +198,7 @@ namespace DRCHECKER {
         std::string& inst = InstructionUtils::getValueStr(dyn_cast<Value>(I));
         OS << inst << " ,BB: ";
         if (I->getParent()) {
-            OS << InstructionUtils::getBBStrID(I->getParent());
+            OS << InstructionUtils::getBBStrID(I->getParent()) << "/" << InstructionUtils::getBBStrID_No(I->getParent());
         }
         OS << " ,FUNC: ";
         if (I->getFunction()) {
@@ -236,7 +236,7 @@ namespace DRCHECKER {
         DILocation *instrLoc = InstructionUtils::getCorrectInstrLocation(I);
         inst = InstructionUtils::getValueStr(dyn_cast<Value>(I));
         if(I->getParent()){
-			bb = InstructionUtils::getBBStrID(I->getParent());
+			bb = InstructionUtils::getBBStrID_No(I->getParent());
         }
         if(I->getFunction()){
             func = I->getFunction()->getName().str();
@@ -288,6 +288,32 @@ namespace DRCHECKER {
             }
         }
         return BBNameMap[B];
+    }
+
+    std::string& InstructionUtils::getBBStrID_No(BasicBlock* B) {
+        static std::map<BasicBlock*,std::string> BBNameNoMap;
+        if (BBNameNoMap.find(B) == BBNameNoMap.end()) {
+            if (B) {
+                if (!B->getName().empty()){
+                    BBNameNoMap[B] = B->getName().str();
+                }else if (B->getParent()){
+                    int no = 0;
+                    for (BasicBlock& bb : *(B->getParent())) {
+                        if (&bb == B) {
+                            BBNameNoMap[B] = std::to_string(no);
+                            break;
+                        }
+                        ++no;
+                    }
+                }else{
+                    //Seems impossible..
+                    BBNameNoMap[B] = "";
+                }
+            }else{
+                BBNameNoMap[B] = "";
+            }
+        }
+        return BBNameNoMap[B];
     }
 
     //Set up a cache for the expensive "print" operation.
