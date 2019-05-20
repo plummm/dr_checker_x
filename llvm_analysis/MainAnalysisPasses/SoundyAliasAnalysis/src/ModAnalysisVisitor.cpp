@@ -13,6 +13,9 @@ namespace DRCHECKER {
 
     //#define DEBUG_STORE_INST
     //#define DEBUG_CALL_INST
+    #define DEBUG_MOD_TRAIT
+    #define DEBUG_BR_TRAIT
+    #define DEBUG_NLP
     //#define DEBUG_TMP
 
     void ModAnalysisVisitor::visitStoreInst(StoreInst &I) {
@@ -116,6 +119,11 @@ namespace DRCHECKER {
 
     //Analyze the modification pattern of current "store", e.g., a = 1 or a++?
     void ModAnalysisVisitor::analyzeModPattern(StoreInst &I, std::set<std::pair<long, AliasObject*>> *targetObjects) {
+#ifdef DEBUG_MOD_TRAIT
+        dbgs() << "ModAnalysisVisitor::analyzeModPattern: ";
+        I.print(dbgs());
+        dbgs() << "\n";
+#endif
         if ( this->currState.modTraitMap.find(&I) != this->currState.modTraitMap.end() &&
              this->currState.modTraitMap[&I].find(this->actx->callSites) != this->currState.modTraitMap[&I].end() ) 
         {
@@ -126,12 +134,22 @@ namespace DRCHECKER {
         Value *srcValue = I.getValueOperand();
         //For now let's only consider the scalar values to store.
         if (!InstructionUtils::isScalar(srcValue)) {
+#ifdef DEBUG_MOD_TRAIT
+            dbgs() << "ModAnalysisVisitor::analyzeModPattern: The value to store is not a scalar\n";
+#endif
             return;
         }
         //Is it a const value?
         if (dyn_cast<llvm::Constant>(srcValue)) {
             //A direct assignment.
             int r = InstructionUtils::getConstantValue(dyn_cast<llvm::Constant>(srcValue), &this->currState.modTraitMap[&I][this->actx->callSites]);
+#ifdef DEBUG_MOD_TRAIT
+            dbgs() << "ModAnalysisVisitor::analyzeModPattern: The value to store is a constant: ";
+            for (auto& x : this->currState.modTraitMap[&I][this->actx->callSites]) {
+                dbgs() << x.first << ":" << x.second << " ";
+            }
+            dbgs() << "\n";
+#endif
             return;
         }
         //Ok, it's not an const value, then how is it derived?
@@ -147,19 +165,32 @@ namespace DRCHECKER {
         srcValue = InstructionUtils::stripAllCasts(srcValue,true);
         if (!srcValue) {
             //Maybe the origin is a pointer instead of a scalar, what else can cause this?
+#ifdef DEBUG_MOD_TRAIT
+            dbgs() << "ModAnalysisVisitor::analyzeModPattern: Null after strip all casts (for scalar)\n"
+#endif
             return;
         }
         //NOTE: we assume that the current "srcValue" is the arithmetics inst we want to analyze. 
         //TODO: phi node
         int64_t cn, cn_o;
         //TODO: the analysis should be per-taint-tag, but now we consider all "targetObjects" together 
-        //(load & store may both belong to "targetObjects" but not the same one)
+        //(i.e. load & store may both belong to "targetObjects" but not the same one)
         if (!this->verifyPatternExistence(srcValue,targetObjects,&cn,&cn_o)) {
             //No recognizable patterns.
+#ifdef DEBUG_MOD_TRAIT
+            dbgs() << "ModAnalysisVisitor::analyzeModPattern: unrecognized pattern!\n"
+#endif
             return;
         }
         //Next figure out the arithmetics.
         int r = this->getArithmeticsInf(srcValue,&this->currState.modTraitMap[&I][this->actx->callSites],cn,cn_o);
+#ifdef DEBUG_MOD_TRAIT
+        dbgs() << "ModAnalysisVisitor::analyzeModPattern: After getArithmeticsInf: ";
+            for (auto& x : this->currState.modTraitMap[&I][this->actx->callSites]) {
+                dbgs() << x.first << ":" << x.second << " ";
+            }
+            dbgs() << "\n";
+#endif
         return;
     }
     
@@ -167,6 +198,11 @@ namespace DRCHECKER {
         if (!v || !dyn_cast<llvm::User>(v)) {
             return 0;
         }
+#ifdef DEBUG_MOD_TRAIT
+        dbgs() << "ModAnalysisVisitor::verifyPatternExistence: ";
+        v->print(dbgs());
+        dbgs() << "\n";
+#endif
         llvm::User *u = dyn_cast<llvm::User>(v);
         //We currently match the pattern "x op C" where C is a contant and x is the global state.
         //That's to say, the inst should have two operands.
@@ -178,6 +214,9 @@ namespace DRCHECKER {
         op[1] = u->getOperand(1);
         if ((!dyn_cast<llvm::Constant>(op[0])) == (!dyn_cast<llvm::Constant>(op[1]))) {
             //both operands are (not) constants, we cannot recognize such patterns now.
+#ifdef DEBUG_MOD_TRAIT
+            dbgs() << "ModAnalysisVisitor::verifyPatternExistence: both/neither operands are constants.\n";
+#endif
             return 0;
         }
         std::map<std::string,int64_t> m;
@@ -192,6 +231,9 @@ namespace DRCHECKER {
                     (*cn) = m["CONST_INT"];
                 }else {
                     //TODO: We don't match these patterns now.
+#ifdef DEBUG_MOD_TRAIT
+                    dbgs() << "ModAnalysisVisitor::verifyPatternExistence: the contant is not CONST_INT.\n";
+#endif
                     return 0;
                 }
             } /*constant op*/ else {
@@ -202,6 +244,9 @@ namespace DRCHECKER {
                 //TODO: we now use (1)
                 std::set<TaintFlag*>* taintFlags = TaintUtils::getTaintInfo(this->currState, this->currFuncCallSites, op[i]);
                 if (!taintFlags) {
+#ifdef DEBUG_MOD_TRAIT
+                    dbgs() << "ModAnalysisVisitor::verifyPatternExistence: the variable is not tainted.\n";
+#endif
                     return 0;
                 }
                 for(auto tf : *taintFlags) {
@@ -223,6 +268,9 @@ namespace DRCHECKER {
         }//for
         //Reaching here, we must have already got the constant number, thus the final result is decided by
         //whether the variable is from the global state.
+#ifdef DEBUG_MOD_TRAIT
+        dbgs() << "ModAnalysisVisitor::verifyPatternExistence: tainted_by_target: " << tainted_by_target << "\n";
+#endif
         return tainted_by_target;
     }
 
@@ -321,9 +369,17 @@ namespace DRCHECKER {
 
     //Try to get the read pattern of the GV in the branch condition, e.g., a == 0 or a > 1?
     void ModAnalysisVisitor::visitBranchInst(BranchInst &I) {
+#ifdef DEBUG_BR_TRAIT
+        dbgs() << "ModAnalysisVisitor::visitBranchInst: ";
+        I.print(dbgs());
+        dbgs() << "\n";
+#endif
         //First figure out whether this br is tainted, no need to analyze untainted br.
         std::set<TaintFlag*>* taintFlags = TaintUtils::getTaintInfo(this->currState, this->currFuncCallSites, &I);
         if ((!taintFlags) || taintFlags->empty()) {
+#ifdef DEBUG_BR_TRAIT
+            dbgs() << "ModAnalysisVisitor::visitBranchInst: Not tainted.\n";
+#endif
             return;
         }
         //Try to identify the condition pattern.
@@ -332,11 +388,17 @@ namespace DRCHECKER {
         //br i1 <cond>, label <iftrue>, label <iffalse>
         Value *condition = I.getCondition();
         if (!condition || !dyn_cast<CmpInst>(condition)) {
+#ifdef DEBUG_BR_TRAIT
+            dbgs() << "ModAnalysisVisitor::visitBranchInst: the condition is not from cmp inst\n";
+#endif
             return;
         }
         CmpInst *cmpInst = dyn_cast<CmpInst>(condition);
         //TODO: we now only consider the case where one op is a variable while the other is a constant.
         if ((!dyn_cast<Constant>(cmpInst->getOperand(0))) == (!dyn_cast<Constant>(cmpInst->getOperand(1)))) {
+#ifdef DEBUG_BR_TRAIT
+            dbgs() << "ModAnalysisVisitor::visitBranchInst: the cmp inst operands are both/neither constants.\n";
+#endif
             return;
         }
         int cn_o;
@@ -356,6 +418,9 @@ namespace DRCHECKER {
         if (v && dyn_cast<CallInst>(v)) {
             std::string callee = InstructionUtils::getCalleeName(dyn_cast<CallInst>(v),true);
             if (callee.size() > 0){
+#ifdef DEBUG_NLP
+                dbgs() << "ModAnalysisVisitor::visitBranchInst: condition related to callee: " << callee << "\n";
+#endif
                 (*pt)["RET_" + callee] = 0;
                 //TODO: in this case need we return?
             }
@@ -368,6 +433,9 @@ namespace DRCHECKER {
             cn = m["CONST_INT"];
         }else {
             //TODO: We don't match these patterns now.
+#ifdef DEBUG_BR_TRAIT
+            dbgs() << "ModAnalysisVisitor::visitBranchInst: the cmp inst constant operand is not CONST_INT\n";
+#endif
             return;
         }
         //Figure out its predicate.
@@ -422,6 +490,13 @@ namespace DRCHECKER {
             default:
                 break;
         }
+#ifdef DEBUG_BR_TRAIT
+        dbgs() << "ModAnalysisVisitor::visitBranchInst: the traits: ";
+        for (auto& x : *pt) {
+            dbgs() << x.first << ":" << x.second << " ";
+        }
+        dbgs() << "\n";
+#endif
         return;
     }
 
@@ -435,6 +510,9 @@ namespace DRCHECKER {
 #endif
        std::string n = InstructionUtils::getCalleeName(&I,true);
        if (n.size() > 0) {
+#ifdef DEBUG_NLP
+           dbgs() << "ModAnalysisVisitor::visitCallInst: callee inst: " << n << "\n";
+#endif
            this->currState.calleeMap[n][&I].insert(this->actx->callSites);
        }
        // if this is a kernel internal function.
