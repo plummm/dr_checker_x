@@ -741,7 +741,7 @@ namespace DRCHECKER {
                         continue;
                     }
                     //y.second is set<ctx*>
-                    for (auto& z : y.second) {
+                    for (auto& ctx : y.second) {
                         ID_TY ctx_id = (ID_TY)ctx;
                         std::vector<LOC_INF> *pctx = InstructionUtils::getStrCtx(ctx);
                         ctxMap[ctx_id] = *pctx;
