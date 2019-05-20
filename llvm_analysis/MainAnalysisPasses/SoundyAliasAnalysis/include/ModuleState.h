@@ -605,7 +605,32 @@ namespace DRCHECKER {
                 tag->dumpInfo(O);
                 tag->printModInsts(O,&(this->switchMap));
             }
-            O << "++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n";
+            O << "++++++++++++++++++++++++Br Traits+++++++++++++++++++++++++++\n";
+            for (auto& x : this->brTraitMap) {
+                O << "-----------Br-----------\n";
+                O << InstructionUtils::getValueStr(x.first) << "\n";
+                O << "-----------Traits (one line per ctx)-----------\n";
+                for (auto& y : x.second) {
+                    //y.first -> ctx*
+                    for (auto& z : y.second) {
+                        O << z.first << ":" << z.second << " ";
+                    }
+                    O << "\n";
+                }
+            }
+            O << "++++++++++++++++++++++++Mod Traits+++++++++++++++++++++++++++\n";
+            for (auto& x : this->modTraitMap) {
+                O << "-----------Mod-----------\n";
+                O << InstructionUtils::getValueStr(x.first) << "\n";
+                O << "-----------Traits (one line per ctx)-----------\n";
+                for (auto& y : x.second) {
+                    //y.first -> ctx*
+                    for (auto& z : y.second) {
+                        O << z.first << ":" << z.second << " ";
+                    }
+                    O << "\n";
+                }
+            }
             return;
         }
 

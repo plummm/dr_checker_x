@@ -13,9 +13,9 @@ namespace DRCHECKER {
 
     //#define DEBUG_STORE_INST
     //#define DEBUG_CALL_INST
-    #define DEBUG_MOD_TRAIT
-    #define DEBUG_BR_TRAIT
-    #define DEBUG_NLP
+    //#define DEBUG_MOD_TRAIT
+    //#define DEBUG_BR_TRAIT
+    //#define DEBUG_NLP
     //#define DEBUG_TMP
 
     void ModAnalysisVisitor::visitStoreInst(StoreInst &I) {
