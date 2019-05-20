@@ -730,6 +730,31 @@ namespace DRCHECKER {
                     }
                 }
             }
+            //Serialize the calleeMap.
+            CALLEE_MAP_TY calleeInfMap;
+            for (auto& x : this->calleeMap) {
+                //x.first is the callee function name
+                for (auto& y : x.second) {
+                    //y.first is CallInst*
+                    LOC_INF *p_str_inst = InstructionUtils::getInstStrRep(y.first);
+                    if (!p_str_inst) {
+                        continue;
+                    }
+                    //y.second is set<ctx*>
+                    for (auto& z : y.second) {
+                        ID_TY ctx_id = (ID_TY)ctx;
+                        std::vector<LOC_INF> *pctx = InstructionUtils::getStrCtx(ctx);
+                        ctxMap[ctx_id] = *pctx;
+                        CONSTRAINTS *p_constraints = &(calleeInfMap[x.first][(*p_str_inst)[3]][(*p_str_inst)[2]][(*p_str_inst)[1]][(*p_str_inst)[0]][ctx_id]);
+                        std::set<uint64_t> *p_cmds = getCmdValueFromCtx(ctx);
+                        if (!p_cmds) {
+                            continue;
+                        }
+                        //TODO: we now simply assume that "cmd" is the 2nd arg of entry ioctl.
+                        (*p_constraints)[1] = *p_cmds;
+                    }
+                }
+            }
 #ifdef DEBUG_TAINT_SERIALIZE_PROGRESS
             dbgs() << "Serialize to file...\n";
 #endif
@@ -752,8 +777,9 @@ namespace DRCHECKER {
             json j_traitMap(traitMap);
             json j_tagModMap(tagModMap);
             json j_tagInfoMap(tagInfoMap);
+            json j_calleeInfMap(calleeInfMap);
             
-            outfile << j_taintedBrs << j_ctxMap << j_traitMap << j_tagModMap << j_tagInfoMap;
+            outfile << j_taintedBrs << j_ctxMap << j_traitMap << j_tagModMap << j_tagInfoMap << j_calleeInfMap;
             outfile.close();
 #ifdef DEBUG_TAINT_SERIALIZE_PROGRESS
             dbgs() << "Serialization finished!\n";
