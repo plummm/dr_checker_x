@@ -166,7 +166,7 @@ namespace DRCHECKER {
         if (!srcValue) {
             //Maybe the origin is a pointer instead of a scalar, what else can cause this?
 #ifdef DEBUG_MOD_TRAIT
-            dbgs() << "ModAnalysisVisitor::analyzeModPattern: Null after strip all casts (for scalar)\n"
+            dbgs() << "ModAnalysisVisitor::analyzeModPattern: Null after strip all casts (for scalar)\n";
 #endif
             return;
         }
@@ -178,7 +178,7 @@ namespace DRCHECKER {
         if (!this->verifyPatternExistence(srcValue,targetObjects,&cn,&cn_o)) {
             //No recognizable patterns.
 #ifdef DEBUG_MOD_TRAIT
-            dbgs() << "ModAnalysisVisitor::analyzeModPattern: unrecognized pattern!\n"
+            dbgs() << "ModAnalysisVisitor::analyzeModPattern: unrecognized pattern!\n";
 #endif
             return;
         }

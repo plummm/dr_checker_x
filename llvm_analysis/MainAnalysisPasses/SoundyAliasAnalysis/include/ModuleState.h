@@ -612,7 +612,8 @@ namespace DRCHECKER {
         void serializeTaintInfo(std::string fn) {
             //Store taint information in a map as below and then serialize it.
             TAINTED_BR_TY taintedBrs;
-            ANALYSIS_CTX_MAP_TY analysisCtxMap;
+            CTX_MAP_TY ctxMap;
+            INST_TRAIT_MAP traitMap;
             //hz: the set of the unique taint tags.
             std::set<TaintTag*> uniqTags;
 #ifdef DEBUG_TAINT_SERIALIZE_PROGRESS
@@ -630,7 +631,8 @@ namespace DRCHECKER {
                 if(!vt || vt->size() <= 0){
                     continue;
                 }
-                ID_TY ctx_id = (ID_TY)&(*(it.first));
+                //it.first is AnalysisContext*
+                ID_TY ctx_id = (ID_TY)(it.first->callSites);
                 //Then all the Value-TaintFlag pairs.
                 bool any_br_taint = false;
                 for (auto const &jt : *vt){
@@ -639,18 +641,36 @@ namespace DRCHECKER {
                     if (!dyn_cast<BranchInst>(jt.first)) {
                         continue;
                     }
+                    BranchInst *br_inst = dyn_cast<BranchInst>(jt.first);
 #ifdef DEBUG_TAINT_SERIALIZE_PROGRESS
                     dbgs() << (++br_cnt) << " ";
 #endif
-                    any_br_taint = true;
-                    LOC_INF *p_str_inst = InstructionUtils::getInstStrRep(dyn_cast<Instruction>(jt.first));
                     //NOTE: TaintTag represents the taint src,
                     //TaintFlag provides the path by which the taint src can taint current inst.
                     //TODO: utilize the path inf in TaintFlag to filter out some 'store' insts (e.g. write after read) 
                     std::set<TaintFlag*> *pflags = jt.second;
+                    if ((!pflags) || pflags->empty()) {
+                        continue;
+                    }
+                    any_br_taint = true;
+                    LOC_INF *p_str_inst = InstructionUtils::getInstStrRep(dyn_cast<Instruction>(jt.first));
+                    //Here we assume that "br" is always the last instruction of a BB.
+                    BR_INF *p_br_inf = &(taintedBrs[(*p_str_inst)[3]][(*p_str_inst)[2]][(*p_str_inst)[1]]);
+                    //Get the br instruction trait if any.
+                    if (this->brTraitMap.find(br_inst) != this->brTraitMap.end() && 
+                        this->brTraitMap[br_inst].find(it.first->callSites) != this->brTraitMap[br_inst].end())
+                    {
+                        TRAIT *p_trait = &(this->brTraitMap[br_inst][it.first->callSites]);
+                        traitMap[(ID_TY)p_trait] = *p_trait;
+                        //Set the trait id
+                        std::get<0>((*p_br_inf)[ctx_id]) = (ID_TY)p_trait;
+                    }else{
+                        //No trait, so set an invalid trait ID.
+                        std::get<0>((*p_br_inf)[ctx_id]) = 0;
+                    }
                     for (TaintFlag *p : *pflags){
-                        //Here we assume that "br" is always the last instruction of a BB.
-                        taintedBrs[(*p_str_inst)[3]][(*p_str_inst)[2]][(*p_str_inst)[1]][ctx_id].insert((ID_TY)(p->tag));
+                        //Add the tag id
+                        std::get<1>((*p_br_inf)[ctx_id]).insert((ID_TY)(p->tag));
                         if(p->tag){
                             uniqTags.insert(p->tag);
                         }
@@ -659,14 +679,13 @@ namespace DRCHECKER {
                 if (any_br_taint) {
                     //Record current AnalysisContext.
                     std::vector<LOC_INF> *pctx = InstructionUtils::getStrCtx(it.first->callSites);
-                    analysisCtxMap[ctx_id] = *pctx;
+                    ctxMap[ctx_id] = *pctx;
                 }
 #ifdef DEBUG_TAINT_SERIALIZE_PROGRESS
                 dbgs() << "\n";
 #endif
             }
             //Ok, now store all uniq TaintTags in a map.
-            MOD_INST_CTX_MAP_TY modInstCtxMap;
             TAG_INFO_TY tagInfoMap;
             TAG_MOD_MAP_TY tagModMap;
 #ifdef DEBUG_TAINT_SERIALIZE_PROGRESS
@@ -679,38 +698,35 @@ namespace DRCHECKER {
                 dbgs() << (++tag_cnt) << "/" << total_tag_cnt << "\n";
 #endif
                 ID_TY tag_id = (ID_TY)tag;
-                /*
-                    dbgs() << tag_id << "\n";
-                    if(tag->v){
-                        tag->v->print(dbgs());
-                        dbgs() << "\n";
-                    }
-                    if(tag->type){
-                        tag->type->print(dbgs());
-                        dbgs() << "\n";
-                    }
-                */
                 const std::string& ty_str = tag->getTypeStr();
                 tagInfoMap[tag_id] = ty_str;
                 for (auto e : tag->mod_insts) {
                     LOC_INF *p_str_inst = InstructionUtils::getInstStrRep(e.first);
+                    StoreInst *st_inst = dyn_cast<StoreInst>(e.first);
                     //Iterate over the ctx of the mod inst.
                     for (auto ctx : e.second) {
                         //"ctx" is of type "std::vector<Instruction*>*".
+                        ID_TY ctx_id = (ID_TY)ctx;
                         std::vector<LOC_INF> *pctx = InstructionUtils::getStrCtx(ctx);
-                        modInstCtxMap[(ID_TY)pctx] = *pctx;
-                        ARG_CONSTRAINTS *p_constraints;
-                        p_constraints = &(tagModMap[tag_id][(*p_str_inst)[3]][(*p_str_inst)[2]][(*p_str_inst)[1]][(*p_str_inst)[0]][(ID_TY)pctx]);
+                        ctxMap[ctx_id] = *pctx;
+                        CONSTRAINTS *p_constraints;
+                        p_constraints = &(tagModMap[tag_id][(*p_str_inst)[3]][(*p_str_inst)[2]][(*p_str_inst)[1]][(*p_str_inst)[0]][ctx_id]);
                         //Fill in the constraints of func args if any.
-                        if (ctx->size() <= 1){
-                            continue;
-                        }
-                        BasicBlock *entry_bb = (*ctx)[1]->getParent();
-                        if((!entry_bb) || this->switchMap.find(entry_bb) == this->switchMap.end()){
+                        std::set<uint64_t> *p_cmds = getCmdValueFromCtx(ctx);
+                        if (!p_cmds) {
                             continue;
                         }
                         //TODO: we now simply assume that "cmd" is the 2nd arg of entry ioctl.
-                        (*p_constraints)[1] = this->switchMap[entry_bb];
+                        (*p_constraints)[1] = *p_cmds;
+                        //Fill in the mod inst traits if any.
+                        if (this->modTraitMap.find(st_inst) != this->modTraitMap.end() && 
+                            this->modTraitMap[st_inst].find(ctx) != this->modTraitMap[st_inst].end())
+                        {
+                            TRAIT *p_trait = &(this->modTraitMap[st_inst][ctx]);
+                            traitMap[(ID_TY)p_trait] = *p_trait;
+                            //Set the trait id
+                            (*p_constraints)[TRAIT_INDEX].insert((ID_TY)p_trait);
+                        }
                     }
                 }
             }
@@ -732,17 +748,30 @@ namespace DRCHECKER {
             outfile.open(fn);
 
             json j_taintedBrs(taintedBrs);
-            json j_analysisCtxMap(analysisCtxMap);
+            json j_ctxMap(ctxMap);
+            json j_traitMap(traitMap);
             json j_tagModMap(tagModMap);
             json j_tagInfoMap(tagInfoMap);
-            json j_modInstCtxMap(modInstCtxMap);
             
-            outfile << j_taintedBrs << j_analysisCtxMap << j_tagModMap << j_tagInfoMap << j_modInstCtxMap;
+            outfile << j_taintedBrs << j_ctxMap << j_traitMap << j_tagModMap << j_tagInfoMap;
             outfile.close();
 #ifdef DEBUG_TAINT_SERIALIZE_PROGRESS
             dbgs() << "Serialization finished!\n";
 #endif
 		}
+
+        //Given a call context, get the "cmd" value set of the entry ioctl to follow the context.
+        std::set<uint64_t> *getCmdValueFromCtx(std::vector<Instruction*> *ctx) {
+            //
+            if ((!ctx) || ctx->size() <= 1){
+                return nullptr;
+            }
+            BasicBlock *entry_bb = (*ctx)[1]->getParent();
+            if((!entry_bb) || this->switchMap.find(entry_bb) == this->switchMap.end()){
+                return nullptr;
+            }
+            return &(this->switchMap[entry_bb]);
+        }
 
         void printCurTime() {
             auto t_now = std::chrono::system_clock::now();
