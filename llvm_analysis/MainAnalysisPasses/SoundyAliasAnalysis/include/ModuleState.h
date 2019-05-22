@@ -579,8 +579,8 @@ namespace DRCHECKER {
                     ++n_entry;
                     dbgs() << n_entry << "/" << total_entry << "..";
 #endif
-                    //Skip the non-br instructions
-                    if (!dyn_cast<BranchInst>(jt.first)) {
+                    //Skip the non-branch instructions
+                    if ((!dyn_cast<BranchInst>(jt.first)) || (!dyn_cast<SwitchInst>(jt.first))) {
                         continue;
                     }
                     //Dump the "Value" information.
@@ -662,8 +662,8 @@ namespace DRCHECKER {
                 bool any_br_taint = false;
                 for (auto const &jt : *vt){
                     //Serialize the "Value" information.
-                    //Only care about the branch instruction (i.e. br)
-                    if (!dyn_cast<BranchInst>(jt.first)) {
+                    //Only care about the branch instruction (e.g. br, switch)
+                    if ((!dyn_cast<BranchInst>(jt.first)) || (!dyn_cast<SwitchInst>(jt.first))) {
                         continue;
                     }
                     BranchInst *br_inst = dyn_cast<BranchInst>(jt.first);
@@ -679,10 +679,11 @@ namespace DRCHECKER {
                     }
                     any_br_taint = true;
                     LOC_INF *p_str_inst = InstructionUtils::getInstStrRep(dyn_cast<Instruction>(jt.first));
-                    //Here we assume that "br" is always the last instruction of a BB.
+                    //Here we assume that the branch instruction is always the last instruction of a BB so that one BB -> one branch inst.
                     BR_INF *p_br_inf = &(taintedBrs[(*p_str_inst)[3]][(*p_str_inst)[2]][(*p_str_inst)[1]]);
                     //Get the br instruction trait if any.
-                    if (this->brTraitMap.find(br_inst) != this->brTraitMap.end() && 
+                    if (br_inst &&
+                        this->brTraitMap.find(br_inst) != this->brTraitMap.end() && 
                         this->brTraitMap[br_inst].find(it.first->callSites) != this->brTraitMap[br_inst].end())
                     {
                         TRAIT *p_trait = &(this->brTraitMap[br_inst][it.first->callSites]);
