@@ -580,7 +580,7 @@ namespace DRCHECKER {
                     dbgs() << n_entry << "/" << total_entry << "..";
 #endif
                     //Skip the non-branch instructions
-                    if ((!dyn_cast<BranchInst>(jt.first)) || (!dyn_cast<SwitchInst>(jt.first))) {
+                    if ((!dyn_cast<BranchInst>(jt.first)) && (!dyn_cast<SwitchInst>(jt.first))) {
                         continue;
                     }
                     //Dump the "Value" information.
@@ -663,7 +663,7 @@ namespace DRCHECKER {
                 for (auto const &jt : *vt){
                     //Serialize the "Value" information.
                     //Only care about the branch instruction (e.g. br, switch)
-                    if ((!dyn_cast<BranchInst>(jt.first)) || (!dyn_cast<SwitchInst>(jt.first))) {
+                    if ((!dyn_cast<BranchInst>(jt.first)) && (!dyn_cast<SwitchInst>(jt.first))) {
                         continue;
                     }
                     BranchInst *br_inst = dyn_cast<BranchInst>(jt.first);
