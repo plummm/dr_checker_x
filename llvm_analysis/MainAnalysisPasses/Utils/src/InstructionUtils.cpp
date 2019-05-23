@@ -320,7 +320,8 @@ namespace DRCHECKER {
         static std::map<Instruction*,std::string> InstNameNoMap;
         if (InstNameNoMap.find(I) == InstNameNoMap.end()) {
             if (I) {
-                if (!I->getName().empty()){
+                if (false){
+                //if (!I->getName().empty()){
                     InstNameNoMap[I] = I->getName().str();
                 }else if (I->getParent()){
                     int no = 0;
