@@ -196,7 +196,7 @@ namespace DRCHECKER {
         llvm::raw_string_ostream OS(str);
         //Inst, BB, Function, and File
         std::string& inst = InstructionUtils::getValueStr(dyn_cast<Value>(I));
-        OS << inst << " ,BB: ";
+        OS << inst  << "/" << InstructionUtils::getInstStrID_No(I) << " ,BB: ";
         if (I->getParent()) {
             OS << InstructionUtils::getBBStrID(I->getParent()) << "/" << InstructionUtils::getBBStrID_No(I->getParent());
         }
@@ -234,7 +234,7 @@ namespace DRCHECKER {
         }
         std::string inst,bb,func,mod;
         DILocation *instrLoc = InstructionUtils::getCorrectInstrLocation(I);
-        inst = InstructionUtils::getValueStr(dyn_cast<Value>(I));
+        inst = InstructionUtils::getInstStrID_No(I);
         if(I->getParent()){
 			bb = InstructionUtils::getBBStrID_No(I->getParent());
         }
@@ -314,6 +314,32 @@ namespace DRCHECKER {
             }
         }
         return BBNameNoMap[B];
+    }
+
+    std::string& InstructionUtils::getInstStrID_No(Instruction* I) {
+        static std::map<Instruction*,std::string> InstNameNoMap;
+        if (InstNameNoMap.find(I) == InstNameNoMap.end()) {
+            if (I) {
+                if (!I->getName().empty()){
+                    InstNameNoMap[I] = I->getName().str();
+                }else if (I->getParent()){
+                    int no = 0;
+                    for (Instruction& i : *(I->getParent())) {
+                        if (&i == I) {
+                            InstNameNoMap[I] = std::to_string(no);
+                            break;
+                        }
+                        ++no;
+                    }
+                }else{
+                    //Seems impossible..
+                    InstNameNoMap[I] = "";
+                }
+            }else{
+                InstNameNoMap[I] = "";
+            }
+        }
+        return InstNameNoMap[I];
     }
 
     //Set up a cache for the expensive "print" operation.
