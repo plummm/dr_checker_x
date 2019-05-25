@@ -450,6 +450,12 @@ namespace DRCHECKER {
             case llvm::CmpInst::Predicate::FCMP_UGT:
             case llvm::CmpInst::Predicate::ICMP_UGT:
             case llvm::CmpInst::Predicate::ICMP_SGT:
+                if (cn_o == 1) {
+                    (*pt)[">"] = cn;
+                }else {
+                    (*pt)["<"] = cn;
+                }
+                break;
             case llvm::CmpInst::Predicate::FCMP_OGE:
             case llvm::CmpInst::Predicate::FCMP_UGE:
             case llvm::CmpInst::Predicate::ICMP_UGE:
@@ -464,6 +470,12 @@ namespace DRCHECKER {
             case llvm::CmpInst::Predicate::FCMP_ULT:
             case llvm::CmpInst::Predicate::ICMP_ULT:
             case llvm::CmpInst::Predicate::ICMP_SLT:
+                if (cn_o == 1) {
+                    (*pt)["<"] = cn;
+                }else {
+                    (*pt)[">"] = cn;
+                }
+                break;
             case llvm::CmpInst::Predicate::FCMP_OLE:
             case llvm::CmpInst::Predicate::FCMP_ULE:
             case llvm::CmpInst::Predicate::ICMP_ULE:
