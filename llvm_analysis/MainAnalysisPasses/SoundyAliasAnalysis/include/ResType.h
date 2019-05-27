@@ -21,6 +21,7 @@ typedef std::vector<std::string> LOC_INF;
 typedef std::map<unsigned, std::set<uint64_t>> CONSTRAINTS;
 
 //mod inst ctx id -> CONSTRAINTS
+//callee inst ctx id -> CONSTRAINTS
 typedef std::map<ID_TY,CONSTRAINTS> MOD_INF;
 
 //br's ctx_id -> (trait id,set<tag_id> that taints this br)
@@ -48,10 +49,7 @@ typedef std::map<std::string,int64_t> TRAIT;
 //Update(Condition) pattern of a mod(br) instruction for a global state.
 typedef std::map<ID_TY,TRAIT> INST_TRAIT_MAP;
 
-//callee inst ctx id -> CONSTRAINTS
-typedef std::map<ID_TY,CONSTRAINTS> CALLEE_INF;
-
 //callee name -> mod -> func -> BB -> inst -> CALLEE_INF of this call inst
-typedef std::map<std::string,std::map<std::string,std::map<std::string,std::map<std::string,std::map<std::string,CALLEE_INF>>>>> CALLEE_MAP_TY;
+typedef std::map<std::string,std::map<std::string,std::map<std::string,std::map<std::string,std::map<std::string,MOD_INF>>>>> CALLEE_MAP_TY;
 
 #endif
