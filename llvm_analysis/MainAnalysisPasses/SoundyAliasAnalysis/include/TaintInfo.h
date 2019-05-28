@@ -131,6 +131,10 @@ namespace DRCHECKER {
             this->mod_insts[inst].insert(call_ctx);
         }
 
+        bool has_mod_insts() {
+            return (!this->mod_insts.empty());
+        }
+
         void dumpInfo(raw_ostream &OS) {
             OS << "Taint Tag:\n";
             OS << "ID: " << static_cast<const void *>(this) << "\n";

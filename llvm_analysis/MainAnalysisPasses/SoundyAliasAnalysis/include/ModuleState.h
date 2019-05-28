@@ -601,6 +601,9 @@ namespace DRCHECKER {
             O << "++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n";
             O << "+++++++++++++++++++++++MOD INST LIST++++++++++++++++++++++++++\n\n";
             for (auto tag : uniqTags){
+                if (!tag->has_mod_insts()) {
+                    continue;
+                }
                 O << "--------------------------TAG--------------------------\n";
                 tag->dumpInfo(O);
                 tag->printModInsts(O,&(this->switchMap));
