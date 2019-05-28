@@ -114,6 +114,9 @@ namespace DRCHECKER {
         static void stripFuncNameSuffix(std::string *fn);
 
         static std::string getCalleeName(CallInst*,bool);
+
+        //Get the "cmd" arg values of the ioctl() that can reach the target "inst" under the context "ctx".
+        static std::set<uint64_t> *getCmdValues(std::vector<Instruction*> *ctx, Instruction* inst, std::map<BasicBlock*,std::set<uint64_t>> *switchMap);
     };
 }
 #endif //PROJECT_INSTRUCTIONUTILS_H

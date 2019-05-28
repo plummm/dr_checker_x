@@ -462,4 +462,22 @@ namespace DRCHECKER {
         }
         return "";
     }
+
+    std::set<uint64_t> *InstructionUtils::getCmdValues(std::vector<Instruction*> *ctx, Instruction* inst, std::map<BasicBlock*,std::set<uint64_t>> *switchMap) {
+        if ((!switchMap) || switchMap->empty()) {
+            return nullptr;
+        }
+        BasicBlock *entry_bb = nullptr;
+        if (ctx && ctx->size() > 1) {
+            //The very first instruction in the context is the same across all contexts (i.e. the first inst in the entry func)
+            //So we should look at the 2nd inst.
+            entry_bb = (*ctx)[1]->getParent();
+        }else if (inst) {
+            entry_bb = inst->getParent();
+        }
+        if((!entry_bb) || switchMap->find(entry_bb) == switchMap->end()){
+            return nullptr;
+        }
+        return &((*switchMap)[entry_bb]);
+    }
 }

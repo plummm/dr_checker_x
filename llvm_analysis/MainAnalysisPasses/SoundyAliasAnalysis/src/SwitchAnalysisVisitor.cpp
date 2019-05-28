@@ -16,16 +16,11 @@ namespace DRCHECKER {
         dbgs() << "SwitchAnalysisVisitor::visitSwitchInst: \n";
         InstructionUtils::printInst(&I,dbgs());
 #endif
-        //Record the mapping from the switch variable values to dst basic blocks.
-        if (!this->currState.switchMap.empty()){
-#ifdef DEBUG_VISIT_SWITCH_INST
-            dbgs() << "SwitchAnalysisVisitor::visitSwitchInst: We have visited one switch inst before!\n";
-#endif
-            //This means we have visited a switch before, we now assume the 1st switch in the entry-ioctl() is our target.
+        //Make sure that the switch variable is the "cmd" arg.
+        Value *cond_var = I.getCondition();
+        if ((!cond_var) || cond_var->getName().empty() || cond_var->getName().str() != "cmd") {
             return;
         }
-        //TODO: make sure that the switch variable is the "cmd" arg.
-        Value *cond_var = I.getCondition();
         BasicBlock * def_bb = I.getDefaultDest();
         unsigned num = I.getNumCases();
 #ifdef DEBUG_VISIT_SWITCH_INST
@@ -47,7 +42,7 @@ namespace DRCHECKER {
             dbgs() << " Dst BB: " << bb->getName().str() << "\n";
 #endif
             this->currState.switchMap[bb].insert(c_val);
-            //TODO: We also need to add this case successor's successors to the map, since they can also be reached from current case value.
+            //We also need to add this case successor's successors to the map, since they can also be reached from current case value.
             std::set<BasicBlock*> *succs = this->get_all_successors(bb);
             for(BasicBlock *succ_bb : *succs){
                 this->currState.switchMap[succ_bb].insert(c_val);

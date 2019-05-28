@@ -161,21 +161,12 @@ namespace DRCHECKER {
                     }
                     //Print out extra information about how to reach this instruction from the entry point in this call context.
                     //E.g. what "cmd" value should we use for the entry-point ioctl()?
-                    //The very first instruction in the context is the same across all contexts (i.e. the first inst in the entry func)
-                    //So we should look at the 2nd inst.
-                    if (ctx->size() <= 1){
-                        continue;
-                    }
-                    BasicBlock *entry_bb = (*ctx)[1]->getParent();
-                    if(!entry_bb){
-                        continue;
-                    }
-                    if(switchMap->find(entry_bb) == switchMap->end()){
-                        //No constraint information about this basic block...
+                    std::set<uint64_t> *p_cmds = InstructionUtils::getCmdValues(ctx,e.first,switchMap);
+                    if (!p_cmds) {
                         continue;
                     }
                     OS << "-----EXT-----\n";
-                    for (auto cmd : (*switchMap)[entry_bb]){
+                    for (auto cmd : *p_cmds){
                         OS << cmd << ", ";
                     }
                     OS << "\n";

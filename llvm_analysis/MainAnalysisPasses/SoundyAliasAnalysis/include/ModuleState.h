@@ -738,7 +738,7 @@ namespace DRCHECKER {
                         CONSTRAINTS *p_constraints;
                         p_constraints = &(tagModMap[tag_id][(*p_str_inst)[3]][(*p_str_inst)[2]][(*p_str_inst)[1]][(*p_str_inst)[0]][ctx_id]);
                         //Fill in the constraints of func args if any.
-                        std::set<uint64_t> *p_cmds = getCmdValueFromCtx(ctx);
+                        std::set<uint64_t> *p_cmds = InstructionUtils::getCmdValues(ctx,e.first,&(this->switchMap));
                         if (!p_cmds) {
                             continue;
                         }
@@ -772,7 +772,7 @@ namespace DRCHECKER {
                         std::vector<LOC_INF> *pctx = InstructionUtils::getStrCtx(ctx);
                         ctxMap[ctx_id] = *pctx;
                         CONSTRAINTS *p_constraints = &(calleeInfMap[x.first][(*p_str_inst)[3]][(*p_str_inst)[2]][(*p_str_inst)[1]][(*p_str_inst)[0]][ctx_id]);
-                        std::set<uint64_t> *p_cmds = getCmdValueFromCtx(ctx);
+                        std::set<uint64_t> *p_cmds = InstructionUtils::getCmdValues(ctx,y.first,&(this->switchMap));
                         if (!p_cmds) {
                             continue;
                         }
@@ -811,19 +811,6 @@ namespace DRCHECKER {
             dbgs() << "Serialization finished!\n";
 #endif
 		}
-
-        //Given a call context, get the "cmd" value set of the entry ioctl to follow the context.
-        std::set<uint64_t> *getCmdValueFromCtx(std::vector<Instruction*> *ctx) {
-            //
-            if ((!ctx) || ctx->size() <= 1){
-                return nullptr;
-            }
-            BasicBlock *entry_bb = (*ctx)[1]->getParent();
-            if((!entry_bb) || this->switchMap.find(entry_bb) == this->switchMap.end()){
-                return nullptr;
-            }
-            return &(this->switchMap[entry_bb]);
-        }
 
         void printCurTime() {
             auto t_now = std::chrono::system_clock::now();
