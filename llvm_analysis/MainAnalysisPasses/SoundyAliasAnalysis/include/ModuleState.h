@@ -585,7 +585,11 @@ namespace DRCHECKER {
                     }
                     //Dump the "Value" information.
                     O << "------------------Value------------------\n";
-                    O << InstructionUtils::getValueStr(jt.first) << "\n";
+                    if (dyn_cast<Instruction>(jt.first)) {
+                        InstructionUtils::printInst(dyn_cast<Instruction>(jt.first),O);
+                    }else {
+                        O << InstructionUtils::getValueStr(jt.first) << "\n";
+                    }
                     //Dump the TaintFlag(s) for current value under current context.
                     std::set<TaintFlag*> *pflags = jt.second;
                     for (TaintFlag *p : *pflags){
