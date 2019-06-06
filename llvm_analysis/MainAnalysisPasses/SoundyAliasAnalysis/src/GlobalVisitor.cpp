@@ -9,7 +9,7 @@
 namespace DRCHECKER {
 
 //#define DEBUG_GLOBAL_ANALYSIS
-//#define DEBUG_CALL_INSTR
+#define DEBUG_CALL_INSTR
 #define DONOT_CARE_COMPLETION
 #define MAX_CALLSITE_DEPTH 5
 #define MAX_FUNC_PTR 5
@@ -214,7 +214,7 @@ namespace DRCHECKER {
                 return;
             }
 #ifdef DEBUG_CALL_INSTR
-            dbgs() << "Visiting Indirect call instruction.";
+            dbgs() << "Visiting Indirect call instruction.\n";
 #endif
             Value *calledValue = I.getCalledValue();
 
@@ -237,7 +237,7 @@ namespace DRCHECKER {
                 }
 #ifdef DEBUG_CALL_INSTR
                 if(filteredFunctions.size() != targetFunctions.size()) {
-                    dbgs() << "Ignoring Target Functions, Doing:"
+                    dbgs() << "Too many Target Functions, give up some, Doing:"
                            << filteredFunctions.size()
                            << ", Got:" << targetFunctions.size() << "\n";
                 }

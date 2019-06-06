@@ -8,6 +8,8 @@
 
 using namespace llvm;
 
+#define DEBUG_TYPE_CMP
+
 namespace DRCHECKER {
 
 
@@ -479,5 +481,72 @@ namespace DRCHECKER {
             return nullptr;
         }
         return &((*switchMap)[entry_bb]);
+    }
+
+    void _trim_num_suffix(std::string *s) {
+        if (!s) {
+            return;
+        }
+        size_t nd = s->rfind("."), *t;
+        if (nd != std::string::npos) {
+            std::string suffix = s->substr(nd+1);
+            std::stoi(suffix,t,10);
+            if (*t >= suffix.size()) {
+                //This means the whole suffix can be converted to an integer, thus a numeric suffix.
+                s->erase(nd);
+            }
+        }
+        return;
+    }
+
+    //In theory, we can simply compare two Type* by "==" in llvm,
+    //but sometimes we want to handle cases like "%struct.A" and "%struct.A.123", 
+    //they are basically the same but llvm does assign different Type* for them.
+    bool InstructionUtils::cmp_types(Type* ty0, Type* ty1) {
+        if (ty0 == ty1) {
+            return true;
+        }
+        if (!ty0 || !ty1) {
+            return false;
+        }
+        if (ty0->getTypeID() != ty1->getTypeID()) {
+            //This means their basic types are different, e.g. a pointer vs an integer.
+            return false;
+        }
+        if (ty0->getNumContainedTypes() != ty1->getNumContainedTypes()) {
+            return false;
+        }
+        unsigned n = ty0->getNumContainedTypes();
+#ifdef DEBUG_TYPE_CMP
+        if (ty0->isFunctionTy()) {
+            dbgs() << "InstructionUtils::cmp_types, function type, #subtypes: " << n << "\n";
+        }else if (ty0->isStructTy()) {
+            dbgs() << "InstructionUtils::cmp_types, struct type, #subtypes: " << n << "\n";
+        }
+#endif
+        if (n > 1) {
+            //Recursively comapre each sub type.
+            for (unsigned i=0; i<n; ++i) {
+                if (!InstructionUtils::cmp_types(ty0->getContainedType(i),ty1->getContainedType(i))) {
+                    return false;
+                }
+            }
+            return true;
+        }else {
+            //TODO: for now we only handle "structs" specially.
+            if (ty0->isStructTy()) {
+                StructType *st0 = dyn_cast<StructType>(ty0);
+                StructType *st1 = dyn_cast<StructType>(ty1);
+                if (st0 && st1 && st0->hasName() && st1->hasName()) {
+                    std::string n0 = st0->getName().str();
+                    std::string n1 = st1->getName().str();
+                    //trim the numeric suffix if any.
+                    _trim_num_suffix(&n0);
+                    _trim_num_suffix(&n1);
+                    return (n0 == n1); 
+                }
+            }
+        }
+        return false;
     }
 }

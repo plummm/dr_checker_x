@@ -3,11 +3,13 @@
 //
 
 #include "PointsToUtils.h"
+#include "../../Utils/include/InstructionUtils.h"
 
 using namespace llvm;
 
 namespace DRCHECKER {
 //#define DEBUG_FUNCTION_PTR_ALIASING
+#define DEBUG_SMART_FUNCTION_PTR_RESOLVE
 
     std::set<PointerPointsTo*>* PointsToUtils::getPointsToObjects(GlobalState &currState,
                                                                   std::vector<Instruction *> *currFuncCallSites,
@@ -107,16 +109,29 @@ namespace DRCHECKER {
 
     bool PointsToUtils::getPossibleFunctionTargets(CallInst &callInst, std::vector<Function *> &targetFunctions) {
         FunctionType *targetFunctionType = callInst.getFunctionType();
+#ifdef DEBUG_SMART_FUNCTION_PTR_RESOLVE
+        dbgs() << "PointsToUtils::getPossibleFunctionTargets: try to resolve a indirect function call w/ type-based method: ";
+        dbgs() << InstructionUtils::getValueStr(&callInst) << "\n";
+        dbgs() << "Callee type: " << InstructionUtils::getTypeStr(targetFunctionType) << "\n";
+#endif
         Module *currModule = callInst.getParent()->getParent()->getParent();
         for(auto a = currModule->begin(), b = currModule->end(); a != b; a++) {
             Function *currFunction = &(*a);
             // does the current function has same type of the call instruction?
-            if(!currFunction->isDeclaration() && currFunction->getFunctionType() == targetFunctionType) {
+            if(!currFunction->isDeclaration() && InstructionUtils::cmp_types(currFunction->getFunctionType(), targetFunctionType)) {
+            //if(!currFunction->isDeclaration() && currFunction->getFunctionType() == targetFunctionType) {
+#ifdef DEBUG_SMART_FUNCTION_PTR_RESOLVE
+                dbgs() << "PointsToUtils::getPossibleFunctionTargets: Got a same-typed candidate callee: ";
+                dbgs() << currFunction->getName().str() << "\n";
+#endif
                 // if yes, see if the function is used in non-call instruction.
                 for (Value::user_iterator i = currFunction->user_begin(), e = currFunction->user_end(); i != e; ++i) {
                     Instruction *currI = dyn_cast<Instruction>(*i);
                     CallInst *currC = dyn_cast<CallInst>(*i);
                     if(currI != nullptr && currC == nullptr) {
+#ifdef DEBUG_SMART_FUNCTION_PTR_RESOLVE
+                        dbgs() << "PointsToUtils::getPossibleFunctionTargets: add to final list since the candidate has been used in a non-call inst.\n";
+#endif
                         // oh the function is used in a non-call instruction.
                         // potential target, insert into potential targets
                         targetFunctions.push_back(currFunction);
