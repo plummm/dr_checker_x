@@ -118,17 +118,26 @@ namespace DRCHECKER {
         for(auto a = currModule->begin(), b = currModule->end(); a != b; a++) {
             Function *currFunction = &(*a);
             // does the current function has same type of the call instruction?
-            if(!currFunction->isDeclaration() && InstructionUtils::cmp_types(currFunction->getFunctionType(), targetFunctionType)) {
+            if(!currFunction->isDeclaration() && InstructionUtils::same_types(currFunction->getFunctionType(), targetFunctionType)) {
             //if(!currFunction->isDeclaration() && currFunction->getFunctionType() == targetFunctionType) {
 #ifdef DEBUG_SMART_FUNCTION_PTR_RESOLVE
                 dbgs() << "PointsToUtils::getPossibleFunctionTargets: Got a same-typed candidate callee: ";
                 dbgs() << currFunction->getName().str() << "\n";
 #endif
-                // if yes, see if the function is used in non-call instruction.
+                //Do some further filtering based on some heuristics
+                //(1) the func appears in a non-call instruction, indicating a function pointer assignment
+                //(2) the func appears in a constant structure, possibly as a function pointer field.
+                //Now we only use (2) since in driver most cases are like "dev->ops->xxx()"
                 for (Value::user_iterator i = currFunction->user_begin(), e = currFunction->user_end(); i != e; ++i) {
                     Instruction *currI = dyn_cast<Instruction>(*i);
                     CallInst *currC = dyn_cast<CallInst>(*i);
-                    if(currI != nullptr && currC == nullptr) {
+                    ConstantAggregate *currConstA = dyn_cast<ConstantAggregate>(*i);
+                    GlobalValue *currGV = dyn_cast<GlobalValue>(*i);
+#ifdef DEBUG_SMART_FUNCTION_PTR_RESOLVE
+                    //dbgs() << "USE: " << InstructionUtils::getValueStr(*i) << "### " << (currI!=nullptr) << "|" << (currC!=nullptr) << "|" << (currConstA!=nullptr) << "|" << (currGV!=nullptr) << "\n";
+#endif
+                    if(currConstA != nullptr) {
+                    //if(currI != nullptr && currC == nullptr) {
 #ifdef DEBUG_SMART_FUNCTION_PTR_RESOLVE
                         dbgs() << "PointsToUtils::getPossibleFunctionTargets: add to final list since the candidate has been used in a non-call inst.\n";
 #endif

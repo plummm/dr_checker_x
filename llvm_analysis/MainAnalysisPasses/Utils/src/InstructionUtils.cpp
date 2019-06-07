@@ -8,7 +8,7 @@
 
 using namespace llvm;
 
-#define DEBUG_TYPE_CMP
+//#define DEBUG_TYPE_CMP
 
 namespace DRCHECKER {
 
@@ -487,11 +487,15 @@ namespace DRCHECKER {
         if (!s) {
             return;
         }
-        size_t nd = s->rfind("."), *t;
+        size_t nd = s->rfind("."), t = 0;
         if (nd != std::string::npos) {
             std::string suffix = s->substr(nd+1);
-            std::stoi(suffix,t,10);
-            if (*t >= suffix.size()) {
+            try {
+                std::stoi(suffix,&t,10);
+            }catch(...) {
+                t = 0;
+            }
+            if (t >= suffix.size()) {
                 //This means the whole suffix can be converted to an integer, thus a numeric suffix.
                 s->erase(nd);
             }
@@ -502,7 +506,12 @@ namespace DRCHECKER {
     //In theory, we can simply compare two Type* by "==" in llvm,
     //but sometimes we want to handle cases like "%struct.A" and "%struct.A.123", 
     //they are basically the same but llvm does assign different Type* for them.
-    bool InstructionUtils::cmp_types(Type* ty0, Type* ty1) {
+    bool InstructionUtils::same_types(Type* ty0, Type* ty1) {
+#ifdef DEBUG_TYPE_CMP
+        if (ty0->isFunctionTy()) {
+            dbgs() << "InstructionUtils::same_types() FUNC: " << InstructionUtils::getTypeStr(ty0) << " | " << InstructionUtils::getTypeStr(ty1) << "\n";
+        }
+#endif
         if (ty0 == ty1) {
             return true;
         }
@@ -513,40 +522,51 @@ namespace DRCHECKER {
             //This means their basic types are different, e.g. a pointer vs an integer.
             return false;
         }
-        if (ty0->getNumContainedTypes() != ty1->getNumContainedTypes()) {
+        unsigned n = ty0->getNumContainedTypes();
+        if (n != ty1->getNumContainedTypes()) {
             return false;
         }
-        unsigned n = ty0->getNumContainedTypes();
 #ifdef DEBUG_TYPE_CMP
+        dbgs() << "InstructionUtils::same_types(): " << "#SUB:" << n << " " << InstructionUtils::getTypeStr(ty0) << " | " << InstructionUtils::getTypeStr(ty1) << "\n";
+        /*
         if (ty0->isFunctionTy()) {
-            dbgs() << "InstructionUtils::cmp_types, function type, #subtypes: " << n << "\n";
+            dbgs() << "InstructionUtils::same_types(): function type, #subtypes: " << n << "\n";
         }else if (ty0->isStructTy()) {
-            dbgs() << "InstructionUtils::cmp_types, struct type, #subtypes: " << n << "\n";
+            dbgs() << "InstructionUtils::same_types(): struct type, #subtypes: " << n << "\n";
+        }else if (ty0->isPointerTy()) {
+            dbgs() << "InstructionUtils::same_types(): pointer type, #subtypes: " << n << "\n";
         }
+        */
 #endif
-        if (n > 1) {
-            //Recursively comapre each sub type.
-            for (unsigned i=0; i<n; ++i) {
-                if (!InstructionUtils::cmp_types(ty0->getContainedType(i),ty1->getContainedType(i))) {
-                    return false;
-                }
-            }
-            return true;
-        }else {
-            //TODO: for now we only handle "structs" specially.
-            if (ty0->isStructTy()) {
-                StructType *st0 = dyn_cast<StructType>(ty0);
-                StructType *st1 = dyn_cast<StructType>(ty1);
-                if (st0 && st1 && st0->hasName() && st1->hasName()) {
-                    std::string n0 = st0->getName().str();
-                    std::string n1 = st1->getName().str();
-                    //trim the numeric suffix if any.
-                    _trim_num_suffix(&n0);
-                    _trim_num_suffix(&n1);
-                    return (n0 == n1); 
-                }
+        //Special handling for "struct"s.
+        if (ty0->isStructTy()) {
+            StructType *st0 = dyn_cast<StructType>(ty0);
+            StructType *st1 = dyn_cast<StructType>(ty1);
+            if (st0 && st1 && st0->hasName() && st1->hasName()) {
+                std::string n0 = st0->getName().str();
+                std::string n1 = st1->getName().str();
+                //trim the numeric suffix if any.
+                _trim_num_suffix(&n0);
+                _trim_num_suffix(&n1);
+#ifdef DEBUG_TYPE_CMP
+                dbgs() << "InstructionUtils::same_types(): cmp struct (suffix): " << (n0==n1) << "\n";
+#endif
+                return (n0 == n1); 
+            }else {
+#ifdef DEBUG_TYPE_CMP
+                dbgs() << "InstructionUtils::same_types(): cmp struct (no name)\n";
+#endif
+                return false;
             }
         }
-        return false;
+        for (unsigned i=0; i<n; ++i) {
+#ifdef DEBUG_TYPE_CMP
+            dbgs() << i << ": " << InstructionUtils::getTypeStr(ty0->getContainedType(i)) << " | " << InstructionUtils::getTypeStr(ty1->getContainedType(i)) << "\n";
+#endif
+            if (!InstructionUtils::same_types(ty0->getContainedType(i),ty1->getContainedType(i))) {
+                return false;
+            }
+        }
+        return true;
     }
 }

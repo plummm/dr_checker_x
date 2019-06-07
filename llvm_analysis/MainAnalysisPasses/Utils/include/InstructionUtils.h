@@ -115,7 +115,7 @@ namespace DRCHECKER {
 
         static std::string getCalleeName(CallInst*,bool);
 
-        static bool cmp_types(Type*,Type*);
+        static bool same_types(Type*,Type*);
 
         //Get the "cmd" arg values of the ioctl() that can reach the target "inst" under the context "ctx".
         static std::set<uint64_t> *getCmdValues(std::vector<Instruction*> *ctx, Instruction* inst, std::map<BasicBlock*,std::set<uint64_t>> *switchMap);

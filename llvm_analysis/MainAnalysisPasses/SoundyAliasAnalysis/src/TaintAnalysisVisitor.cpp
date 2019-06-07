@@ -551,7 +551,11 @@ namespace DRCHECKER {
                     if(farg_no == arg_no) {
                         std::set<TaintFlag*> *currArgTaintInfo = mergeTaintInfo(valuesToMerge, &I);
                         // ensure that we didn't mess up.
-                        assert(currArgTaintInfo != nullptr);
+                        //assert(currArgTaintInfo != nullptr);
+                        if (currArgTaintInfo == nullptr) {
+                            //This is less likely but if it happens, treat this arg as not tainted.
+                            break;
+                        }
 #ifdef DEBUG_CALL_INSTR
                         // OK, we need to add taint info.
                         dbgs() << "Argument:" << (arg_no) << " has taint info\n";
