@@ -8,7 +8,7 @@
 using namespace llvm;
 
 namespace DRCHECKER {
-//#define DEBUG_FUNCTION_PTR_ALIASING
+#define DEBUG_FUNCTION_PTR_ALIASING
 #define DEBUG_SMART_FUNCTION_PTR_RESOLVE
 
     std::set<PointerPointsTo*>* PointsToUtils::getPointsToObjects(GlobalState &currState,
@@ -119,7 +119,6 @@ namespace DRCHECKER {
             Function *currFunction = &(*a);
             // does the current function has same type of the call instruction?
             if(!currFunction->isDeclaration() && InstructionUtils::same_types(currFunction->getFunctionType(), targetFunctionType)) {
-            //if(!currFunction->isDeclaration() && currFunction->getFunctionType() == targetFunctionType) {
 #ifdef DEBUG_SMART_FUNCTION_PTR_RESOLVE
                 dbgs() << "PointsToUtils::getPossibleFunctionTargets: Got a same-typed candidate callee: ";
                 dbgs() << currFunction->getName().str() << "\n";
@@ -136,8 +135,8 @@ namespace DRCHECKER {
 #ifdef DEBUG_SMART_FUNCTION_PTR_RESOLVE
                     //dbgs() << "USE: " << InstructionUtils::getValueStr(*i) << "### " << (currI!=nullptr) << "|" << (currC!=nullptr) << "|" << (currConstA!=nullptr) << "|" << (currGV!=nullptr) << "\n";
 #endif
-                    if(currConstA != nullptr) {
-                    //if(currI != nullptr && currC == nullptr) {
+                    //if(currConstA != nullptr) {
+                    if(currI != nullptr && currC == nullptr) {
 #ifdef DEBUG_SMART_FUNCTION_PTR_RESOLVE
                         dbgs() << "PointsToUtils::getPossibleFunctionTargets: add to final list since the candidate has been used in a non-call inst.\n";
 #endif
@@ -150,9 +149,18 @@ namespace DRCHECKER {
             }
         }
 
+        PointsToUtils::filterPossibleFunctionsByLoc(&callInst, targetFunctions);
+
+        return targetFunctions.size() > 0;
+    }
+
+    void PointsToUtils::filterPossibleFunctionsByLoc(Instruction *inst, std::vector<Function *> &targetFunctions) {
+        if (!inst) {
+            return;
+        }
         // Find only those functions which are part of the driver.
         DILocation *instrLoc = nullptr;
-        instrLoc = callInst.getDebugLoc().get();
+        instrLoc = inst->getDebugLoc().get();
         if(instrLoc != nullptr) {
             std::string currFileName = instrLoc->getFilename();
             size_t found = currFileName.find_last_of("/");
@@ -173,9 +181,6 @@ namespace DRCHECKER {
         } else {
             targetFunctions.clear();
         }
-
-        return targetFunctions.size() > 0;
     }
-
 
 };

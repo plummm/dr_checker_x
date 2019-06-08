@@ -14,6 +14,7 @@
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Type.h"
 #include "TaintInfo.h"
+#include "../../Utils/include/InstructionUtils.h"
 
 using namespace llvm;
 #ifdef DEBUG
@@ -24,6 +25,8 @@ using namespace llvm;
 //#define DEBUG_OUTSIDE_OBJ_CREATION
 //#define DEBUG_FETCH_POINTS_TO_OBJECTS_OUTSIDE
 #define ENABLE_SUB_OBJ_CACHE
+#define SMART_FUNC_PTR_RESOLVE
+#define DEBUG_SMART_FUNCTION_PTR_RESOLVE
 
 namespace DRCHECKER {
 //#define DEBUG_FUNCTION_ARG_OBJ_CREATION
@@ -443,6 +446,82 @@ namespace DRCHECKER {
 
                 dstObjects.insert(dstObjects.end(), std::make_pair(0, newObj));
             }
+        }
+
+        //Try to find a proper function for a func pointer field in a struct.
+        bool getPossibleMemberFunctions(Instruction *inst, FunctionType *targetFunctionType, Type *host_ty, long field, std::vector<Function *> &targetFunctions) {
+            if (!inst || !targetFunctionType || !host_ty || field < 0 || field >= host_ty->getStructNumElements()) {
+                return false;
+            }
+#ifdef DEBUG_SMART_FUNCTION_PTR_RESOLVE
+            dbgs() << "PointsToUtils::getPossibleMemberFunctions: inst: ";
+            dbgs() << InstructionUtils::getValueStr(inst) << "\n";
+            dbgs() << "FUNC: " << InstructionUtils::getTypeStr(targetFunctionType);
+            dbgs() << " STRUCT: " << InstructionUtils::getTypeStr(host_ty) << " #" << field << "\n";
+#endif
+            Module *currModule = inst->getParent()->getParent()->getParent();
+            for(auto a = currModule->begin(), b = currModule->end(); a != b; a++) {
+                Function *currFunction = &(*a);
+                // does the current function has same type of the call instruction?
+                if(!currFunction->isDeclaration() && InstructionUtils::same_types(currFunction->getFunctionType(), targetFunctionType)) {
+#ifdef DEBUG_SMART_FUNCTION_PTR_RESOLVE
+                    dbgs() << "PointsToUtils::getPossibleMemberFunctions: Got a same-typed candidate callee: ";
+                    dbgs() << currFunction->getName().str() << "\n";
+#endif
+                    //Our filter logic is that the candidate function should appear in a constant (global) struct as a field,
+                    //with the struct type "host_ty" and fieldID "field".
+                    for (Value::user_iterator i = currFunction->user_begin(), e = currFunction->user_end(); i != e; ++i) {
+                        ConstantAggregate *currConstA = dyn_cast<ConstantAggregate>(*i);
+                        GlobalValue *currGV = dyn_cast<GlobalValue>(*i);
+#ifdef DEBUG_SMART_FUNCTION_PTR_RESOLVE
+                        //dbgs() << "USE: " << InstructionUtils::getValueStr(*i) << "### " << (currConstA!=nullptr) << "|" << (currGV!=nullptr) << "\n";
+#endif
+                        if(currConstA != nullptr && InstructionUtils::same_types(currConstA->getType(), host_ty)) {
+                            Constant *constF = currConstA->getAggregateElement(field);
+                            if (!constF) {
+                                continue;
+                            }
+                            Function *dstFunc = dyn_cast<Function>(constF);
+                            if (currFunction != dstFunc) {
+                                continue;
+                            }
+#ifdef DEBUG_SMART_FUNCTION_PTR_RESOLVE
+                            dbgs() << "PointsToUtils::getPossibleMemberFunctions: add to final list.\n";
+#endif
+                            // oh the function is used in a non-call instruction.
+                            // potential target, insert into potential targets
+                            targetFunctions.push_back(currFunction);
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Find only those functions which are part of the driver.
+            DILocation *instrLoc = nullptr;
+            instrLoc = inst->getDebugLoc().get();
+            if(instrLoc != nullptr) {
+                std::string currFileName = instrLoc->getFilename();
+                size_t found = currFileName.find_last_of("/");
+                std::string parFol = currFileName.substr(0, found);
+                std::vector<Function *> newList;
+                for(auto cf:targetFunctions) {
+                    instrLoc = cf->getEntryBlock().getFirstNonPHIOrDbg()->getDebugLoc().get();
+                    if(instrLoc != nullptr) {
+                        currFileName = instrLoc->getFilename();
+                        if(currFileName.find(parFol) != std::string::npos) {
+                            newList.push_back(cf);
+                        }
+                    }
+                }
+                targetFunctions.clear();
+                targetFunctions.insert(targetFunctions.end(), newList.begin(), newList.end());
+
+            } else {
+                targetFunctions.clear();
+            }
+
+            return targetFunctions.size() > 0;
         }
 
         //TaintInfo helpers start
@@ -909,64 +988,84 @@ namespace DRCHECKER {
             //NOTE: "pointsTo" should only store point-to information for the pointer fields.
             //So if "hasObjects" is false, we need to first ensure that the field is a pointer before creating new objects.
             Type *ety = this->targetType->getStructElementType(srcfieldId);
-            if (!ety->isPointerTy() || !ety->getPointerElementType()->isStructTy()) {
-                //The field is not a pointer, or it doen't point to a struct, we cannot create an object pointed to by it.
+            if (!ety->isPointerTy()) {
                 return;
             }
-            // if there are no objects that this pointer field points to, generate a dummy object.
-            if(create_arg_obj || this->isFunctionArg() || this->isOutsideObject()) {
-#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-                dbgs() << "Creating a new dynamic AliasObject at:";
-                targetInstr->print(dbgs());
-                dbgs() << "\n";
-#endif
-                OutsideObject *newObj = new OutsideObject(targetInstr,ety->getPointerElementType());
-                ObjectPointsTo *newPointsToObj = new ObjectPointsTo();
-                newPointsToObj->propogatingInstruction = targetInstr;
-                newPointsToObj->targetObject = newObj;
-                newPointsToObj->fieldId = srcfieldId;
-                // this is the field of the newly created object to which
-                // new points to points to
-                newPointsToObj->dstfieldId = 0;
-                newObj->auto_generated = true;
+            Type *e_pointto_ty = ety->getPointerElementType();
+            if (e_pointto_ty->isFunctionTy()) {
+                //This is a function pointer w/o point-to function, which can cause trobule later in resolving indirect function call.
+                //We can try to do some smart resolving here by looking at the same-typed global constant objects.
+#ifdef SMART_FUNC_PTR_RESOLVE
+                std::vector<Function*> candidateFuncs;
+                this->getPossibleMemberFunctions(targetInstr, dyn_cast<FunctionType>(e_pointto_ty), this->targetType, srcfieldId, candidateFuncs);
+                for (Function *func : candidateFuncs) {
+                    GlobalObject *newObj = new GlobalObject(func);
+                    ObjectPointsTo *newPointsToObj = new ObjectPointsTo();
+                    newPointsToObj->propogatingInstruction = targetInstr;
+                    newPointsToObj->targetObject = newObj;
+                    newPointsToObj->fieldId = srcfieldId;
+                    newPointsToObj->dstfieldId = 0;
 
-                // get the taint for the field and add that taint to the newly created object
-                std::set<TaintFlag*> *fieldTaint = getFieldTaintInfo(srcfieldId);
+                    pointsTo.push_back(newPointsToObj);
+                    dstObjects.insert(dstObjects.end(), std::make_pair(0, newObj));
+                }
+#endif
+            }else if (e_pointto_ty->isStructTy()) {
+                // if there are no struct objects that this pointer field points to, generate a dummy object.
+                if(create_arg_obj || this->isFunctionArg() || this->isOutsideObject()) {
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-                dbgs() << "Trying to get taint for field:" << srcfieldId << " for object:" << this << "\n";
+                    dbgs() << "Creating a new dynamic AliasObject at:";
+                    targetInstr->print(dbgs());
+                    dbgs() << "\n";
 #endif
-                if(fieldTaint != nullptr) {
+                    OutsideObject *newObj = new OutsideObject(targetInstr,ety->getPointerElementType());
+                    ObjectPointsTo *newPointsToObj = new ObjectPointsTo();
+                    newPointsToObj->propogatingInstruction = targetInstr;
+                    newPointsToObj->targetObject = newObj;
+                    newPointsToObj->fieldId = srcfieldId;
+                    // this is the field of the newly created object to which
+                    // new points to points to
+                    newPointsToObj->dstfieldId = 0;
+                    newObj->auto_generated = true;
+
+                    // get the taint for the field and add that taint to the newly created object
+                    std::set<TaintFlag*> *fieldTaint = getFieldTaintInfo(srcfieldId);
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-                    dbgs() << "Adding taint for field:" << srcfieldId << " for object:" << newObj << "\n";
+                    dbgs() << "Trying to get taint for field:" << srcfieldId << " for object:" << this << "\n";
 #endif
-                    for(auto existingTaint:*fieldTaint) {
-                        TaintFlag *newTaint = new TaintFlag(existingTaint,targetInstr,targetInstr);
-                        newObj->taintAllFieldsWithTag(newTaint);
-                    }
-                    newObj->is_taint_src = true;
-#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS_OUTSIDE
-                    dbgs() << "##Set |is_taint_src| to true.\n";
-#endif
-                } else {
-                    // if all the contents are tainted?
-                    if(this->all_contents_tainted) {
+                    if(fieldTaint != nullptr) {
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-                        dbgs() << "Trying to get field from an object whose contents are fully tainted\n";
+                        dbgs() << "Adding taint for field:" << srcfieldId << " for object:" << newObj << "\n";
 #endif
-                        assert(this->all_contents_taint_flag != nullptr);
-                        TaintFlag *newTaint = new TaintFlag(this->all_contents_taint_flag,targetInstr,targetInstr);
-                        newObj->taintAllFieldsWithTag(newTaint);
+                        for(auto existingTaint:*fieldTaint) {
+                            TaintFlag *newTaint = new TaintFlag(existingTaint,targetInstr,targetInstr);
+                            newObj->taintAllFieldsWithTag(newTaint);
+                        }
                         newObj->is_taint_src = true;
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS_OUTSIDE
                         dbgs() << "##Set |is_taint_src| to true.\n";
 #endif
+                    } else {
+                        // if all the contents are tainted?
+                        if(this->all_contents_tainted) {
+#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
+                            dbgs() << "Trying to get field from an object whose contents are fully tainted\n";
+#endif
+                            assert(this->all_contents_taint_flag != nullptr);
+                            TaintFlag *newTaint = new TaintFlag(this->all_contents_taint_flag,targetInstr,targetInstr);
+                            newObj->taintAllFieldsWithTag(newTaint);
+                            newObj->is_taint_src = true;
+#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS_OUTSIDE
+                            dbgs() << "##Set |is_taint_src| to true.\n";
+#endif
+                        }
                     }
+
+                    //insert the newly create object.
+                    pointsTo.push_back(newPointsToObj);
+
+                    dstObjects.insert(dstObjects.end(), std::make_pair(0, newObj));
                 }
-
-                //insert the newly create object.
-                pointsTo.push_back(newPointsToObj);
-
-                dstObjects.insert(dstObjects.end(), std::make_pair(0, newObj));
             }
         }
     };

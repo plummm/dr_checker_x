@@ -73,7 +73,7 @@ namespace DRCHECKER {
          */
         static bool getPossibleFunctionTargets(CallInst &callInst, std::vector<Function*> &targetFunctions);
 
-
+        static void filterPossibleFunctionsByLoc(Instruction *inst, std::vector<Function *> &targetFunctions);
 
     };
 
