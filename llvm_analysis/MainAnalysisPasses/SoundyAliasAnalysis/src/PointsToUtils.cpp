@@ -60,7 +60,7 @@ namespace DRCHECKER {
                     GlobalObject *currGlobObj = (GlobalObject*)(currPointsTo->targetObject);
                     Function *targetFunction = dyn_cast<Function>(currGlobObj->targetVar);
                     if(targetFunction != nullptr) {
-                        if (targetFunction->getType() == targetFunctionType) {
+                        if (InstructionUtils::same_types(targetFunction->getType(), targetFunctionType)) {
                             retVal = true;
                             dstFunctions.push_back(targetFunction);
 #ifdef DEBUG_FUNCTION_PTR_ALIASING
