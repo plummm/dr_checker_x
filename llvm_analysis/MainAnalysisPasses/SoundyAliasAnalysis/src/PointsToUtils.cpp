@@ -8,8 +8,8 @@
 using namespace llvm;
 
 namespace DRCHECKER {
-#define DEBUG_FUNCTION_PTR_ALIASING
-#define DEBUG_SMART_FUNCTION_PTR_RESOLVE
+//#define DEBUG_FUNCTION_PTR_ALIASING
+//#define DEBUG_SMART_FUNCTION_PTR_RESOLVE
 
     std::set<PointerPointsTo*>* PointsToUtils::getPointsToObjects(GlobalState &currState,
                                                                   std::vector<Instruction *> *currFuncCallSites,
@@ -108,6 +108,8 @@ namespace DRCHECKER {
     }
 
     bool PointsToUtils::getPossibleFunctionTargets(CallInst &callInst, std::vector<Function *> &targetFunctions) {
+        //Set up a cache to accelerate the lookup.
+        static std::map<Module*,std::map<FunctionType*,std::vector<Function*>>> target_cache;
         FunctionType *targetFunctionType = callInst.getFunctionType();
 #ifdef DEBUG_SMART_FUNCTION_PTR_RESOLVE
         dbgs() << "PointsToUtils::getPossibleFunctionTargets: try to resolve a indirect function call w/ type-based method: ";
@@ -115,6 +117,11 @@ namespace DRCHECKER {
         dbgs() << "Callee type: " << InstructionUtils::getTypeStr(targetFunctionType) << "\n";
 #endif
         Module *currModule = callInst.getParent()->getParent()->getParent();
+        if (target_cache.find(currModule) != target_cache.end() && target_cache[currModule].find(targetFunctionType) != target_cache[currModule].end()) {
+            //targetFunctions.insert(target_cache[currModule][targetFunctionType].begin(),target_cache[currModule][targetFunctionType].end());
+            targetFunctions = target_cache[currModule][targetFunctionType];
+            return true;
+        }
         for(auto a = currModule->begin(), b = currModule->end(); a != b; a++) {
             Function *currFunction = &(*a);
             // does the current function has same type of the call instruction?
@@ -151,7 +158,12 @@ namespace DRCHECKER {
 
         PointsToUtils::filterPossibleFunctionsByLoc(&callInst, targetFunctions);
 
-        return targetFunctions.size() > 0;
+        if (targetFunctions.size() > 0) {
+            //target_cache[currModule][targetFunctionType].insert(targetFunctions.begin(),targetFunctions.end());
+            target_cache[currModule][targetFunctionType] = targetFunctions;
+            return true;
+        }
+        return false;
     }
 
     void PointsToUtils::filterPossibleFunctionsByLoc(Instruction *inst, std::vector<Function *> &targetFunctions) {

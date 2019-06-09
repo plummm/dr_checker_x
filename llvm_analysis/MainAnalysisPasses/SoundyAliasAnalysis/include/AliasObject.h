@@ -26,7 +26,7 @@ using namespace llvm;
 //#define DEBUG_FETCH_POINTS_TO_OBJECTS_OUTSIDE
 #define ENABLE_SUB_OBJ_CACHE
 #define SMART_FUNC_PTR_RESOLVE
-#define DEBUG_SMART_FUNCTION_PTR_RESOLVE
+//#define DEBUG_SMART_FUNCTION_PTR_RESOLVE
 
 namespace DRCHECKER {
 //#define DEBUG_FUNCTION_ARG_OBJ_CREATION
@@ -454,7 +454,7 @@ namespace DRCHECKER {
                 return false;
             }
 #ifdef DEBUG_SMART_FUNCTION_PTR_RESOLVE
-            dbgs() << "PointsToUtils::getPossibleMemberFunctions: inst: ";
+            dbgs() << "getPossibleMemberFunctions: inst: ";
             dbgs() << InstructionUtils::getValueStr(inst) << "\n";
             dbgs() << "FUNC: " << InstructionUtils::getTypeStr(targetFunctionType);
             dbgs() << " STRUCT: " << InstructionUtils::getTypeStr(host_ty) << " #" << field << "\n";
@@ -465,7 +465,7 @@ namespace DRCHECKER {
                 // does the current function has same type of the call instruction?
                 if(!currFunction->isDeclaration() && InstructionUtils::same_types(currFunction->getFunctionType(), targetFunctionType)) {
 #ifdef DEBUG_SMART_FUNCTION_PTR_RESOLVE
-                    dbgs() << "PointsToUtils::getPossibleMemberFunctions: Got a same-typed candidate callee: ";
+                    dbgs() << "getPossibleMemberFunctions: Got a same-typed candidate callee: ";
                     dbgs() << currFunction->getName().str() << "\n";
 #endif
                     //Our filter logic is that the candidate function should appear in a constant (global) struct as a field,
@@ -482,11 +482,20 @@ namespace DRCHECKER {
                                 continue;
                             }
                             Function *dstFunc = dyn_cast<Function>(constF);
+                            if (!dstFunc && dyn_cast<ConstantExpr>(constF)) {
+                                //Maybe this field is a casted function pointer.
+                                ConstantExpr *constE = dyn_cast<ConstantExpr>(constF);
+                                if (constE->isCast()) {
+                                    Value *op = constE->getOperand(0);
+                                    dstFunc = dyn_cast<Function>(op);
+                                    //dstFunc might still be null.
+                                }
+                            }
                             if (currFunction != dstFunc) {
                                 continue;
                             }
 #ifdef DEBUG_SMART_FUNCTION_PTR_RESOLVE
-                            dbgs() << "PointsToUtils::getPossibleMemberFunctions: add to final list.\n";
+                            dbgs() << "getPossibleMemberFunctions: add to final list.\n";
 #endif
                             // oh the function is used in a non-call instruction.
                             // potential target, insert into potential targets
