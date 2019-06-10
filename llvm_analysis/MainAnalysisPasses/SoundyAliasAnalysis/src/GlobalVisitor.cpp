@@ -15,7 +15,7 @@ namespace DRCHECKER {
 #define MAX_FUNC_PTR 3
 #define SMART_FUNCTION_PTR_RESOLVING
 #define DEBUG_BB_VISIT
-//#define DEBUG_CALL_INSTR
+#define FUNC_BLACKLIST
 
     // Basic visitor functions.
     // call the corresponding function in the child callbacks.
@@ -110,6 +110,15 @@ namespace DRCHECKER {
 #ifdef DONOT_CARE_COMPLETION
         if(this->currFuncCallSites->size() > MAX_CALLSITE_DEPTH) {
             errs() << "MAX CALL SITE DEPTH REACHED, IGNORING:" << currFuncName << "\n";
+            return;
+        }
+#endif
+
+        //A hacking: set up a blacklist for certain time-consuming functions..
+#ifdef FUNC_BLACKLIST
+        std::set<std::string> black_funcs{"con_write","do_con_write","io_serial_out","io_serial_in"};
+        if (black_funcs.find(currFuncName) != black_funcs.end()) {
+            dbgs() << "Func in blacklist, IGNORING:" << currFuncName << "\n";
             return;
         }
 #endif

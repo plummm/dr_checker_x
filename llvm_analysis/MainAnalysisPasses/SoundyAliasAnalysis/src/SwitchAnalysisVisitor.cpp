@@ -68,8 +68,8 @@ namespace DRCHECKER {
     void SwitchAnalysisVisitor::visit(BasicBlock *BB) {
     }
 
-    //For now we only analyze the switch-case in the top-level entry-point ioctl(), so no need to dive into the callees.
-    /*
+    //There can be layered ioctl calls which all have the switch-case structure for the same user passed-in "cmd" argument,
+    //so the SwitchAnalysisVisitor needs also process each callee.
     VisitorCallback* SwitchAnalysisVisitor::visitCallInst(CallInst &I, Function *currFunc,
                                                          std::vector<Instruction *> *oldFuncCallSites,
                                                          std::vector<Instruction *> *callSiteContext) {
@@ -88,6 +88,5 @@ namespace DRCHECKER {
 
         return vis;
     }
-    */
 
 }// namespace DRCHECKER
