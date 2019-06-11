@@ -448,6 +448,120 @@ namespace DRCHECKER {
             }
         }
 
+        bool getPossibleMemberFunctions_dbg(Instruction *inst, FunctionType *targetFunctionType, Type *host_ty, long field, std::vector<Function *> &targetFunctions) {
+            if (!inst || !targetFunctionType || !host_ty || field < 0 || field >= host_ty->getStructNumElements()) {
+                return false;
+            }
+            Module *currModule = inst->getParent()->getParent()->getParent();
+            for(auto a = currModule->begin(), b = currModule->end(); a != b; a++) {
+                Function *currFunction = &(*a);
+                if(!currFunction->isDeclaration()) {
+                    if (currFunction->getName().str() != "vt_ioctl") {
+                        continue;
+                    }
+                    dbgs() << "Find vt_ioctl()\n";
+                    std::map<ConstantAggregate*,std::set<long>> *res = this->getUsesInStruct(currFunction);
+                    if (res) {
+                        dbgs() << "getUsesInStruct succeed!\n";
+                        for (auto& x : *res) {
+                            dbgs() << "-------------------\n";
+                            dbgs() << InstructionUtils::getValueStr(x.first) << "\n";
+                            for (auto &y : x.second) {
+                                dbgs() << y << ", ";
+                            }
+                            dbgs() << "\n";
+                        }
+                    }
+                    for (Value::user_iterator i = currFunction->user_begin(), e = currFunction->user_end(); i != e; ++i) {
+                        ConstantExpr *constExp = dyn_cast<ConstantExpr>(*i);
+                        ConstantAggregate *currConstA = dyn_cast<ConstantAggregate>(*i);
+                        GlobalValue *currGV = dyn_cast<GlobalValue>(*i);
+                        dbgs() << "USE: " << InstructionUtils::getValueStr(*i) << "### " << (constExp!=nullptr) << "|" << (currConstA!=nullptr) << "|" << (currGV!=nullptr) << "\n";
+                        if(constExp != nullptr) {
+                            for (Value::user_iterator j = constExp->user_begin(), je = constExp->user_end(); j != je; ++j) {
+                                ConstantAggregate *currConstAC = dyn_cast<ConstantAggregate>(*j);
+                                dbgs() << "USE(CEXPR): " << InstructionUtils::getValueStr(*i) << "### " << (currConstAC!=nullptr) << "\n";
+                            }
+                        }
+                        if(currConstA != nullptr) {
+                            dbgs() << "Find its use as a ConstantAggregate:\n";
+                            dbgs() << InstructionUtils::getValueStr(currConstA) << "\n";
+                            Constant *constF = currConstA->getAggregateElement(12);
+                            if (!constF) {
+                                dbgs() << "Failure currConstA->getAggregateElement(12)\n";
+                                continue;
+                            }
+                            dbgs() << "constF: " << InstructionUtils::getValueStr(constF) << "\n";
+                            Function *dstFunc = dyn_cast<Function>(constF);
+                            if (!dstFunc && dyn_cast<ConstantExpr>(constF)) {
+                                dbgs() << "!dstFunc && dyn_cast<ConstantExpr>(constF)\n"; 
+                                //Maybe this field is a casted function pointer.
+                                ConstantExpr *constE = dyn_cast<ConstantExpr>(constF);
+                                if (constE->isCast()) {
+                                    dbgs() << "constE->isCast()\n";
+                                    Value *op = constE->getOperand(0);
+                                    dstFunc = dyn_cast<Function>(op);
+                                    //dstFunc might still be null.
+                                }
+                            }
+                            if (dstFunc) {
+                                dbgs() << dstFunc->getName().str() << "\n";
+                            }else {
+                                dbgs() << "Null dstFunc\n";
+                            }
+                        }
+                    }
+                }
+            }
+            return false;
+        }
+
+        std::map<ConstantAggregate*,std::set<long>> *getUsesInStruct(Value *v) {
+            static std::map<Value*,std::map<ConstantAggregate*,std::set<long>>> use_cache;
+            if (!v) {
+                return nullptr;
+            }
+            if (use_cache.find(v) != use_cache.end()) {
+                return &use_cache[v];
+            }
+            for (Value::user_iterator i = v->user_begin(), e = v->user_end(); i != e; ++i) {
+                if (dyn_cast<Instruction>(*i)) {
+                    //If the user is an instruction, it'll be impossible to occur in a constant struct.
+                    continue;
+                }
+                std::map<ConstantAggregate*,std::set<long>> *res = nullptr;
+                std::map<ConstantAggregate*,std::set<long>> buf;
+                ConstantAggregate *currConstA = dyn_cast<ConstantAggregate>(*i);
+                if (currConstA) {
+                    //Figure out the #field
+                    for (unsigned c = 0; c < currConstA->getNumOperands(); ++c) {
+                        Constant *constF = currConstA->getAggregateElement(c);
+                        if (dyn_cast<Value>(constF) == v) {
+                            buf[currConstA].insert((long)c);
+                        }
+                    }
+                    res = &buf;
+                }else {
+                    res = this->getUsesInStruct(*i);
+                }
+                if (!res || res->empty()) {
+                    continue;
+                }
+                //merge
+                for (auto& x : *res) {
+                    if (use_cache[v].find(x.first) == use_cache[v].end()) {
+                        use_cache[v][x.first] = x.second;
+                    }else {
+                        use_cache[v][x.first].insert(x.second.begin(),x.second.end());
+                    }
+                }
+            }
+            if (use_cache.find(v) != use_cache.end()) {
+                return &use_cache[v];
+            }
+            return nullptr;
+        }
+
         //Try to find a proper function for a func pointer field in a struct.
         bool getPossibleMemberFunctions(Instruction *inst, FunctionType *targetFunctionType, Type *host_ty, long field, std::vector<Function *> &targetFunctions) {
             if (!inst || !targetFunctionType || !host_ty || field < 0 || field >= host_ty->getStructNumElements()) {
@@ -470,35 +584,15 @@ namespace DRCHECKER {
 #endif
                     //Our filter logic is that the candidate function should appear in a constant (global) struct as a field,
                     //with the struct type "host_ty" and fieldID "field".
-                    for (Value::user_iterator i = currFunction->user_begin(), e = currFunction->user_end(); i != e; ++i) {
-                        ConstantAggregate *currConstA = dyn_cast<ConstantAggregate>(*i);
-                        GlobalValue *currGV = dyn_cast<GlobalValue>(*i);
-#ifdef DEBUG_SMART_FUNCTION_PTR_RESOLVE
-                        //dbgs() << "USE: " << InstructionUtils::getValueStr(*i) << "### " << (currConstA!=nullptr) << "|" << (currGV!=nullptr) << "\n";
-#endif
-                        if(currConstA != nullptr && InstructionUtils::same_types(currConstA->getType(), host_ty)) {
-                            Constant *constF = currConstA->getAggregateElement(field);
-                            if (!constF) {
-                                continue;
-                            }
-                            Function *dstFunc = dyn_cast<Function>(constF);
-                            if (!dstFunc && dyn_cast<ConstantExpr>(constF)) {
-                                //Maybe this field is a casted function pointer.
-                                ConstantExpr *constE = dyn_cast<ConstantExpr>(constF);
-                                if (constE->isCast()) {
-                                    Value *op = constE->getOperand(0);
-                                    dstFunc = dyn_cast<Function>(op);
-                                    //dstFunc might still be null.
-                                }
-                            }
-                            if (currFunction != dstFunc) {
-                                continue;
-                            }
+                    std::map<ConstantAggregate*,std::set<long>> *res = this->getUsesInStruct(currFunction);
+                    if (!res || res->empty()) {
+                        continue;
+                    }
+                    for (auto& x : *res) {
+                        if (InstructionUtils::same_types((x.first)->getType(), host_ty) && x.second.find(field) != x.second.end()) {
 #ifdef DEBUG_SMART_FUNCTION_PTR_RESOLVE
                             dbgs() << "getPossibleMemberFunctions: add to final list.\n";
 #endif
-                            // oh the function is used in a non-call instruction.
-                            // potential target, insert into potential targets
                             targetFunctions.push_back(currFunction);
                             break;
                         }

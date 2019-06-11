@@ -470,17 +470,22 @@ namespace DRCHECKER {
             return nullptr;
         }
         BasicBlock *entry_bb = nullptr;
+        //NOTE: The very first instruction in the context is the same across all contexts (i.e. the first inst in the entry func)
         if (ctx && ctx->size() > 1) {
-            //The very first instruction in the context is the same across all contexts (i.e. the first inst in the entry func)
-            //So we should look at the 2nd inst.
-            entry_bb = (*ctx)[1]->getParent();
+            //We should find the latest call site which has the associated switch-case info.
+            for (size_t i = ctx->size()-1; i >= 1; --i) {
+                entry_bb = (*ctx)[i]->getParent();
+                if(entry_bb && switchMap->find(entry_bb) != switchMap->end()){
+                    return &((*switchMap)[entry_bb]);
+                }
+            }
         }else if (inst) {
             entry_bb = inst->getParent();
+            if(entry_bb && switchMap->find(entry_bb) != switchMap->end()){
+                return &((*switchMap)[entry_bb]);
+            }
         }
-        if((!entry_bb) || switchMap->find(entry_bb) == switchMap->end()){
-            return nullptr;
-        }
-        return &((*switchMap)[entry_bb]);
+        return nullptr;
     }
 
     void _trim_num_suffix(std::string *s) {
