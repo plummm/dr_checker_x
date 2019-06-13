@@ -118,9 +118,15 @@ namespace DRCHECKER {
         //A hacking: set up a blacklist for certain time-consuming functions..
 #ifdef FUNC_BLACKLIST
         std::set<std::string> black_funcs{"con_write","do_con_write","io_serial_out","io_serial_in","__sanitizer_cov_trace_pc"};
-        if (black_funcs.find(currFuncName) != black_funcs.end() || currFuncName.find("asan_report") != std::string::npos) {
+        std::set<std::string> black_funcs_inc{"asan_report","llvm.dbg"};
+        if (black_funcs.find(currFuncName) != black_funcs.end()) {
             dbgs() << "Func in blacklist, IGNORING:" << currFuncName << "\n";
             return;
+        }
+        for (auto& x : black_funcs_inc) {
+            if (currFuncName.find(x) != std::string::npos) {
+                return;
+            }
         }
 #endif
 
@@ -134,12 +140,12 @@ namespace DRCHECKER {
         //if we only insert the call inst itself into the "call context", we will not be able to differentiate
         //these target callees... So now for each call inst, we insert both the call inst and the entry inst of the
         //target function into the "call context".
-        try{
+        dbgs() << "GlobalVisitor::processCalledFunction: insert entry inst of: " << currFuncName << "\n";
+        if (!currFunc->isDeclaration()) {
             BasicBlock &bb = currFunc->getEntryBlock();
             newCallContext->insert(newCallContext->end(), bb.getFirstNonPHI());
-        }catch(...){
-            dbgs() << "GlobalVisitor::processCalledFunction: exception when inserting entry inst of: " << currFuncName << "\n";
-            //Insert the call inst again in order to keep the context size compatiable with 2*MAX-1...
+        }else{
+            //Insert the call inst again in order to match the 2*MAX-1...
             newCallContext->insert(newCallContext->end(), &I);
         }
         this->currState.getOrCreateContext(newCallContext);

@@ -204,9 +204,11 @@ namespace DRCHECKER {
             }
 
             // add the source instruction into the trace.
-            Instruction *srcInstr = dyn_cast<Instruction>(srcOperand);
-            if(srcInstr != nullptr && lastInstr != srcInstr) {
-                this->instructionTrace.push_back(srcInstr);
+            if (srcOperand) {
+                Instruction *srcInstr = dyn_cast<Instruction>(srcOperand);
+                if(srcInstr != nullptr && lastInstr != srcInstr) {
+                    this->instructionTrace.push_back(srcInstr);
+                }
             }
             //hz: tag propagation.
             this->tag = copyTaint->tag;

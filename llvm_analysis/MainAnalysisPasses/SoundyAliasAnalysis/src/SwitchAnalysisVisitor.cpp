@@ -44,6 +44,7 @@ namespace DRCHECKER {
             dbgs() << " Dst BB: " << bb->getName().str() << "\n";
 #endif
             this->currState.switchMap[bb].insert(c_val);
+            this->has_explicit_cmd = true;
             //We also need to add this case successor's successors to the map, since they can also be reached from current case value.
             std::set<BasicBlock*> *succs = this->get_all_successors(bb);
             for(BasicBlock *succ_bb : *succs){
@@ -152,7 +153,7 @@ namespace DRCHECKER {
         dbgs() << "\n";
 #endif
 #ifdef RESOLVE_IMPLICIT_CMD
-        if (this->currState.switchMap.empty()) {
+        if (!this->has_explicit_cmd) {
             this->resolveImplicitCMD(I,currFunc,callSiteContext);
         }
 #endif

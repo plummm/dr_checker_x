@@ -37,6 +37,7 @@ namespace DRCHECKER {
             this->currFuncCallSites = srcCallSites;
             // ensure that we have a context for current function.
             targetState.getOrCreateContext(this->currFuncCallSites);
+            this->has_explicit_cmd = false;
         }
 
         ~SwitchAnalysisVisitor() {
@@ -61,6 +62,8 @@ namespace DRCHECKER {
         std::set<BasicBlock*>* get_all_successors(BasicBlock*);
 
         void resolveImplicitCMD(CallInst &I, Function *currFunc, std::vector<Instruction *> *callSiteContext);
+
+        bool has_explicit_cmd;
 
     }; //SwitchAnalysisVisitor class definition
 
