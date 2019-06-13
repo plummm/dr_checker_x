@@ -119,6 +119,8 @@ namespace DRCHECKER {
 
         //Get the "cmd" arg values of the ioctl() that can reach the target "inst" under the context "ctx".
         static std::set<uint64_t> *getCmdValues(std::vector<Instruction*> *ctx, Instruction* inst, std::map<BasicBlock*,std::set<uint64_t>> *switchMap);
+
+        static std::map<ConstantAggregate*,std::set<long>> *getUsesInStruct(Value *v);
     };
 }
 #endif //PROJECT_INSTRUCTIONUTILS_H

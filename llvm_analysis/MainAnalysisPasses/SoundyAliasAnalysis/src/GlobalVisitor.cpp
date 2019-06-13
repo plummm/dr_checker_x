@@ -108,7 +108,8 @@ namespace DRCHECKER {
     void GlobalVisitor::processCalledFunction(CallInst &I, Function *currFunc) {
         std::string currFuncName = currFunc->getName().str();
 #ifdef DONOT_CARE_COMPLETION
-        if(this->currFuncCallSites->size() > MAX_CALLSITE_DEPTH) {
+        //hz: we need to use "2*MAX-1" since for each call site we insert both the call inst and the callee entry inst into the context.
+        if(this->currFuncCallSites->size() > 2 * MAX_CALLSITE_DEPTH - 1) {
             errs() << "MAX CALL SITE DEPTH REACHED, IGNORING:" << currFuncName << "\n";
             return;
         }
@@ -129,6 +130,11 @@ namespace DRCHECKER {
         newCallContext->insert(newCallContext->end(), this->currFuncCallSites->begin(), this->currFuncCallSites->end());
         // create context.
         newCallContext->insert(newCallContext->end(), &I);
+        //hz: If this is an indirect call inst, there can be multiple possible target callees, in this situation
+        //if we only insert the call inst itself into the "call context", we will not be able to differentiate
+        //these target callees... So now for each call inst, we insert both the call inst and the entry inst of the
+        //target function into the "call context".
+        newCallContext->insert(newCallContext->end(), currFunc->getEntryBlock().getFirstNonPHI());
         this->currState.getOrCreateContext(newCallContext);
 
         // new callbacks that handles the current function.

@@ -26,7 +26,7 @@ using namespace llvm;
 //#define DEBUG_FETCH_POINTS_TO_OBJECTS_OUTSIDE
 #define ENABLE_SUB_OBJ_CACHE
 #define SMART_FUNC_PTR_RESOLVE
-//#define DEBUG_SMART_FUNCTION_PTR_RESOLVE
+#define DEBUG_SMART_FUNCTION_PTR_RESOLVE
 
 namespace DRCHECKER {
 //#define DEBUG_FUNCTION_ARG_OBJ_CREATION
@@ -460,7 +460,7 @@ namespace DRCHECKER {
                         continue;
                     }
                     dbgs() << "Find vt_ioctl()\n";
-                    std::map<ConstantAggregate*,std::set<long>> *res = this->getUsesInStruct(currFunction);
+                    std::map<ConstantAggregate*,std::set<long>> *res = InstructionUtils::getUsesInStruct(currFunction);
                     if (res) {
                         dbgs() << "getUsesInStruct succeed!\n";
                         for (auto& x : *res) {
@@ -516,52 +516,6 @@ namespace DRCHECKER {
             return false;
         }
 
-        std::map<ConstantAggregate*,std::set<long>> *getUsesInStruct(Value *v) {
-            static std::map<Value*,std::map<ConstantAggregate*,std::set<long>>> use_cache;
-            if (!v) {
-                return nullptr;
-            }
-            if (use_cache.find(v) != use_cache.end()) {
-                return &use_cache[v];
-            }
-            for (Value::user_iterator i = v->user_begin(), e = v->user_end(); i != e; ++i) {
-                if (dyn_cast<Instruction>(*i)) {
-                    //If the user is an instruction, it'll be impossible to occur in a constant struct.
-                    continue;
-                }
-                std::map<ConstantAggregate*,std::set<long>> *res = nullptr;
-                std::map<ConstantAggregate*,std::set<long>> buf;
-                ConstantAggregate *currConstA = dyn_cast<ConstantAggregate>(*i);
-                if (currConstA) {
-                    //Figure out the #field
-                    for (unsigned c = 0; c < currConstA->getNumOperands(); ++c) {
-                        Constant *constF = currConstA->getAggregateElement(c);
-                        if (dyn_cast<Value>(constF) == v) {
-                            buf[currConstA].insert((long)c);
-                        }
-                    }
-                    res = &buf;
-                }else {
-                    res = this->getUsesInStruct(*i);
-                }
-                if (!res || res->empty()) {
-                    continue;
-                }
-                //merge
-                for (auto& x : *res) {
-                    if (use_cache[v].find(x.first) == use_cache[v].end()) {
-                        use_cache[v][x.first] = x.second;
-                    }else {
-                        use_cache[v][x.first].insert(x.second.begin(),x.second.end());
-                    }
-                }
-            }
-            if (use_cache.find(v) != use_cache.end()) {
-                return &use_cache[v];
-            }
-            return nullptr;
-        }
-
         //Try to find a proper function for a func pointer field in a struct.
         bool getPossibleMemberFunctions(Instruction *inst, FunctionType *targetFunctionType, Type *host_ty, long field, std::vector<Function *> &targetFunctions) {
             if (!inst || !targetFunctionType || !host_ty || field < 0 || field >= host_ty->getStructNumElements()) {
@@ -584,11 +538,18 @@ namespace DRCHECKER {
 #endif
                     //Our filter logic is that the candidate function should appear in a constant (global) struct as a field,
                     //with the struct type "host_ty" and fieldID "field".
-                    std::map<ConstantAggregate*,std::set<long>> *res = this->getUsesInStruct(currFunction);
+                    std::map<ConstantAggregate*,std::set<long>> *res = InstructionUtils::getUsesInStruct(currFunction);
                     if (!res || res->empty()) {
                         continue;
                     }
                     for (auto& x : *res) {
+#ifdef DEBUG_SMART_FUNCTION_PTR_RESOLVE
+                        dbgs() << "USE: STRUCT: " << InstructionUtils::getTypeStr((x.first)->getType()) << " #";
+                        for (auto& y : x.second) {
+                            dbgs() << y << ", ";
+                        }
+                        dbgs() << "\n";
+#endif
                         if (InstructionUtils::same_types((x.first)->getType(), host_ty) && x.second.find(field) != x.second.end()) {
 #ifdef DEBUG_SMART_FUNCTION_PTR_RESOLVE
                             dbgs() << "getPossibleMemberFunctions: add to final list.\n";

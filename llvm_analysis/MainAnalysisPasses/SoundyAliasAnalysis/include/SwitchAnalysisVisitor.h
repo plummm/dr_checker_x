@@ -60,6 +60,8 @@ namespace DRCHECKER {
 
         std::set<BasicBlock*>* get_all_successors(BasicBlock*);
 
+        void resolveImplicitCMD(CallInst &I, Function *currFunc, std::vector<Instruction *> *callSiteContext);
+
     }; //SwitchAnalysisVisitor class definition
 
 } //namespace DRCHECKER
