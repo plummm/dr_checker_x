@@ -402,12 +402,14 @@ namespace DRCHECKER {
             return 1;
         }else if (dyn_cast<llvm::ConstantFP>(C)) {
             //TODO: we need to put the float value in an "int64_t"
+            (*res)["CONST_FP"] = 0;
             return 2;
         }else if (dyn_cast<llvm::UndefValue>(C)) {
             (*res)["CONST_UNDEF"] = 0;
             return 3;
         }else if (dyn_cast<llvm::ConstantExpr>(C)) {
             //TODO: we need to evaluate the expr to a numeric value, how to do that?
+            (*res)["CONST_EXPR"] = 0;
             return 4;
         }else if (dyn_cast<llvm::ConstantPointerNull>(C)) {
             (*res)["CONST_NULLPTR"] = 0;
@@ -417,6 +419,7 @@ namespace DRCHECKER {
             return 6;
         }else {
             //Ignore other cases for now.
+            (*res)["CONST_OTHER"] = 0;
             return 7;
         }
     }

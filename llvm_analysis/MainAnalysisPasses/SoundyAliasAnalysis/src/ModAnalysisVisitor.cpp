@@ -132,13 +132,6 @@ namespace DRCHECKER {
         }
         //GlobalState &currState;
         Value *srcValue = I.getValueOperand();
-        //For now let's only consider the scalar values to store.
-        if (!InstructionUtils::isScalar(srcValue)) {
-#ifdef DEBUG_MOD_TRAIT
-            dbgs() << "ModAnalysisVisitor::analyzeModPattern: The value to store is not a scalar\n";
-#endif
-            return;
-        }
         //Is it a const value?
         if (dyn_cast<llvm::Constant>(srcValue)) {
             //A direct assignment.
@@ -149,6 +142,13 @@ namespace DRCHECKER {
                 dbgs() << x.first << ":" << x.second << " ";
             }
             dbgs() << "\n";
+#endif
+            return;
+        }
+        //For now let's only consider the scalar values to store.
+        if (!InstructionUtils::isScalar(srcValue)) {
+#ifdef DEBUG_MOD_TRAIT
+            dbgs() << "ModAnalysisVisitor::analyzeModPattern: The value to store is not a scalar\n";
 #endif
             return;
         }
@@ -431,6 +431,9 @@ namespace DRCHECKER {
         int cn;
         if (m.find("CONST_INT") != m.end()) {
             cn = m["CONST_INT"];
+        }else if (m.find("CONST_NULLPTR") != m.end()) {
+            //null ptr
+            cn = 0;
         }else {
             //TODO: We don't match these patterns now.
 #ifdef DEBUG_BR_TRAIT
