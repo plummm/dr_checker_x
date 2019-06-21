@@ -29,11 +29,13 @@ namespace DRCHECKER {
         Type *type;
         //Record all instructions (w/ its call context) that can possibly modify this taint source.
         std::map< Instruction *, std::set<std::vector<Instruction*>*> > mod_insts;
+        bool is_global;
 
-        TaintTag(long fieldId, Value *v) {
+        TaintTag(long fieldId, Value *v, bool is_global = true) {
             this -> fieldId = fieldId;
             this -> v = v;
             this -> type = this->getTy();
+            this -> is_global = is_global;
         }
 
         TaintTag(TaintTag *srcTag) {
@@ -42,6 +44,7 @@ namespace DRCHECKER {
             this -> type = srcTag -> type;
             //This is content copy.
             this -> mod_insts = srcTag -> mod_insts;
+            this -> is_global = srcTag -> is_global;
         }
 
         std::string getTypeStr() {
@@ -148,6 +151,7 @@ namespace DRCHECKER {
                 OS << InstructionUtils::getTypeStr(this->type);
             }
             OS << "\n";
+            OS << "is_global: " << this->is_global << "\n";
         }
 
         void printModInsts(raw_ostream &OS, std::map<BasicBlock*,std::set<uint64_t>> *switchMap) {
@@ -227,6 +231,10 @@ namespace DRCHECKER {
         TaintFlag(Value * targetInstr) : TaintFlag(targetInstr, false) {}
         //Destructors
         ~TaintFlag() {}
+
+        void setTag(TaintTag *tag) {
+            this -> tag = tag;
+        }
 
         bool isTainted() const {
             return is_tainted;

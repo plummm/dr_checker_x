@@ -502,6 +502,8 @@ namespace DRCHECKER {
             //for ioctl() in driver code, the FILE pointer should also
             //be regarded as a global variable.
             if(functionType == MY_IOCTL) {
+                // last argument is the user pointer.
+                taintedArgs.insert(targetFunction->arg_size() - 1);
                 is_handled = true;
             }
             if(functionType == READ_HDR || functionType == WRITE_HDR) {
@@ -560,7 +562,10 @@ namespace DRCHECKER {
             for(Function::arg_iterator arg_begin = targetFunction->arg_begin(), arg_end = targetFunction->arg_end(); arg_begin != arg_end; arg_begin++) {
                 Value *currArgVal = &(*arg_begin);
                 if(taintedArgs.find(arg_no) != taintedArgs.end()) {
+                    //hz: Add a taint tag indicating that the taint is from user-provided arg, instead of global states.
+                    TaintTag *currTag = new TaintTag(0,currArgVal,false);
                     TaintFlag *currFlag = new TaintFlag(currArgVal, true);
+                    currFlag->setTag(currTag);
                     currFlag->instructionTrace.push_back(targetFunction->getEntryBlock().getFirstNonPHIOrDbg());
                     std::set<TaintFlag*> *currTaintInfo = new std::set<TaintFlag*>();
                     currTaintInfo->insert(currFlag);
@@ -596,6 +601,9 @@ namespace DRCHECKER {
             for(auto const &it : GlobalState::globalVariables){
                 Value *v = it.first;
                 TaintFlag *currFlag = new TaintFlag(v, true);
+                //Add a tag
+                TaintTag *currTag = new TaintTag(0,v);
+                currFlag->setTag(currTag);
                 std::set<PointerPointsTo*> *ps = it.second;
                 if (ps->size() <= 0) {
                     continue;
@@ -609,7 +617,10 @@ namespace DRCHECKER {
                     if (ty->isFunctionTy() || ty->isLabelTy() || ty->isMetadataTy()){
                         continue;
                     }
-                    //TODO: exclude the const strings.
+                }
+                //Exclude the constants which cannot be modified.
+                if (dyn_cast<ConstantData>(v) || dyn_cast<ConstantAggregate>(v)) {
+                    continue;
                 }
 #ifdef DEBUG_GLOBAL_TAINT
                 dbgs() << "addGlobalTaintSource(): Set the glob var as taint source: ";

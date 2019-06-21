@@ -73,8 +73,18 @@ namespace DRCHECKER {
         (*currPointsTo)[p] = newPointsToSet;
         //Need to taint it?
         if (taint) {
-            TaintFlag *currFlag = new TaintFlag(p, true);
-            newObj->taintAllFieldsWithTag(currFlag);
+            //Is the pointer "p" tainted itself?
+            //
+            std::set<TaintFlag*> *existingTaints = TaintUtils::getTaintInfo(this->currState,this->currFuncCallSites,p);
+            if (existingTaints && !existingTaints->empty()) {
+                for (TaintFlag *currTaint : *existingTaints) {
+                    newObj->taintAllFieldsWithTag(currTaint);
+                }
+            }else {
+                //The original pointer is not tainted, treat it as a global state.
+                TaintFlag *currFlag = new TaintFlag(p, true);
+                newObj->taintAllFieldsWithTag(currFlag);
+            }
             newObj->is_taint_src = true;
 #ifdef DEBUG_CREATE_DUMMY_OBJ_IF_NULL
             dbgs() << "AliasAnalysisVisitor::createOutsideObj(): set |is_taint_src| for the outside obj.\n";
@@ -374,6 +384,8 @@ namespace DRCHECKER {
                                 }
                                 //Record it in the "embObjs".
                                 hostObj->embObjs[host_dstFieldId] = newObj;
+                                newObj->parent = hostObj;
+                                newObj->parent_field = host_dstFieldId;
                             }
                         }
                         if(newObj){
