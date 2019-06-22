@@ -30,14 +30,15 @@ namespace DRCHECKER {
         //Record all instructions (w/ its call context) that can possibly modify this taint source.
         std::map< Instruction *, std::set<std::vector<Instruction*>*> > mod_insts;
         bool is_global;
-        //The AliasObject(s) and the field(s) that are related to this tag.
-        //std::set<std::pair<long, AliasObject*>> origObjects;
+        //The AliasObject that is related to this tag.
+        void *priv;
 
-        TaintTag(long fieldId, Value *v, bool is_global = true) {
+        TaintTag(long fieldId, Value *v, bool is_global = true, void *p = nullptr) {
             this -> fieldId = fieldId;
             this -> v = v;
             this -> type = this->getTy();
             this -> is_global = is_global;
+            this -> priv = p;
         }
 
         TaintTag(TaintTag *srcTag) {
@@ -47,6 +48,7 @@ namespace DRCHECKER {
             //This is content copy.
             this -> mod_insts = srcTag -> mod_insts;
             this -> is_global = srcTag -> is_global;
+            this -> priv = srcTag -> priv;
         }
 
         std::string getTypeStr() {

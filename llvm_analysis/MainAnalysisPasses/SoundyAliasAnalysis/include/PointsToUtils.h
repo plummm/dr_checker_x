@@ -77,6 +77,8 @@ namespace DRCHECKER {
 
         static bool getTargetObjects(std::set<PointerPointsTo*> *dstPointsTo, std::set<std::pair<long, AliasObject*>> &targetObjects);
 
+        //static std::set<std::string> *getHierarchyStr(AliasObject *obj, long field);
+
     };
 
 }

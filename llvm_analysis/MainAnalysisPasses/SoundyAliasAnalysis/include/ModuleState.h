@@ -544,6 +544,42 @@ namespace DRCHECKER {
             return nullptr;
         };
 
+        std::set<std::string> *getHierarchyStr(AliasObject *obj, long field) {
+            if (!obj) {
+                return nullptr;
+            }
+            std::set<std::string> *strs = new std::set<std::string>();
+            std::string currStr = InstructionUtils::getTypeStr(obj->targetType) + ":" + std::to_string(field);
+            if (obj->parent) {
+                //Current obj is embedded in another obj.
+                std::set<std::string> *rs = getHierarchyStr(obj->parent,obj->parent_field);
+                if (rs) {
+                    for (auto& x : *rs) {
+                        strs->insert(x + "." + currStr);
+                    }
+                    delete(rs);
+                }
+            }
+            if (!obj->pointsFrom.empty()) {
+                //Current obj may be pointed to by a field in another obj.
+                for (AliasObject *x : obj->pointsFrom) {
+                    for (ObjectPointsTo *y : x->pointsTo) {
+                        if (y->targetObject != obj) {
+                            continue;
+                        }
+                        std::set<std::string> *rs = getHierarchyStr(x,y->fieldId);
+                        if (rs) {
+                            for (auto& z : *rs) {
+                                strs->insert(z + "->" + currStr);
+                            }
+                            delete(rs);
+                        }
+                    }
+                }
+            }
+            return strs; 
+        }
+
         //Dump all the taint information to the raw_ostream.
         void dumpTaintInfo(llvm::raw_ostream& O) {
 #ifdef DEBUG_TAINT_DUMP_PROGRESS
@@ -595,6 +631,15 @@ namespace DRCHECKER {
                     for (TaintFlag *p : *pflags){
                         O << "------------------Taint------------------\n";
                         p->dumpInfo(O,&uniqTags);
+                        if (p->tag && p->tag->priv) {
+                            std::set<std::string> *strs = getHierarchyStr((AliasObject*)p->tag->priv, p->tag->fieldId);
+                            if (strs && !strs->empty()) {
+                                O << "---TAG OBJ HIERARCHY---\n";
+                                for (auto& hs : *strs) {
+                                    O << hs << "\n";
+                                }
+                            }
+                        }
                     }
                 }
 #ifdef DEBUG_TAINT_DUMP_PROGRESS
@@ -690,8 +735,8 @@ namespace DRCHECKER {
                     BR_INF *p_br_inf = &(taintedBrs[(*p_str_inst)[3]][(*p_str_inst)[2]][(*p_str_inst)[1]]);
                     //Get the br instruction trait if any.
                     if (br_inst &&
-                        this->brTraitMap.find(br_inst) != this->brTraitMap.end() && 
-                        this->brTraitMap[br_inst].find(it.first->callSites) != this->brTraitMap[br_inst].end())
+                            this->brTraitMap.find(br_inst) != this->brTraitMap.end() && 
+                            this->brTraitMap[br_inst].find(it.first->callSites) != this->brTraitMap[br_inst].end())
                     {
                         TRAIT *p_trait = &(this->brTraitMap[br_inst][it.first->callSites]);
                         traitMap[(ID_TY)p_trait] = *p_trait;
@@ -734,6 +779,16 @@ namespace DRCHECKER {
                 const std::string& ty_str = tag->getTypeStr();
                 tagInfoMap[tag_id]["ty"] = ty_str;
                 tagInfoMap[tag_id]["is_global"] = (tag->is_global ? "true" : "false");
+                if (tag->priv) {
+                    std::set<std::string> *hstrs = getHierarchyStr((AliasObject*)tag->priv, tag->fieldId);
+                    if (hstrs && !hstrs->empty()) {
+                        int hc = 0;
+                        for (auto& hs : *hstrs) {
+                            tagInfoMap[tag_id]["hs_" + std::to_string(hc)] = hs;
+                            ++hc;
+                        }
+                    }
+                }
                 for (auto e : tag->mod_insts) {
                     LOC_INF *p_str_inst = InstructionUtils::getInstStrRep(e.first);
                     StoreInst *st_inst = dyn_cast<StoreInst>(e.first);
@@ -754,7 +809,7 @@ namespace DRCHECKER {
                         (*p_constraints)[1] = *p_cmds;
                         //Fill in the mod inst traits if any.
                         if (this->modTraitMap.find(st_inst) != this->modTraitMap.end() && 
-                            this->modTraitMap[st_inst].find(ctx) != this->modTraitMap[st_inst].end())
+                                this->modTraitMap[st_inst].find(ctx) != this->modTraitMap[st_inst].end())
                         {
                             TRAIT *p_trait = &(this->modTraitMap[st_inst][ctx]);
                             traitMap[(ID_TY)p_trait] = *p_trait;
@@ -797,11 +852,11 @@ namespace DRCHECKER {
             std::ofstream outfile;
             outfile.open(fn);
             {
-                cereal::XMLOutputArchive oarchive(outfile);
-                oarchive(taintedBrs, analysisCtxMap, tagModMap, tagInfoMap, modInstCtxMap);
+            cereal::XMLOutputArchive oarchive(outfile);
+            oarchive(taintedBrs, analysisCtxMap, tagModMap, tagInfoMap, modInstCtxMap);
             }//archive goes out of scope, ensuring all contents are flushed.
             outfile.close();
-            */
+             */
             //Use "json for C++" to serialize...
             std::ofstream outfile;
             outfile.open(fn);
@@ -812,13 +867,13 @@ namespace DRCHECKER {
             json j_tagModMap(tagModMap);
             json j_tagInfoMap(tagInfoMap);
             json j_calleeInfMap(calleeInfMap);
-            
+
             outfile << j_taintedBrs << j_ctxMap << j_traitMap << j_tagModMap << j_tagInfoMap << j_calleeInfMap;
             outfile.close();
 #ifdef DEBUG_TAINT_SERIALIZE_PROGRESS
             dbgs() << "Serialization finished!\n";
 #endif
-		}
+        }
 
         void printCurTime() {
             auto t_now = std::chrono::system_clock::now();

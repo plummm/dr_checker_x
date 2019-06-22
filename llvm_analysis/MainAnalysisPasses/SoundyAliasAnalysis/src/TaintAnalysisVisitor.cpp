@@ -469,9 +469,6 @@ namespace DRCHECKER {
                 assert(targetObjects.size() > 0);
                 TaintFlag *newTaintFlag = new TaintFlag(currArg, true);
                 newTaintFlag->addInstructionToTrace(&I);
-                //hz: This function handles the taint from user arg (e.g. copy_from_user), so we should set the tag accordingly.
-                TaintTag *tag = new TaintTag(0,currArg,false);
-                newTaintFlag->setTag(tag);
 
                 for(auto fieldObject:targetObjects) {
                     // if it is pointing to first field, then taint everything
@@ -480,8 +477,10 @@ namespace DRCHECKER {
 #ifdef DEBUG_CALL_INSTR
                         dbgs() << "Adding Taint To field ID:"<< fieldObject.first << " of:" << fieldObject.second;
 #endif
+                        TaintTag *tag = new TaintTag(fieldObject.first,fieldObject.second->getValue(),false,(void*)fieldObject.second);
+                        TaintFlag *tf = new TaintFlag(newTaintFlag,tag);
 
-                        if (fieldObject.second->addFieldTaintFlag(fieldObject.first, newTaintFlag)) {
+                        if (fieldObject.second->addFieldTaintFlag(fieldObject.first, tf)) {
 #ifdef DEBUG_CALL_INSTR
                             dbgs() << ":Success\n";
 #endif
@@ -490,12 +489,16 @@ namespace DRCHECKER {
 #ifdef DEBUG_CALL_INSTR
                             dbgs() << ":Failed\n";
 #endif
+                            delete(tag);
+                            delete(tf);
                         }
                     } else {
 #ifdef DEBUG_CALL_INSTR
                         dbgs() << "Adding Taint To All fields:"<< fieldObject.first << " of:" << fieldObject.second;
 #endif
-                        if(fieldObject.second->taintAllFieldsWithTag(newTaintFlag)) {
+                        TaintTag *tag = new TaintTag(0,fieldObject.second->getValue(),false,(void*)fieldObject.second);
+                        TaintFlag *tf = new TaintFlag(newTaintFlag,tag);
+                        if(fieldObject.second->taintAllFieldsWithTag(tf)) {
 #ifdef DEBUG_CALL_INSTR
                             dbgs() << ":Success\n";
 #endif
@@ -504,6 +507,8 @@ namespace DRCHECKER {
 #ifdef DEBUG_CALL_INSTR
                             dbgs() << ":Failed\n";
 #endif
+                            delete(tag);
+                            delete(tf);
                         }
                     }
                 }

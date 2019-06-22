@@ -603,9 +603,7 @@ namespace DRCHECKER {
                 Value *v = it.first;
                 TaintFlag *currFlag = new TaintFlag(v, true);
                 //Add a tag
-                //std::set<std::pair<long, AliasObject*>> targetObjects;
-                //PointsToUtils::getTargetObjects(it.second,targetObjects);
-                TaintTag *currTag = new TaintTag(0,v,true);
+                TaintTag *currTag = new TaintTag(0,v);
                 currFlag->setTag(currTag);
                 std::set<PointerPointsTo*> *ps = it.second;
                 if (ps->size() <= 0) {
