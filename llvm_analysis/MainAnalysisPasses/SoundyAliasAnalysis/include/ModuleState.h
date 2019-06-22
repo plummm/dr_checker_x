@@ -732,7 +732,8 @@ namespace DRCHECKER {
 #endif
                 ID_TY tag_id = (ID_TY)tag;
                 const std::string& ty_str = tag->getTypeStr();
-                tagInfoMap[tag_id] = ty_str;
+                tagInfoMap[tag_id]["ty"] = ty_str;
+                tagInfoMap[tag_id]["is_global"] = (tag->is_global ? "true" : "false");
                 for (auto e : tag->mod_insts) {
                     LOC_INF *p_str_inst = InstructionUtils::getInstStrRep(e.first);
                     StoreInst *st_inst = dyn_cast<StoreInst>(e.first);

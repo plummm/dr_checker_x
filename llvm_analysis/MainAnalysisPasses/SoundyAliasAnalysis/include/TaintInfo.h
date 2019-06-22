@@ -30,6 +30,8 @@ namespace DRCHECKER {
         //Record all instructions (w/ its call context) that can possibly modify this taint source.
         std::map< Instruction *, std::set<std::vector<Instruction*>*> > mod_insts;
         bool is_global;
+        //The AliasObject(s) and the field(s) that are related to this tag.
+        //std::set<std::pair<long, AliasObject*>> origObjects;
 
         TaintTag(long fieldId, Value *v, bool is_global = true) {
             this -> fieldId = fieldId;

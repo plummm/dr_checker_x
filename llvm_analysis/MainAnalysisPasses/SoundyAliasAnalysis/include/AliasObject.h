@@ -669,6 +669,8 @@ namespace DRCHECKER {
                 if (existingTag && !existingTag->is_global) {
                     is_global = false;
                 }
+                std::set<std::pair<long, AliasObject*>> targetObjects;
+                targetObjects.insert(std::make_pair(0,this));
                 this->all_contents_tainted = true;
                 //"0" represents that we are not referring to a certain field.
                 TaintTag *all_taint_tag = new TaintTag(0,v,is_global);
@@ -680,6 +682,8 @@ namespace DRCHECKER {
 #ifdef DEBUG
                     dbgs() << "Adding taint to field:" << fieldId << "\n";
 #endif
+                    targetObjects.clear();
+                    targetObjects.insert(std::make_pair(fieldId,this));
                     TaintTag *tag = new TaintTag(fieldId,v,is_global);
                     TaintFlag *newFlag = new TaintFlag(targetTaintFlag,tag);
                     addFieldTaintFlag(fieldId, newFlag);

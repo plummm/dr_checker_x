@@ -195,4 +195,19 @@ namespace DRCHECKER {
         }
     }
 
+    bool PointsToUtils::getTargetObjects(std::set<PointerPointsTo*> *dstPointsTo, std::set<std::pair<long, AliasObject*>> &targetObjects) {
+        if (!dstPointsTo || dstPointsTo->empty()) {
+            return false;
+        }
+        for (PointerPointsTo *currPointsToObj:*dstPointsTo) {
+            long target_field = currPointsToObj->dstfieldId;
+            AliasObject *dstObj = currPointsToObj->targetObject;
+            auto to_check = std::make_pair(target_field, dstObj);
+            if (std::find(targetObjects.begin(), targetObjects.end(), to_check) == targetObjects.end()) {
+                targetObjects.insert(targetObjects.end(), to_check);
+            }
+        }
+        return true;
+    }
+
 };

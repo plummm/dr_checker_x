@@ -563,6 +563,7 @@ namespace DRCHECKER {
                 Value *currArgVal = &(*arg_begin);
                 if(taintedArgs.find(arg_no) != taintedArgs.end()) {
                     //hz: Add a taint tag indicating that the taint is from user-provided arg, instead of global states.
+                    //This tag represents the "arg", at the function entry its point-to object hasn't been created yet, so no "pobjs" for the tag.
                     TaintTag *currTag = new TaintTag(0,currArgVal,false);
                     TaintFlag *currFlag = new TaintFlag(currArgVal, true);
                     currFlag->setTag(currTag);
@@ -602,7 +603,9 @@ namespace DRCHECKER {
                 Value *v = it.first;
                 TaintFlag *currFlag = new TaintFlag(v, true);
                 //Add a tag
-                TaintTag *currTag = new TaintTag(0,v);
+                //std::set<std::pair<long, AliasObject*>> targetObjects;
+                //PointsToUtils::getTargetObjects(it.second,targetObjects);
+                TaintTag *currTag = new TaintTag(0,v,true);
                 currFlag->setTag(currTag);
                 std::set<PointerPointsTo*> *ps = it.second;
                 if (ps->size() <= 0) {

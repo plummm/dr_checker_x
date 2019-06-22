@@ -75,6 +75,8 @@ namespace DRCHECKER {
 
         static void filterPossibleFunctionsByLoc(Instruction *inst, std::vector<Function *> &targetFunctions);
 
+        static bool getTargetObjects(std::set<PointerPointsTo*> *dstPointsTo, std::set<std::pair<long, AliasObject*>> &targetObjects);
+
     };
 
 }
