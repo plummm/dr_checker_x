@@ -29,6 +29,8 @@ namespace DRCHECKER {
         Type *type;
         //Record all instructions (w/ its call context) that can possibly modify this taint source.
         std::map< Instruction *, std::set<std::vector<Instruction*>*> > mod_insts;
+        //If this is a local taint tag (i.e. for user provided arg), record all its comparison constants here.
+        std::map< Instruction *, std::set<int64_t>> cmp_constants;
         bool is_global;
         //The AliasObject that is related to this tag.
         void *priv;
@@ -47,8 +49,36 @@ namespace DRCHECKER {
             this -> type = srcTag -> type;
             //This is content copy.
             this -> mod_insts = srcTag -> mod_insts;
+            this -> cmp_constants = srcTag -> cmp_constants;
             this -> is_global = srcTag -> is_global;
             this -> priv = srcTag -> priv;
+        }
+
+        void addCmpConstants(Instruction *inst, int64_t n) {
+            if (!inst) {
+                return;
+            }
+            this->cmp_constants[inst].insert(n);
+        }
+
+        bool has_cmp_consts() {
+            return (!this->cmp_constants.empty());
+        }
+
+        void printCmpConsts(raw_ostream &OS) {
+            if (!this->has_cmp_consts()) {
+                return;
+            }
+            OS << "####CMP CONSTS LIST####\n";
+            for (auto& e : this->cmp_constants) {
+                OS << "--- ";
+                InstructionUtils::printInst(e.first, OS);
+                //Print the context if any.
+                for (auto& x : e.second) {
+                    OS << x << ", ";
+                }
+                OS << "\n";
+            }
         }
 
         std::string getTypeStr() {

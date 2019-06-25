@@ -15,6 +15,7 @@ namespace DRCHECKER {
     //#define DEBUG_CALL_INST
     //#define DEBUG_MOD_TRAIT
     //#define DEBUG_BR_TRAIT
+    //#define DEBUG_ICMP_INST
     //#define DEBUG_NLP
     //#define DEBUG_TMP
 
@@ -367,12 +368,69 @@ namespace DRCHECKER {
         return 1;
     }
 
+    //Try to extract the constants used in the comparison against user provided args.
+    void ModAnalysisVisitor::visitICmpInst(ICmpInst &I) {
+#ifdef DEBUG_ICMP_INST
+        dbgs() << "ModAnalysisVisitor::visitICmpInst: " << InstructionUtils::getValueStr(&I) << "\n";
+#endif
+        //TODO: we now only consider the case where one op is a variable while the other is a constant.
+        if ((!dyn_cast<Constant>(I.getOperand(0))) == (!dyn_cast<Constant>(I.getOperand(1)))) {
+#ifdef DEBUG_ICMP_INST
+            dbgs() << "ModAnalysisVisitor::visitICmpInst: the cmp inst operands are both/neither constants.\n";
+#endif
+            return;
+        }
+        int cn_o;
+        Constant *c;
+        for (int i=0; i<2; ++i) {
+            if (dyn_cast<Constant>(I.getOperand(i))) {
+                cn_o = i;
+                c = dyn_cast<Constant>(I.getOperand(i));
+                break;
+            }
+        }
+        Value *v = I.getOperand(1-cn_o);
+        //Ok, is this "v" tainted?
+        std::set<TaintFlag*> *taintFlags = TaintUtils::getTaintInfo(this->currState, this->currFuncCallSites, &I);
+        if ((!taintFlags) || taintFlags->empty()) {
+#ifdef DEBUG_ICMP_INST
+            dbgs() << "ModAnalysisVisitor::visitICmpInst: Not tainted.\n";
+#endif
+            return;
+        }
+        //Get the integer constant value.
+        std::map<std::string,int64_t> m;
+        int r = InstructionUtils::getConstantValue(c,&m);
+        int cn;
+        if (m.find("CONST_INT") != m.end()) {
+            cn = m["CONST_INT"];
+        }else if (m.find("CONST_NULLPTR") != m.end()) {
+            //null ptr
+            cn = 0;
+        }else {
+            //TODO: We don't match these patterns now.
+#ifdef DEBUG_ICMP_INST
+            dbgs() << "ModAnalysisVisitor::visitICmpInst: the cmp inst constant operand is not CONST_INT\n";
+#endif
+            return;
+        }
+        //Is this "v" tainted by a user provided arg, if yes, record the constant.
+        for (TaintFlag *x : *taintFlags) {
+            if (!x || !x->tag) {
+                continue;
+            }
+            if (!x->tag->is_global) {
+                //Ok, find an arg taint, record the constant value in the corresponding tag.
+                x->tag->addCmpConstants(&I,cn);
+            }
+        }
+        return;
+    }
+
     //Try to get the read pattern of the GV in the branch condition, e.g., a == 0 or a > 1?
     void ModAnalysisVisitor::visitBranchInst(BranchInst &I) {
 #ifdef DEBUG_BR_TRAIT
-        dbgs() << "ModAnalysisVisitor::visitBranchInst: ";
-        I.print(dbgs());
-        dbgs() << "\n";
+        dbgs() << "ModAnalysisVisitor::visitBranchInst: " << InstructionUtils::getValueStr(&I) << "\n";
 #endif
         //First figure out whether this br is tainted, no need to analyze untainted br.
         std::set<TaintFlag*>* taintFlags = TaintUtils::getTaintInfo(this->currState, this->currFuncCallSites, &I);

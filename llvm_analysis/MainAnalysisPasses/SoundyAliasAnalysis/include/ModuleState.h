@@ -652,14 +652,19 @@ namespace DRCHECKER {
             }
             //print the mod_inst_list of all unique taint tags.
             O << "++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n";
-            O << "+++++++++++++++++++++++MOD INST LIST++++++++++++++++++++++++++\n\n";
+            O << "+++++++++++++++++++++++MOD INST & CMP CONST LIST++++++++++++++++++++++++++\n\n";
             for (auto tag : uniqTags){
-                if (!tag->has_mod_insts()) {
+                if (!tag->has_mod_insts() && !tag->has_cmp_consts()) {
                     continue;
                 }
                 O << "--------------------------TAG--------------------------\n";
                 tag->dumpInfo(O);
-                tag->printModInsts(O,&(this->switchMap));
+                if (tag->has_mod_insts()) {
+                    tag->printModInsts(O,&(this->switchMap));
+                }
+                if (tag->has_cmp_consts()) {
+                    tag->printCmpConsts(O);
+                }
             }
             O << "++++++++++++++++++++++++Br Traits+++++++++++++++++++++++++++\n";
             for (auto& x : this->brTraitMap) {
@@ -770,6 +775,7 @@ namespace DRCHECKER {
             //Ok, now store all uniq TaintTags in a map.
             TAG_INFO_TY tagInfoMap;
             TAG_MOD_MAP_TY tagModMap;
+            TAG_CONST_MAP_TY tagConstMap;
 #ifdef DEBUG_TAINT_SERIALIZE_PROGRESS
             dbgs() << "Serialize information about taint tags and modification IRs...\n";
             int tag_cnt = 0;
@@ -793,7 +799,16 @@ namespace DRCHECKER {
                         }
                     }
                 }
-                for (auto e : tag->mod_insts) {
+                //Record cmp constants of tags.
+                for (auto& e : tag->cmp_constants) {
+                    LOC_INF *p_str_inst = InstructionUtils::getInstStrRep(e.first);
+                    if (!p_str_inst || e.second.empty()) {
+                        continue;
+                    }
+                    tagConstMap[tag_id][(*p_str_inst)[3]][(*p_str_inst)[2]][(*p_str_inst)[1]][(*p_str_inst)[0]] = e.second;
+                }
+                //Record mod insts of the tag.
+                for (auto& e : tag->mod_insts) {
                     LOC_INF *p_str_inst = InstructionUtils::getInstStrRep(e.first);
                     StoreInst *st_inst = dyn_cast<StoreInst>(e.first);
                     //Iterate over the ctx of the mod inst.
@@ -869,10 +884,11 @@ namespace DRCHECKER {
             json j_ctxMap(ctxMap);
             json j_traitMap(traitMap);
             json j_tagModMap(tagModMap);
+            json j_tagConstMap(tagConstMap);
             json j_tagInfoMap(tagInfoMap);
             json j_calleeInfMap(calleeInfMap);
 
-            outfile << j_taintedBrs << j_ctxMap << j_traitMap << j_tagModMap << j_tagInfoMap << j_calleeInfMap;
+            outfile << j_taintedBrs << j_ctxMap << j_traitMap << j_tagModMap << j_tagConstMap << j_tagInfoMap << j_calleeInfMap;
             outfile.close();
 #ifdef DEBUG_TAINT_SERIALIZE_PROGRESS
             dbgs() << "Serialization finished!\n";
