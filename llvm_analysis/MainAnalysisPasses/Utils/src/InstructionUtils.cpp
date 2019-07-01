@@ -473,19 +473,18 @@ namespace DRCHECKER {
             return nullptr;
         }
         BasicBlock *entry_bb = nullptr;
+        if (inst) {
+            entry_bb = inst->getParent();
+        }
         //NOTE: The very first instruction in the context is the same across all contexts (i.e. the first inst in the entry func)
-        if (ctx && ctx->size() > 1) {
+        //So the below loop will not consider lookup the 1st instruction in the SwitchMap.
+        if (ctx) {
             //We should find the latest call site which has the associated switch-case info.
-            for (size_t i = ctx->size()-1; i >= 1; --i) {
-                entry_bb = (*ctx)[i]->getParent();
+            for (size_t i = ctx->size()-1; i >= 0; --i) {
                 if(entry_bb && switchMap->find(entry_bb) != switchMap->end()){
                     return &((*switchMap)[entry_bb]);
                 }
-            }
-        }else if (inst) {
-            entry_bb = inst->getParent();
-            if(entry_bb && switchMap->find(entry_bb) != switchMap->end()){
-                return &((*switchMap)[entry_bb]);
+                entry_bb = (*ctx)[i]->getParent();
             }
         }
         return nullptr;
