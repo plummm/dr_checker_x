@@ -23,7 +23,17 @@ namespace DRCHECKER {
         if ((!cond_var) || cond_var->getName().empty() || cond_var->getName().str() != "cmd") {
             return;
         }
-        BasicBlock * def_bb = I.getDefaultDest();
+        BasicBlock *cur_bb = I.getParent();
+        std::set<uint64_t> leadCmd;
+        if (cur_bb && this->currState.switchMap.find(cur_bb) != this->currState.switchMap.end()) {
+            //This means there are some cmd values that can lead to this BB where we encounter a new cmd switch, 
+            //this can happen if there are multiple cmd switches in a same function, e.g.
+            //switch(cmd){case 0: ...; case 1: ...;} ... switch(cmd){case 2: .X.; case 3: .Y.;}
+            //If we want to reach X, the previous analysis may tell us case 0 and 1 will lead to X since it's the successor
+            //of the previous "switch", while in fact we should exclude case 0 and 1 (i.e. block the leading cmds here) and only reserve case 2.
+            leadCmd = this->currState.switchMap[cur_bb];
+        }
+        BasicBlock *def_bb = I.getDefaultDest();
         unsigned num = I.getNumCases();
 #ifdef DEBUG_VISIT_SWITCH_INST
         dbgs() << "Cond Var: ";
@@ -34,7 +44,25 @@ namespace DRCHECKER {
         }
         dbgs() << " #cases: " << num << "\n";
 #endif
-        for(auto c : I.cases()){
+        //Since we are encountering a new cmd switch, we need to "block" all previous cmds that can reach here,
+        //which can happen if there are multiple cmd switches in a same function, e.g.
+        //switch(cmd){case 0: ...; case 1: ...;} ... switch(cmd){case 2: .X.; case 3: .Y.;}
+        //If we want to reach X, the previous analysis may tell us case 0 and 1 will lead to X since it's the successor
+        //of the previous "switch", while in fact we should exclude case 0 and 1 (i.e. block the leading cmds here) and only reserve case 2.
+        //TODO 1:
+        //switch(cmd) {...}
+        //switch(cmd) {case 0:case 1:case 2: .X.;} //(1) no default case, (2) all other cases share the same handler code
+        //"X" does belong to the 2nd switch exclusively, but our current algorithm will regard it as a shared exit...
+        //In this situation we will be unable to exclude the reaching cmds, causing burdens for the fuzzer, but at least it's safe (no cmds are overlooked.)
+        //TODO 2:
+        //If we want to reach a default case handler, we should say "specify a cmd that doesn't have a dedicated handler", instead of "any cmd is ok"
+        std::set<BasicBlock*> *shared_bbs = this->get_shared_switch_bbs(&I); 
+        for (BasicBlock *cur_bb : this->uniq_bb_map[&I]) {
+            //For each succ bb exclusively belonging to current switch-case IR, block out all previous reaching cmds.
+            this->currState.switchMap[cur_bb].clear(); 
+        }
+        //Ok, now set the cmd map for this switch IR.
+        for (auto c : I.cases()){
             ConstantInt *val = c.getCaseValue();
             //int64_t c_val = val->getSExtValue();
             uint64_t c_val = val->getZExtValue();
@@ -43,14 +71,53 @@ namespace DRCHECKER {
             dbgs() << "Cond Val: " << c_val;
             dbgs() << " Dst BB: " << bb->getName().str() << "\n";
 #endif
-            this->currState.switchMap[bb].insert(c_val);
             this->has_explicit_cmd = true;
-            //We also need to add this case successor's successors to the map, since they can also be reached from current case value.
+            //Add the case successors to the map.
             std::set<BasicBlock*> *succs = this->get_all_successors(bb);
             for(BasicBlock *succ_bb : *succs){
                 this->currState.switchMap[succ_bb].insert(c_val);
             }
         }
+    }
+
+    std::set<BasicBlock*>* SwitchAnalysisVisitor::get_shared_switch_bbs(SwitchInst *I) {
+        if (!I) {
+            return nullptr;
+        }
+        if (this->shared_bb_map.find(I) != this->shared_bb_map.end()) {
+            return &this->shared_bb_map[I];
+        }
+        this->uniq_bb_map[I].clear();
+        BasicBlock *def_bb = I->getDefaultDest();
+        bool inited = true;
+        if (def_bb) {
+            std::set<BasicBlock*> *def_succs = this->get_all_successors(def_bb);
+            this->shared_bb_map[I] = *def_succs;
+            this->uniq_bb_map[I] = *def_succs;
+        }else {
+            inited = false;
+        }
+        for(auto c : I->cases()){
+            BasicBlock *bb = c.getCaseSuccessor();
+            std::set<BasicBlock*> *succs = this->get_all_successors(bb);
+            this->uniq_bb_map[I].insert(succs->begin(),succs->end());
+            if (!inited) {
+                this->shared_bb_map[I] = *succs;
+                inited = true;
+            }else {
+                std::set<BasicBlock*> intersect;
+                std::set_intersection(succs->begin(),succs->end(),this->shared_bb_map[I].begin(),this->shared_bb_map[I].end(),
+                                  std::inserter(intersect,intersect.begin()));
+                this->shared_bb_map[I].clear();
+                this->shared_bb_map[I].insert(intersect.begin(),intersect.end());
+            }
+        }
+        std::set<BasicBlock*> diff;
+        std::set_difference(this->uniq_bb_map[I].begin(),this->uniq_bb_map[I].end(),this->shared_bb_map[I].begin(),this->shared_bb_map[I].end(),
+                          std::inserter(diff,diff.begin()));
+        this->uniq_bb_map[I].clear();
+        this->uniq_bb_map[I].insert(diff.begin(),diff.end());
+        return &this->shared_bb_map[I];
     }
 
     std::set<BasicBlock*>* SwitchAnalysisVisitor::get_all_successors(BasicBlock *bb) {
@@ -65,6 +132,8 @@ namespace DRCHECKER {
             }
             this->succ_map[bb].insert(this->succ_map[curr_bb].begin(),this->succ_map[curr_bb].end());
         }
+        //inclusive
+        this->succ_map[bb].insert(bb);
         return &this->succ_map[bb];
     }
 

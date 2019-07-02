@@ -29,6 +29,12 @@ namespace DRCHECKER {
         //The mapping from one BB to all its successors (recursively).
         std::map<BasicBlock*,std::set<BasicBlock*>> succ_map;
 
+        //The map from a switch inst to the BB set shared by all its cases (mutual successors).
+        std::map<SwitchInst*,std::set<BasicBlock*>> shared_bb_map;
+
+        //The map from a switch inst to its unique BB set (only exists in this switch).
+        std::map<SwitchInst*,std::set<BasicBlock*>> uniq_bb_map;
+
         SwitchAnalysisVisitor(GlobalState &targetState,
                              Function *toAnalyze,
                              std::vector<Instruction *> *srcCallSites): currState(targetState) {
@@ -60,6 +66,8 @@ namespace DRCHECKER {
                                                std::vector<Instruction *> *currFuncCallSites);
 
         std::set<BasicBlock*>* get_all_successors(BasicBlock*);
+
+        std::set<BasicBlock*>* get_shared_switch_bbs(SwitchInst *I);
 
         void resolveImplicitCMD(CallInst &I, Function *currFunc, std::vector<Instruction *> *callSiteContext);
 
