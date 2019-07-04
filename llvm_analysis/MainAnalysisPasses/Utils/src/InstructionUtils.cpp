@@ -480,11 +480,17 @@ namespace DRCHECKER {
         //So the below loop will not consider lookup the 1st instruction in the SwitchMap.
         if (ctx) {
             //We should find the latest call site which has the associated switch-case info.
-            for (size_t i = ctx->size()-1; i >= 0; --i) {
+            for (int i = ctx->size()-1; i >= 0; --i) {
                 if(entry_bb && switchMap->find(entry_bb) != switchMap->end()){
                     return &((*switchMap)[entry_bb]);
                 }
-                entry_bb = (*ctx)[i]->getParent();
+                if ((*ctx)[i]) {
+                    //dbgs() << "((*ctx)[i])->getParent()\n";
+                    //dbgs() << i << " | " << *((*ctx)[i]) << "\n";
+                    entry_bb = ((*ctx)[i])->getParent();
+                }else {
+                    //
+                }
             }
         }
         return nullptr;

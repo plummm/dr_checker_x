@@ -69,6 +69,10 @@ namespace DRCHECKER {
 
         std::set<BasicBlock*>* get_shared_switch_bbs(SwitchInst *I);
 
+        void get_case_successors(BasicBlock *bb, uint64_t cn, std::set<BasicBlock*> *res);
+
+        bool is_cmd_switch(SwitchInst &I);
+
         void resolveImplicitCMD(CallInst &I, Function *currFunc, std::vector<Instruction *> *callSiteContext);
 
         bool has_explicit_cmd;

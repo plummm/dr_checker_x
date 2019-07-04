@@ -13,26 +13,25 @@ namespace DRCHECKER {
     #define RESOLVE_IMPLICIT_CMD
     #define DEBUG_RESOLVE_IMPLICIT_CMD
 
+    bool SwitchAnalysisVisitor::is_cmd_switch(SwitchInst &I) {
+        Value *cond_var = I.getCondition();
+        if ((!cond_var) || cond_var->getName().empty() || cond_var->getName().str() != "cmd") {
+            return false;
+        }
+        return true;
+    }
+
     void SwitchAnalysisVisitor::visitSwitchInst(SwitchInst &I) {
+        //TODO: do not process SwitchInst that we have already processed.
 #ifdef DEBUG_VISIT_SWITCH_INST
         dbgs() << "SwitchAnalysisVisitor::visitSwitchInst: \n";
         InstructionUtils::printInst(&I,dbgs());
 #endif
         //Make sure that the switch variable is the "cmd" arg.
-        Value *cond_var = I.getCondition();
-        if ((!cond_var) || cond_var->getName().empty() || cond_var->getName().str() != "cmd") {
+        if (!this->is_cmd_switch(I)) {
             return;
         }
-        BasicBlock *cur_bb = I.getParent();
-        std::set<uint64_t> leadCmd;
-        if (cur_bb && this->currState.switchMap.find(cur_bb) != this->currState.switchMap.end()) {
-            //This means there are some cmd values that can lead to this BB where we encounter a new cmd switch, 
-            //this can happen if there are multiple cmd switches in a same function, e.g.
-            //switch(cmd){case 0: ...; case 1: ...;} ... switch(cmd){case 2: .X.; case 3: .Y.;}
-            //If we want to reach X, the previous analysis may tell us case 0 and 1 will lead to X since it's the successor
-            //of the previous "switch", while in fact we should exclude case 0 and 1 (i.e. block the leading cmds here) and only reserve case 2.
-            leadCmd = this->currState.switchMap[cur_bb];
-        }
+        Value *cond_var = I.getCondition();
         BasicBlock *def_bb = I.getDefaultDest();
         unsigned num = I.getNumCases();
 #ifdef DEBUG_VISIT_SWITCH_INST
@@ -44,23 +43,7 @@ namespace DRCHECKER {
         }
         dbgs() << " #cases: " << num << "\n";
 #endif
-        //Since we are encountering a new cmd switch, we need to "block" all previous cmds that can reach here,
-        //which can happen if there are multiple cmd switches in a same function, e.g.
-        //switch(cmd){case 0: ...; case 1: ...;} ... switch(cmd){case 2: .X.; case 3: .Y.;}
-        //If we want to reach X, the previous analysis may tell us case 0 and 1 will lead to X since it's the successor
-        //of the previous "switch", while in fact we should exclude case 0 and 1 (i.e. block the leading cmds here) and only reserve case 2.
-        //TODO 1:
-        //switch(cmd) {...}
-        //switch(cmd) {case 0:case 1:case 2: .X.;} //(1) no default case, (2) all other cases share the same handler code
-        //"X" does belong to the 2nd switch exclusively, but our current algorithm will regard it as a shared exit...
-        //In this situation we will be unable to exclude the reaching cmds, causing burdens for the fuzzer, but at least it's safe (no cmds are overlooked.)
-        //TODO 2:
-        //If we want to reach a default case handler, we should say "specify a cmd that doesn't have a dedicated handler", instead of "any cmd is ok"
-        std::set<BasicBlock*> *shared_bbs = this->get_shared_switch_bbs(&I); 
-        for (BasicBlock *cur_bb : this->uniq_bb_map[&I]) {
-            //For each succ bb exclusively belonging to current switch-case IR, block out all previous reaching cmds.
-            this->currState.switchMap[cur_bb].clear(); 
-        }
+        //TODO: If we want to reach a default case handler, we should say "specify a cmd that doesn't have a dedicated handler", instead of "any cmd is ok"
         //Ok, now set the cmd map for this switch IR.
         for (auto c : I.cases()){
             ConstantInt *val = c.getCaseValue();
@@ -73,10 +56,12 @@ namespace DRCHECKER {
 #endif
             this->has_explicit_cmd = true;
             //Add the case successors to the map.
-            std::set<BasicBlock*> *succs = this->get_all_successors(bb);
+            std::set<BasicBlock*> *succs = new std::set<BasicBlock*>();
+            this->get_case_successors(bb,c_val,succs);
             for(BasicBlock *succ_bb : *succs){
                 this->currState.switchMap[succ_bb].insert(c_val);
             }
+            delete(succs);
         }
     }
 
@@ -120,10 +105,13 @@ namespace DRCHECKER {
         return &this->shared_bb_map[I];
     }
 
+    //TODO: this function will produce wrong results in the presence of loop now.
     std::set<BasicBlock*>* SwitchAnalysisVisitor::get_all_successors(BasicBlock *bb) {
         if(this->succ_map.find(bb) != this->succ_map.end()){
             return &this->succ_map[bb];
         }
+        //inclusive
+        this->succ_map[bb].insert(bb);
         for(succ_iterator sit = succ_begin(bb), set = succ_end(bb); sit != set; ++sit) {
             BasicBlock *curr_bb = *sit;
             this->succ_map[bb].insert(curr_bb);
@@ -132,9 +120,52 @@ namespace DRCHECKER {
             }
             this->succ_map[bb].insert(this->succ_map[curr_bb].begin(),this->succ_map[curr_bb].end());
         }
-        //inclusive
-        this->succ_map[bb].insert(bb);
         return &this->succ_map[bb];
+    }
+
+    //Get all successors of a basicblock, w/ a certain "cmd" value.
+    //NOTE: for now we don't cache the results, as SwitchAnalysis will run only once for each switch inst.
+    void SwitchAnalysisVisitor::get_case_successors(BasicBlock *bb, uint64_t cn, std::set<BasicBlock*> *res) {
+        if (!bb || !res) {
+            return;
+        }
+        if (res->find(bb) != res->end()) {
+            //We have already visited this bb (i.e. loop) or it's currently being processed.
+            return;
+        }
+        dbgs() << "get_case_successors,BB: " << InstructionUtils::getBBStrID(bb) << "/" << InstructionUtils::getBBStrID_No(bb) << " cn: " << cn << "\n";
+        //inclusive
+        res->insert(bb);
+        //Does current BB end with a switch-case inst?
+        Instruction *tinst = bb->getTerminator();
+        if (tinst && dyn_cast<SwitchInst>(tinst)) {
+            //A switch inst, we need to follow the specified "cmd".
+            SwitchInst *sinst = dyn_cast<SwitchInst>(tinst);
+            //make sure the switch is regarding the "cmd"
+            if (this->is_cmd_switch(*sinst)) {
+                for (auto c : sinst->cases()){
+                    ConstantInt *val = c.getCaseValue();
+                    //int64_t c_val = val->getSExtValue();
+                    uint64_t c_val = val->getZExtValue();
+                    if (c_val == cn) {
+                        BasicBlock *case_bb = c.getCaseSuccessor();
+                        this->get_case_successors(case_bb,cn,res);
+                        return;
+                    }
+                }
+                //This means, we have to take the default exit of this switch-case since no case matches the specified cmd value.
+                BasicBlock *def_dest = sinst->getDefaultDest();
+                this->get_case_successors(def_dest,cn,res);
+                return;
+            }
+        }
+        //TODO: any non-switch comparison with cmd like if (cmd == XXX) ?
+        //Recursively deal with every direct successor.
+        for(succ_iterator sit = succ_begin(bb), set = succ_end(bb); sit != set; ++sit) {
+            BasicBlock *curr_bb = *sit;
+            this->get_case_successors(curr_bb,cn,res);
+        }
+        return;
     }
 
     void SwitchAnalysisVisitor::visit(BasicBlock *BB) {
@@ -214,8 +245,8 @@ namespace DRCHECKER {
     //There can be layered ioctl calls which all have the switch-case structure for the same user passed-in "cmd" argument,
     //so the SwitchAnalysisVisitor needs also process each callee.
     VisitorCallback* SwitchAnalysisVisitor::visitCallInst(CallInst &I, Function *currFunc,
-                                                         std::vector<Instruction *> *oldFuncCallSites,
-                                                         std::vector<Instruction *> *callSiteContext) {
+            std::vector<Instruction *> *oldFuncCallSites,
+            std::vector<Instruction *> *callSiteContext) {
 #ifdef DEBUG_CALL_INST
         dbgs() << "---------\nSwitch analysis visits call instruction: ";
         I.print(dbgs());
