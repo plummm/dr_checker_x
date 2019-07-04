@@ -12,6 +12,8 @@ namespace DRCHECKER {
     #define DEBUG_VISIT_SWITCH_INST
     #define RESOLVE_IMPLICIT_CMD
     #define DEBUG_RESOLVE_IMPLICIT_CMD
+    //TODO: we cannot guarantee this magic number will not be used as a valid case number actually...
+    #define DEFAULT_CASE_NUM 88888888
 
     bool SwitchAnalysisVisitor::is_cmd_switch(SwitchInst &I) {
         Value *cond_var = I.getCondition();
@@ -43,7 +45,6 @@ namespace DRCHECKER {
         }
         dbgs() << " #cases: " << num << "\n";
 #endif
-        //TODO: If we want to reach a default case handler, we should say "specify a cmd that doesn't have a dedicated handler", instead of "any cmd is ok"
         //Ok, now set the cmd map for this switch IR.
         for (auto c : I.cases()){
             ConstantInt *val = c.getCaseValue();
@@ -63,6 +64,13 @@ namespace DRCHECKER {
             }
             delete(succs);
         }
+        //We also need to consider: which BBs can be or only be reached w/ a default case number.
+        std::set<BasicBlock*> *def_succs = new std::set<BasicBlock*>();
+        this->get_case_successors(def_bb,DEFAULT_CASE_NUM,def_succs);
+        for(BasicBlock *succ_bb : *def_succs){
+            this->currState.switchMap[succ_bb].insert(DEFAULT_CASE_NUM);
+        }
+        delete(def_succs);
     }
 
     std::set<BasicBlock*>* SwitchAnalysisVisitor::get_shared_switch_bbs(SwitchInst *I) {

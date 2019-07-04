@@ -21,7 +21,7 @@ namespace DRCHECKER {
 #define CREATE_DUMMY_OBJ_IF_NULL
 //#define DEBUG_CREATE_DUMMY_OBJ_IF_NULL
 //#define DEBUG_UPDATE_POINTSTO
-#define DEBUG_TMP
+//#define DEBUG_TMP
 
     //hz: A helper method to create and (taint) a new OutsideObject.
     OutsideObject* AliasAnalysisVisitor::createOutsideObj(Value *p, bool taint) {

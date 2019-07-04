@@ -17,7 +17,7 @@ namespace DRCHECKER {
 //#define DEBUG
 //#define DEBUG_BIN_INSTR
 //#define DEBUG_LOAD_INSTR
-#define DEBUG_TMP
+//#define DEBUG_TMP
 
     std::set<TaintFlag*>* TaintAnalysisVisitor::getTaintInfo(Value *targetVal) {
         return TaintUtils::getTaintInfo(this->currState, this->currFuncCallSites, targetVal);
