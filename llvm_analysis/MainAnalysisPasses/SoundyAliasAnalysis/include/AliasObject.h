@@ -417,11 +417,12 @@ namespace DRCHECKER {
                 newObj->auto_generated = true;
 
                 // get the taint for the field and add that taint to the newly created object
+                this->taintSubObj(newObj,srcfieldId,targetInstr);
+                /*
                 std::set<TaintFlag*> *fieldTaint = getFieldTaintInfo(srcfieldId);
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
                 dbgs() << "Trying to get taint for field:" << srcfieldId << " for object:" << this << "\n";
 #endif
-                //TODO: debug add this info
                 if(fieldTaint != nullptr) {
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
                     dbgs() << "Adding taint for field:" << srcfieldId << " for object:" << newObj << "\n";
@@ -437,6 +438,7 @@ namespace DRCHECKER {
                         newObj->taintAllFields(this->all_contents_taint_flag);
                     }
                 }
+                */
 
                 //insert the newly create object.
                 pointsTo.push_back(newPointsToObj);
@@ -649,6 +651,8 @@ namespace DRCHECKER {
         }
 
         inline Value * getValue();
+
+        virtual void taintSubObj(AliasObject *newObj, long srcfieldId, Instruction *targetInstr);
 
         virtual void fetchPointsToObjects(long srcfieldId, std::set<std::pair<long, AliasObject*>> &dstObjects,
             Instruction *targetInstr = nullptr, bool create_arg_obj = false);

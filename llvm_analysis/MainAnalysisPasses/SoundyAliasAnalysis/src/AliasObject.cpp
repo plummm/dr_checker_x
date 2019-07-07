@@ -26,6 +26,41 @@ namespace DRCHECKER {
         dbgs() << "\n*******************\n";
     }
 
+    //Taint the point-to object by field "srcfieldId" according to the field taint info.
+    void AliasObject::taintSubObj(AliasObject *newObj, long srcfieldId, Instruction *targetInstr) {
+        std::set<TaintFlag*> *fieldTaint = getFieldTaintInfo(srcfieldId);
+#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
+        dbgs() << "Trying to get taint for field:" << srcfieldId << " for object:" << this << "\n";
+#endif
+        if(fieldTaint != nullptr) {
+#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
+            dbgs() << "Adding taint for field:" << srcfieldId << " for object:" << newObj << "\n";
+#endif
+            for(auto existingTaint:*fieldTaint) {
+                TaintFlag *newTaint = new TaintFlag(existingTaint,targetInstr,targetInstr);
+                newObj->taintAllFieldsWithTag(newTaint);
+            }
+            newObj->is_taint_src = true;
+#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS_OUTSIDE
+            dbgs() << "##Set |is_taint_src| to true.\n";
+#endif
+        } else {
+            // if all the contents are tainted?
+            if(this->all_contents_tainted) {
+#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
+                dbgs() << "Trying to get field from an object whose contents are fully tainted\n";
+#endif
+                assert(this->all_contents_taint_flag != nullptr);
+                TaintFlag *newTaint = new TaintFlag(this->all_contents_taint_flag,targetInstr,targetInstr);
+                newObj->taintAllFieldsWithTag(newTaint);
+                newObj->is_taint_src = true;
+#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS_OUTSIDE
+                dbgs() << "##Set |is_taint_src| to true.\n";
+#endif
+            }
+        }
+    }
+
     //An improved version of "fetchPointsToObjects", we need to consider the type of each field.
     void AliasObject::fetchPointsToObjects(long srcfieldId, std::set<std::pair<long, AliasObject*>> &dstObjects,
             Instruction *targetInstr, bool create_arg_obj) {
@@ -41,17 +76,39 @@ namespace DRCHECKER {
             //fallback method
             return this->fetchPointsToObjects_default(srcfieldId,dstObjects,targetInstr,create_arg_obj);
         }
+        //What's the expected type of the fetched point-to object?
+        Type *expObjTy = nullptr;
+        //TODO: deal with other types of insts that can invoke "fetchPointsToObjects" in its handler.
+        if (targetInstr && dyn_cast<LoadInst>(targetInstr)) {
+            expObjTy = targetInstr->getType();
+            if (expObjTy->isPointerTy()) {
+                expObjTy = expObjTy->getPointerElementType();
+            }
+        }
         bool hasObjects = false;
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
         fetchPointsToObjects_log(srcfieldId, dstObjects, targetInstr, create_arg_obj);
 #endif
         for(ObjectPointsTo *obj:pointsTo) {
             if(obj->fieldId == srcfieldId) {
+                //We handle a special case here:
+                //Many malloc'ed HeapLocation object can be of the type i8*, while only in the later code the pointer will be converted to a certain struct*,
+                //we choose to do this conversion here, specifically we need to:
+                //(1) change the object type to the "expObjTy",
+                //(2) setup the taint information properly.
+                if (obj->dstfieldId == 0 && obj->targetObject && obj->targetObject->isHeapObject() && 
+                    expObjTy && expObjTy->isStructTy() && obj->targetObject->targetType != expObjTy) 
+                {
+                    //Change type.
+                    obj->targetObject->targetType = expObjTy;
+                    //Do the taint accordingly.
+                    this->taintSubObj(obj->targetObject,srcfieldId,targetInstr);
+                }
                 auto p = std::make_pair(obj->dstfieldId, obj->targetObject);
                 if(std::find(dstObjects.begin(), dstObjects.end(), p) == dstObjects.end()) {
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-                    dbgs() << "Found an obj in |pointsTo| records.\n"
-                        obj->getValue()->print(dbgs());
+                    dbgs() << "Found an obj in |pointsTo| records.\n";
+                    obj->getValue()->print(dbgs());
                     dbgs() << " | " << obj->dstfieldId << " | is_taint_src:" << obj->targetObject->is_taint_src << "\n";
 #endif
                     dstObjects.insert(dstObjects.end(), p);
@@ -118,37 +175,7 @@ namespace DRCHECKER {
                 newObj->pointsFrom.push_back(this);
 
                 // get the taint for the field and add that taint to the newly created object
-                std::set<TaintFlag*> *fieldTaint = getFieldTaintInfo(srcfieldId);
-#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-                dbgs() << "Trying to get taint for field:" << srcfieldId << " for object:" << this << "\n";
-#endif
-                if(fieldTaint != nullptr) {
-#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-                    dbgs() << "Adding taint for field:" << srcfieldId << " for object:" << newObj << "\n";
-#endif
-                    for(auto existingTaint:*fieldTaint) {
-                        TaintFlag *newTaint = new TaintFlag(existingTaint,targetInstr,targetInstr);
-                        newObj->taintAllFieldsWithTag(newTaint);
-                    }
-                    newObj->is_taint_src = true;
-#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS_OUTSIDE
-                    dbgs() << "##Set |is_taint_src| to true.\n";
-#endif
-                } else {
-                    // if all the contents are tainted?
-                    if(this->all_contents_tainted) {
-#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-                        dbgs() << "Trying to get field from an object whose contents are fully tainted\n";
-#endif
-                        assert(this->all_contents_taint_flag != nullptr);
-                        TaintFlag *newTaint = new TaintFlag(this->all_contents_taint_flag,targetInstr,targetInstr);
-                        newObj->taintAllFieldsWithTag(newTaint);
-                        newObj->is_taint_src = true;
-#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS_OUTSIDE
-                        dbgs() << "##Set |is_taint_src| to true.\n";
-#endif
-                    }
-                }
+                this->taintSubObj(newObj,srcfieldId,targetInstr);
 
                 //insert the newly create object.
                 pointsTo.push_back(newPointsToObj);
