@@ -147,6 +147,11 @@ namespace DRCHECKER {
         std::set<PointerPointsTo*>* makePointsToCopy(Instruction *propInstruction, Value *srcPointer,
                                                      std::set<PointerPointsTo*>* srcPointsTo, long fieldId=-1);
 
+        std::set<PointerPointsTo*>* makePointsToCopy_emb(Instruction *propInstruction, Value *srcPointer,
+                                                     std::set<PointerPointsTo*>* srcPointsTo, long fieldId=-1);
+
+        AliasObject *createEmbObj(AliasObject *hostObj, long host_dstFieldId, Value *v);
+
         /***
          * Merge points-to information of all the provided values.
          * @param valuesToMerge set of values whose points to information need to be merged.
@@ -190,6 +195,9 @@ namespace DRCHECKER {
 
         //hz: make a copy for the src AliasObject of a different type. 
         AliasObject* x_type_obj_copy(AliasObject *srcObj, Type *dstType);
+
+        //hz:
+        void processOneDimensionGEP(GetElementPtrInst &I);
     };
 
 }
