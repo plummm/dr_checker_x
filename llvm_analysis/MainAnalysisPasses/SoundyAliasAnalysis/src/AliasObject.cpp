@@ -4,6 +4,8 @@ using namespace llvm;
 
 namespace DRCHECKER {
 
+    //#define DEBUG_CHANGE_HEAPLOCATIONTYPE
+
     void AliasObject::fetchPointsToObjects_log(long srcfieldId, std::set<std::pair<long, AliasObject*>> &dstObjects,
             Instruction *targetInstr, bool create_arg_obj) {
         dbgs() << "\n*********fetchPointsToObjects(Outside Object)**********\n Current Inst: ";
@@ -77,12 +79,13 @@ namespace DRCHECKER {
             return this->fetchPointsToObjects_default(srcfieldId,dstObjects,targetInstr,create_arg_obj);
         }
         //What's the expected type of the fetched point-to object?
+        Type *expFieldTy = nullptr;
         Type *expObjTy = nullptr;
         //TODO: deal with other types of insts that can invoke "fetchPointsToObjects" in its handler.
         if (targetInstr && dyn_cast<LoadInst>(targetInstr)) {
-            expObjTy = targetInstr->getType();
-            if (expObjTy->isPointerTy()) {
-                expObjTy = expObjTy->getPointerElementType();
+            expFieldTy = targetInstr->getType();
+            if (expFieldTy->isPointerTy()) {
+                expObjTy = expFieldTy->getPointerElementType();
             }
         }
         bool hasObjects = false;
@@ -96,9 +99,19 @@ namespace DRCHECKER {
                 //we choose to do this conversion here, specifically we need to:
                 //(1) change the object type to the "expObjTy",
                 //(2) setup the taint information properly.
-                if (obj->dstfieldId == 0 && obj->targetObject && obj->targetObject->isHeapObject() && 
+#ifdef DEBUG_CHANGE_HEAPLOCATIONTYPE
+                dbgs() << "AliasObject::fetchPointsToObjects: isHeapLocation: " << (obj->targetObject && obj->targetObject->isHeapLocation()) << " dstField: " << obj->dstfieldId;
+                if (expObjTy) {
+                    dbgs() << " expObjTy: " << InstructionUtils::getTypeStr(expObjTy);
+                }
+                dbgs() << "\n";
+#endif
+                if (obj->dstfieldId == 0 && obj->targetObject && obj->targetObject->isHeapLocation() && 
                     expObjTy && expObjTy->isStructTy() && obj->targetObject->targetType != expObjTy) 
                 {
+#ifdef DEBUG_CHANGE_HEAPLOCATIONTYPE
+                    dbgs() << "AliasObject::fetchPointsToObjects: Change type of the HeapLocation.\n";
+#endif
                     //Change type.
                     obj->targetObject->targetType = expObjTy;
                     //Do the taint accordingly.

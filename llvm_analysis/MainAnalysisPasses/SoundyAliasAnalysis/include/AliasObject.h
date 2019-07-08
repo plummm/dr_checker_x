@@ -791,7 +791,14 @@ namespace DRCHECKER {
 
         virtual bool isHeapObject() {
             /***
-             * Returns True if this object is a Heap object.
+             * Returns True if this object is a malloced Heap object.
+             */
+            return false;
+        }
+
+        virtual bool isHeapLocation() {
+            /***
+             * Returns True if this object is a HeapLocation instance.
              */
             return false;
         }
@@ -1050,6 +1057,10 @@ namespace DRCHECKER {
              * Return true if this is malloced
              */
             return this->is_malloced;
+        }
+
+        bool isHeapLocation() {
+            return true;
         }
 
     };
