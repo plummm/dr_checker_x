@@ -178,7 +178,9 @@ namespace DRCHECKER {
         // fields that store information which is tainted.
         std::vector<FieldTaint*> taintedFields;
 
-        bool auto_generated;
+        bool auto_generated = false;
+
+        bool from_array = false;
 
         // field to indicate that all contents of this object
         // are tainted or not.

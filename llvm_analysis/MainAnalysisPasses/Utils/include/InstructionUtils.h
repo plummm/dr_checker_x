@@ -121,6 +121,9 @@ namespace DRCHECKER {
         static std::set<uint64_t> *getCmdValues(std::vector<Instruction*> *ctx, Instruction* inst, std::map<BasicBlock*,std::set<uint64_t>> *switchMap);
 
         static std::map<ConstantAggregate*,std::set<long>> *getUsesInStruct(Value *v);
+
+        //Create a new GEP from an existing one, using only the first few indices.
+        static GetElementPtrInst *createSubGEP(GEPOperator*,unsigned);
     };
 }
 #endif //PROJECT_INSTRUCTIONUTILS_H

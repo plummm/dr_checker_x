@@ -629,4 +629,20 @@ namespace DRCHECKER {
         return nullptr;
     }
 
+    //Create a new GEP with up to ith operand of the original GEP.
+    GetElementPtrInst *InstructionUtils::createSubGEP(GEPOperator* gep,unsigned i) {
+        if (!gep || i < 1) {
+            return nullptr;
+        }
+        if (i >= gep->getNumOperands()) {
+            i = gep->getNumOperands() - 1;
+        }
+        std::vector<Value*> indices;
+        for (int t=1; t<=i; ++t) {
+            indices.push_back(gep->getOperand(t));
+        }
+        ArrayRef<Value*> IdxList(indices);
+        return GetElementPtrInst::Create(nullptr/*PointeeType*/, gep->getPointerOperand()/*Value *Ptr*/, IdxList/*ArrayRef<Value*> IdxList*//*const Twine &NameStr="", Instruction *InsertBefore=nullptr*/);
+    }
+
 }

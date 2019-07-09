@@ -5,7 +5,7 @@
 
 namespace DRCHECKER {
 
-//#define DEBUG_GET_ELEMENT_PTR
+#define DEBUG_GET_ELEMENT_PTR
 //#define DEBUG_ALLOCA_INSTR
 //#define DEBUG_CAST_INSTR
 //#define DEBUG_BINARY_INSTR
@@ -264,7 +264,8 @@ namespace DRCHECKER {
     }
 
     //In this version, we assume that "srcPointsTo" points to an embedded struct in a host struct.
-    std::set<PointerPointsTo*>* AliasAnalysisVisitor::makePointsToCopy_emb(Instruction *propInstruction, Value *srcPointer,
+    //NOTE: "srcPointer" in this function is related to "srcPointsTo".
+    std::set<PointerPointsTo*>* AliasAnalysisVisitor::makePointsToCopy_emb(Instruction *propInstruction, Value *srcPointer, Value *resPointer,
                                                              std::set<PointerPointsTo*>* srcPointsTo, long fieldId) {
 #ifdef DEBUG_GET_ELEMENT_PTR
         dbgs() << "AliasAnalysisVisitor::makePointsToCopy_emb(): elements in *srcPointsTo: " << srcPointsTo->size() << " \n";
@@ -278,6 +279,13 @@ namespace DRCHECKER {
             long dstField = currPointsToObj->dstfieldId;
             //We must ensure that it points to an embedded struct in another struct.
             Type *host_type = hostObj->targetType;
+#ifdef DEBUG_GET_ELEMENT_PTR
+            dbgs() << "--- ";
+            if (host_type) {
+                dbgs() << "host_type: " << InstructionUtils::getTypeStr(host_type) << " | " << dstField;
+            }
+            dbgs() << "\n";
+#endif
             if (!host_type || !host_type->isStructTy() || host_type->getStructNumElements() <= dstField || dstField < 0) {
                 continue;
             }
@@ -286,15 +294,36 @@ namespace DRCHECKER {
                 continue;
             }
             Type *hostArrSubTy = nullptr; 
-            if(hostSubTy->isArrayTy()){
+            if (hostSubTy->isArrayTy()){
                 hostArrSubTy = hostSubTy->getArrayElementType();
             }
-            if (hostSubTy->isStructTy()) {
-                //Ok, it's an emb struct, create new emb struct if necessary.
+            if (hostObj->from_array && dstField == 0 && fieldId < host_type->getStructNumElements()) {
+                //This means current pointee obj is from an array, so the last GEP index was used to locate it in the array (instead of locating an embed struct in the host struct),
+                //so current field ID will directly index into "hostObj" (instead of the embed struct located in field 0 of "hostObj").
+#ifdef DEBUG_GET_ELEMENT_PTR
+                dbgs() << "AliasAnalysisVisitor::makePointsToCopy_emb(): current pointee obj is from an array..\n";
+#endif
+                //TODO: is this right??
+                hostObj->from_array = false;
                 PointerPointsTo *newPointsToObj = new PointerPointsTo();
                 newPointsToObj->propogatingInstruction = propInstruction;
-                newPointsToObj->targetPointer = srcPointer;
-                AliasObject *newObj = this->createEmbObj(hostObj,dstField,...);
+                newPointsToObj->targetPointer = resPointer;
+                if (fieldId >= 0) {
+                    newPointsToObj->dstfieldId = fieldId;
+                }else {
+                    newPointsToObj->dstfieldId = 0;
+                }
+                newPointsToObj->targetObject = hostObj;
+                newPointsToInfo->insert(newPointsToInfo->begin(), newPointsToObj);
+            }else if (hostSubTy->isStructTy() && fieldId < hostSubTy->getStructNumElements()) {
+                //Ok, it's an emb struct, create new emb struct if necessary.
+#ifdef DEBUG_GET_ELEMENT_PTR
+                dbgs() << "AliasAnalysisVisitor::makePointsToCopy_emb(): current pointee obj is an embedded struct..\n";
+#endif
+                PointerPointsTo *newPointsToObj = new PointerPointsTo();
+                newPointsToObj->propogatingInstruction = propInstruction;
+                newPointsToObj->targetPointer = resPointer;
+                AliasObject *newObj = this->createEmbObj(hostObj,dstField,srcPointer);
                 if(newObj){
                     newPointsToObj->targetObject = newObj;
                     if(fieldId >= 0){
@@ -306,23 +335,27 @@ namespace DRCHECKER {
                     newPointsToInfo->insert(newPointsToInfo->begin(), newPointsToObj);
                 }else{
 #ifdef DEBUG_GET_ELEMENT_PTR
-                    errs() << "In AliasAnalysisVisitor::makePointsToCopy_emb(): cannot get or create embedded object for: ";
-                    if (propInstruction) {
-                        propInstruction->print(errs());
-                    }
-                    errs() << "\n";
+                    errs() << "In AliasAnalysisVisitor::makePointsToCopy_emb(): cannot get or create embedded object.\n";
 #endif
                 }
-            }else if (hostArrSubTy) {
+            }else if (hostArrSubTy && fieldId < hostSubTy->getArrayNumElements()) {
                 //It's an embedded array, the result pointer should point to one array element.
+#ifdef DEBUG_GET_ELEMENT_PTR
+                dbgs() << "AliasAnalysisVisitor::makePointsToCopy_emb(): current pointee obj is an embedded array..\n";
+#endif
                 PointerPointsTo *newPointsToObj = new PointerPointsTo();
                 newPointsToObj->propogatingInstruction = propInstruction;
-                newPointsToObj->targetPointer = srcPointer;
+                newPointsToObj->targetPointer = resPointer;
                 newPointsToObj->dstfieldId = 0;
-                AliasObject *newObj = this->createEmbObj(hostObj,dstField,...);
+                AliasObject *newObj = this->createEmbObj(hostObj,dstField,resPointer);
                 if(newObj){
+                    newObj->from_array = true;
                     newPointsToObj->targetObject = newObj;
                     newPointsToInfo->insert(newPointsToInfo->begin(), newPointsToObj);
+                }else {
+#ifdef DEBUG_GET_ELEMENT_PTR
+                    errs() << "In AliasAnalysisVisitor::makePointsToCopy_emb(): cannot get or create embedded object.\n";
+#endif
                 }
             }
         }
@@ -953,10 +986,8 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
 //It will try to analyze and record the point-to information in the global state for each GEP operator.
 Value* AliasAnalysisVisitor::visitGetElementPtrOperator(Instruction *I, GEPOperator *gep) {
 #ifdef DEBUG_GET_ELEMENT_PTR
-    dbgs() << "Alias Analysis, in :visitGetElementPtrOperator()\n";
-    dbgs() << "AliasAnalysisVisitor::visitGetElementPtrOperator(): ";
-    I->print(dbgs());
-    dbgs() << "\n";
+    dbgs() << "AliasAnalysisVisitor::visitGetElementPtrOperator(): " << InstructionUtils::getValueStr(I) << "\n";
+    dbgs() << "GEP: " << InstructionUtils::getValueStr(gep) << "\n";
 #endif
     //Null pointer or we have processed it before.
     if(!gep || hasPointsToObjects(gep)){
@@ -974,96 +1005,16 @@ Value* AliasAnalysisVisitor::visitGetElementPtrOperator(Instruction *I, GEPOpera
         srcPointer = visitGetElementPtrOperator(I,op);
     }else{
         if(!hasPointsToObjects(srcPointer)) {
-                srcPointer = srcPointer->stripPointerCasts();
-            }
+            srcPointer = srcPointer->stripPointerCasts();
         }
-        if(gep->getPointerOperand()->getType()->getContainedType(0)->isStructTy() && (gep->getNumOperands() > 2) ) {
-            // Index a structure.
-            if (ConstantInt *CI = dyn_cast<ConstantInt>(gep->getOperand(2))) {
-                unsigned long structFieldId = CI->getZExtValue();
-#ifdef CREATE_DUMMY_OBJ_IF_NULL
-                //hz: try to create dummy objects if there is no point-to information about the pointer variable,
-                //since it can be an outside global variable. (e.g. platform_device).
-                if(!hasPointsToObjects(srcPointer)) {
-                    this->createOutsideObj(srcPointer,true);
-                }
-#endif
-                if(hasPointsToObjects(srcPointer)) {
-#ifdef DEBUG_GET_ELEMENT_PTR
-                    dbgs() << "Has Points to information for:";
-                    srcPointer->print(dbgs());
-                    dbgs() << "\n";
-#endif
-
-                    std::set<PointerPointsTo*>* srcPointsTo = getPointsToObjects(srcPointer);
-                    //We will make current GEP operator point to a field with "structFieldId" of the object pointed to by its pointer operand.
-                    //By doing this, we not only register the point-to informtion of each instruction value, but also each GEP operator value.
-                    //Without doing this, current taint analysis implementation will fail to find point-to objects in instructions like "load i32, i32 * getelementptr(xxxx)"
-                    std::set<PointerPointsTo*>* newPointsToInfo = makePointsToCopy(I, gep, srcPointsTo, structFieldId);
-                    if(newPointsToInfo && !newPointsToInfo->empty()){
-                        this->updatePointsToObjects(gep, newPointsToInfo);
-                    }
-                } else {
-                    // we are trying to dereference a structure or an array
-                    // however the src pointer does not point to any object.
-                    // How sad??
-#ifdef DEBUG_GET_ELEMENT_PTR
-                    errs() << "Error occurred, Trying to dereference a structure, which does not point to any object.";
-                    errs() << " Ignoring:" << srcPointer << "\n";
-                    srcPointer->print(errs());
-                    errs() << "  END\n";
-#endif
-                    //assert(false);
-                }
-
-            }
-        } else {
-            for(int i=0;i<gep->getNumOperands();i++) {
-                if(dyn_cast<Constant>(gep->getOperand(i))) {
-                    continue;
-                }
-                srcPointer = gep->getOperand(i);
-
-                // we could have array operand as first operand, rather than pointer operand.
-                // array operand could be at end
-                if (!hasPointsToObjects(srcPointer)) {
-                    // check if this is the array operand.
-                    // srcPointer = gep->getOperand(1);
-                    if (!hasPointsToObjects(srcPointer)) {
-                        srcPointer = srcPointer->stripPointerCasts();
-                    }
-                }
-                //Ignore the index.
-#ifdef CREATE_DUMMY_OBJ_IF_NULL
-                //hz: try to create dummy objects if there is no point-to information about the pointer variable,
-                //since it can be an outside global variable. (e.g. platform_device).
-                if(!hasPointsToObjects(srcPointer)) {
-                    this->createOutsideObj(srcPointer,true);
-                }
-#endif
-                if (hasPointsToObjects(srcPointer)) {
-                    std::set<PointerPointsTo *> *srcPointsTo = getPointsToObjects(srcPointer);
-                    std::set<PointerPointsTo *> *newPointsToInfo = makePointsToCopy(I, gep, srcPointsTo, -1);
-                    if(newPointsToInfo && !newPointsToInfo->empty()){
-                        this->updatePointsToObjects(gep, newPointsToInfo);
-                    }
-                    break;
-                } else {
-                    // we are trying to dereference an array
-                    // however the src pointer does not point to any object.
-                    // How sad??
-#ifdef DEBUG_GET_ELEMENT_PTR
-                    errs() << "Array pointer does not point to any object:";
-                    srcPointer->print(dbgs());
-                    errs() << "Ignoring.\n";
-#endif
-                    //assert(false);
-                }
-            }
-
-        }
-        return gep;
     }
+    if(gep->getNumOperands() > 2) {
+        this->processMultiDimensionGEP(I,gep,srcPointer);
+    } else {
+        this->processOneDimensionGEP(I,gep);
+    }
+    return gep;
+}
 
     void AliasAnalysisVisitor::visitGetElementPtrInst(GetElementPtrInst &I) {
         /***
@@ -1072,9 +1023,7 @@ Value* AliasAnalysisVisitor::visitGetElementPtrOperator(Instruction *I, GEPOpera
          *  this is where accessing structure fields happen.
          */
 #ifdef DEBUG_GET_ELEMENT_PTR
-        dbgs() << "AliasAnalysisVisitor::visitGetElementPtrInst(): ";
-        I.print(dbgs());
-        dbgs() << "\n";
+        dbgs() << "AliasAnalysisVisitor::visitGetElementPtrInst(): " << InstructionUtils::getValueStr(&I) << "\n";
 #endif
         Value* srcPointer = I.getPointerOperand();
         GEPOperator *gep = dyn_cast<GEPOperator>(srcPointer);
@@ -1086,115 +1035,113 @@ Value* AliasAnalysisVisitor::visitGetElementPtrOperator(Instruction *I, GEPOpera
                 srcPointer = srcPointer->stripPointerCasts();
             }
         }
-        //
-        //
-        Type *currTy = I.getPointerOperand()->getType();
         if (I.getNumOperands() > 2) {
-#ifdef CREATE_DUMMY_OBJ_IF_NULL
-            //hz: try to create dummy objects if there is no point-to information about the pointer variable,
-            //since it can be an outside global variable. (e.g. platform_device).
-            if(!hasPointsToObjects(srcPointer)) {
-                this->createOutsideObj(srcPointer,true);
-            }
-#endif
-            if (!hasPointsToObjects(srcPointer)) {
-                //No way to sort this out...
-#ifdef DEBUG_GET_ELEMENT_PTR
-                errs() << "Error occurred, Trying to dereference a structure, which does not point to any object.";
-                errs() << " Ignoring:" << srcPointer << "\n";
-                srcPointer->print(errs());
-                errs() << "  END\n";
-#endif
-                return;
-            }
-            std::set<PointerPointsTo*> *currPointsTo = getPointsToObjects(srcPointer);
-            //We process every index (but still ignore the 1st one) in the GEP, instead of the only 2nd one in the original Dr.Checker.
-            for (int i=2; i<I.getNumOperands(); ++i) {
-#ifdef DEBUG_GET_ELEMENT_PTR
-                dbgs() << "About to process index: " << (i-2) << "\n";
-#endif
-                ConstantInt *CI = dyn_cast<ConstantInt>(I.getOperand(i));
-                if (!CI) {
-                    //TODO: non-constant index.
-                    break;
-                }
-                unsigned long structFieldId = CI->getZExtValue();
-#ifdef DEBUG_GET_ELEMENT_PTR
-                dbgs() << "Index value: " << structFieldId << "\n";
-#endif
-                //Loop invariant: "currPointsTo" always has contents here.
-                //Given the current points-to and index, iteratively get the new points-to.
-                std::set<PointerPointsTo*>* newPointsToInfo = makePointsToCopy(&I, &I, currPointsTo, structFieldId);
-                if (!newPointsToInfo || newPointsToInfo->empty()) {
-                    //Fallback: just update w/ the "currPointsTo".
-                    break;
-                }
-                currPointsTo = newPointsToInfo;
-            }
-            if(currPointsTo && !currPointsTo->empty()){
-                this->updatePointsToObjects(&I, currPointsTo);
-            }
+            this->processMultiDimensionGEP(&I,dyn_cast<GEPOperator>(&I),srcPointer);
         }else {
             //One-dimension GEP.
             //Here we reserve the default Dr.Checker's logic - simply copy the point-to info.
-            this->processOneDimensionGEP(I);
-        }
-        //
-        //
-        if(I.getPointerOperand()->getType()->getContainedType(0)->isStructTy() && (I.getNumOperands() > 2) ) {
-            // Are we indexing a struct?
-            // OK, we are de-referencing a structure.
-            if (ConstantInt *CI = dyn_cast<ConstantInt>(I.getOperand(2))) {
-                unsigned long structFieldId = CI->getZExtValue();
-#ifdef CREATE_DUMMY_OBJ_IF_NULL
-                //hz: try to create dummy objects if there is no point-to information about the pointer variable,
-                //since it can be an outside global variable. (e.g. platform_device).
-                if(!hasPointsToObjects(srcPointer)) {
-                    this->createOutsideObj(srcPointer,true);
-                }
-#endif
-                if(hasPointsToObjects(srcPointer)) {
-#ifdef DEBUG_GET_ELEMENT_PTR
-                    dbgs() << "Has Points to information for:";
-                    srcPointer->print(dbgs());
-                    dbgs() << "\n";
-#endif
-
-                    std::set<PointerPointsTo*>* srcPointsTo = getPointsToObjects(srcPointer);
-                    std::set<PointerPointsTo*>* newPointsToInfo = makePointsToCopy(&I, &I, srcPointsTo, structFieldId);
-                    //errs() << "visitGEP, after makePointsToCopy, new points-to size: " << newPointsToInfo->size() << " \n";
-                    if(newPointsToInfo && !newPointsToInfo->empty()){
-                        this->updatePointsToObjects(&I, newPointsToInfo);
-                    }
-                    //errs() << "visitGEP, after updatePointsToObjects, has points-to: " << (hasPointsToObjects(srcPointer)?"true":"false") << "\n";
-                } else {
-                    // we are trying to dereference a structure or an array
-                    // however the src pointer does not point to any object.
-                    // How sad??
-#ifdef DEBUG_GET_ELEMENT_PTR
-                    errs() << "Error occurred, Trying to dereference a structure, which does not point to any object.";
-                    errs() << " Ignoring:" << srcPointer << "\n";
-                    srcPointer->print(errs());
-                    errs() << "  END\n";
-#endif
-                    //assert(false);
-                }
-
-            }
-        } else {
-            this->processOneDimensionGEP(I);
+            this->processOneDimensionGEP(&I, dyn_cast<GEPOperator>(&I));
         }
     }
 
-    void AliasAnalysisVisitor::processOneDimensionGEP(GetElementPtrInst &I) {
-        if (I.getNumOperands() > 2) {
+    void AliasAnalysisVisitor::processMultiDimensionGEP(Instruction *propInst, GEPOperator *I, Value *srcPointer) {
+        assert(I);
+        if (!I || !srcPointer) {
             return;
         }
-        for(int i=0;i<I.getNumOperands();i++) {
-            if(dyn_cast<Constant>(I.getOperand(i))) {
+        if (I->getNumOperands() <= 2) {
+            return;
+        }
+#ifdef CREATE_DUMMY_OBJ_IF_NULL
+        //hz: try to create dummy objects if there is no point-to information about the pointer variable,
+        //since it can be an outside global variable. (e.g. platform_device).
+        if(!hasPointsToObjects(srcPointer)) {
+            this->createOutsideObj(srcPointer,true);
+        }
+#endif
+        if (!hasPointsToObjects(srcPointer)) {
+            //No way to sort this out...
+#ifdef DEBUG_GET_ELEMENT_PTR
+            errs() << "Error occurred, Trying to dereference a structure, which does not point to any object.";
+            errs() << " Ignoring:" << srcPointer << "\n";
+            srcPointer->print(errs());
+            errs() << "  END\n";
+#endif
+            return;
+        }
+        std::set<PointerPointsTo*> *currPointsTo = getPointsToObjects(srcPointer);
+        bool update = true;
+        //We process every index (but still ignore the 1st one) in the GEP, instead of the only 2nd one in the original Dr.Checker.
+        for (int i=2; i<I->getNumOperands(); ++i) {
+#ifdef DEBUG_GET_ELEMENT_PTR
+            dbgs() << "About to process index: " << (i-2) << "\n";
+#endif
+            ConstantInt *CI = dyn_cast<ConstantInt>(I->getOperand(i));
+            if (!CI) {
+                //TODO: non-constant index.
+#ifdef DEBUG_GET_ELEMENT_PTR
+                dbgs() << "Non-constant index: " << i << "\n";
+#endif
+                if (i == 2) {
+                    update = false;
+                }
+                break;
+            }
+            unsigned long structFieldId = CI->getZExtValue();
+#ifdef DEBUG_GET_ELEMENT_PTR
+            dbgs() << "Index value: " << structFieldId << "\n";
+#endif
+            //Loop invariant: "currPointsTo" always has contents here.
+            std::set<PointerPointsTo*>* newPointsToInfo = nullptr;
+            if (i > 2) {
+                //More than 2 indices in this GEP, according to the GEP specification, this means the last (i-1) index
+                //must index into an embedded struct, instead of a pointer field.
+                //TODO: operator vs. inst
+                Value *subGEP = InstructionUtils::createSubGEP(I,i-1);
+                Value *resGEP = nullptr;
+                if (i >= I->getNumOperands()-1) {
+                    resGEP = I;
+                }else {
+                    resGEP = InstructionUtils::createSubGEP(I,i);
+                }
+#ifdef DEBUG_GET_ELEMENT_PTR
+                dbgs() << "subGEP: " << InstructionUtils::getValueStr(subGEP) << "\n";
+                dbgs() << "resGEP: " << InstructionUtils::getValueStr(resGEP) << "\n";
+#endif
+                if (subGEP) {
+                    newPointsToInfo = makePointsToCopy_emb(propInst, subGEP, resGEP, currPointsTo, structFieldId);
+                }
+            }else {
+                //Most GEP should only have 2 indices..
+                newPointsToInfo = makePointsToCopy(propInst, I, currPointsTo, structFieldId);
+            }
+            if (!newPointsToInfo || newPointsToInfo->empty()) {
+                //Fallback: just update w/ the "currPointsTo" except when this is a 2-dimension GEP.
+                if (i == 2) {
+                    update = false;
+                }
+                break;
+            }
+            currPointsTo = newPointsToInfo;
+        }
+        if(update && currPointsTo && !currPointsTo->empty()){
+            this->updatePointsToObjects(I, currPointsTo);
+        }
+    }
+
+    void AliasAnalysisVisitor::processOneDimensionGEP(Instruction *propInst, GEPOperator *I) {
+        assert(I);
+        if (!I) {
+            return;
+        }
+        if (I->getNumOperands() > 2) {
+            return;
+        }
+        for(int i=0;i<I->getNumOperands();i++) {
+            if(dyn_cast<Constant>(I->getOperand(i))) {
                 continue;
             }
-            Value *srcPointer = I.getOperand(i);
+            Value *srcPointer = I->getOperand(i);
 
 #ifdef DEBUG_GET_ELEMENT_PTR
             dbgs() << "GEP instruction for array, operand: " << i << "\n";
@@ -1219,7 +1166,7 @@ Value* AliasAnalysisVisitor::visitGetElementPtrOperator(Instruction *I, GEPOpera
             // array operand could be at end
             if (!hasPointsToObjects(srcPointer)) {
                 // check if this is the array operand.
-                // srcPointer = I.getOperand(1);
+                // srcPointer = I->getOperand(1);
                 if (!hasPointsToObjects(srcPointer)) {
                     srcPointer = srcPointer->stripPointerCasts();
                 }
@@ -1234,9 +1181,9 @@ Value* AliasAnalysisVisitor::visitGetElementPtrOperator(Instruction *I, GEPOpera
 #endif
             if (hasPointsToObjects(srcPointer)) {
                 std::set<PointerPointsTo *> *srcPointsTo = getPointsToObjects(srcPointer);
-                std::set<PointerPointsTo *> *newPointsToInfo = makePointsToCopy(&I, &I, srcPointsTo, -1);
+                std::set<PointerPointsTo *> *newPointsToInfo = makePointsToCopy(propInst, I, srcPointsTo, -1);
                 if(newPointsToInfo && !newPointsToInfo->empty()){
-                    this->updatePointsToObjects(&I, newPointsToInfo);
+                    this->updatePointsToObjects(I, newPointsToInfo);
                 }
                 break;
             } else {

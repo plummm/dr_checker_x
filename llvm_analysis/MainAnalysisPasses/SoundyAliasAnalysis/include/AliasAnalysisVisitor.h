@@ -147,7 +147,7 @@ namespace DRCHECKER {
         std::set<PointerPointsTo*>* makePointsToCopy(Instruction *propInstruction, Value *srcPointer,
                                                      std::set<PointerPointsTo*>* srcPointsTo, long fieldId=-1);
 
-        std::set<PointerPointsTo*>* makePointsToCopy_emb(Instruction *propInstruction, Value *srcPointer,
+        std::set<PointerPointsTo*>* makePointsToCopy_emb(Instruction *propInstruction, Value *srcPointer, Value *resPointer,
                                                      std::set<PointerPointsTo*>* srcPointsTo, long fieldId=-1);
 
         AliasObject *createEmbObj(AliasObject *hostObj, long host_dstFieldId, Value *v);
@@ -197,7 +197,9 @@ namespace DRCHECKER {
         AliasObject* x_type_obj_copy(AliasObject *srcObj, Type *dstType);
 
         //hz:
-        void processOneDimensionGEP(GetElementPtrInst &I);
+        void processOneDimensionGEP(Instruction *propInst, GEPOperator *I);
+
+        void processMultiDimensionGEP(Instruction *propInst, GEPOperator *I, Value *srcPointer);
     };
 
 }
