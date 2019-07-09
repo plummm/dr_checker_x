@@ -375,6 +375,10 @@ namespace DRCHECKER {
         }else{
 #ifdef DEBUG_GET_ELEMENT_PTR
             dbgs() << "AliasAnalysisVisitor::createEmbObj(): try to create a new embed object!\n";
+            dbgs() << "hostObj: " << (unsigned long)(hostObj) << " host_dstFieldId: " << host_dstFieldId << "\n";
+            if (v) {
+                dbgs() << "expected type: " << InstructionUtils::getTypeStr(v->getType()) << "\n";
+            }
 #endif
             //Need to create a new AliasObject for the embedded struct.
             newObj = this->createOutsideObj(v,false);
@@ -461,7 +465,7 @@ namespace DRCHECKER {
                 //hz: the following several "if" try to decide whether we will actually index into an embedded struct in the host struct.
                 //NOTE: fieldId < 0 means that we simply want to copy the points-to information w/o changing anything.
                 if (basePointToType && basePointToType->isStructTy() && host_type->isStructTy() &&
-                        host_type->getStructNumElements() > host_dstFieldId && host_type != basePointToType && fieldId >= 0)
+                        host_type->getStructNumElements() > host_dstFieldId && !InstructionUtils::same_types(host_type,basePointToType) && fieldId >= 0)
                 {
                     Type *src_fieldTy = host_type->getStructElementType(host_dstFieldId);
                     //It's also possible that the field is an array of a certain struct, if so, we should also regard this field as
