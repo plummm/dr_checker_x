@@ -297,6 +297,9 @@ namespace DRCHECKER {
             if (hostSubTy->isArrayTy()){
                 hostArrSubTy = hostSubTy->getArrayElementType();
             }
+            PointerPointsTo *newPointsToObj = new PointerPointsTo();
+            newPointsToObj->propogatingInstruction = propInstruction;
+            newPointsToObj->fieldId = 0;
             if (hostObj->from_array && dstField == 0 && fieldId < host_type->getStructNumElements()) {
                 //This means current pointee obj is from an array, so the last GEP index was used to locate it in the array (instead of locating an embed struct in the host struct),
                 //so current field ID will directly index into "hostObj" (instead of the embed struct located in field 0 of "hostObj").
@@ -305,8 +308,6 @@ namespace DRCHECKER {
 #endif
                 //TODO: is this right??
                 hostObj->from_array = false;
-                PointerPointsTo *newPointsToObj = new PointerPointsTo();
-                newPointsToObj->propogatingInstruction = propInstruction;
                 newPointsToObj->targetPointer = resPointer;
                 if (fieldId >= 0) {
                     newPointsToObj->dstfieldId = fieldId;
@@ -320,8 +321,6 @@ namespace DRCHECKER {
 #ifdef DEBUG_GET_ELEMENT_PTR
                 dbgs() << "AliasAnalysisVisitor::makePointsToCopy_emb(): current pointee obj is an embedded struct..\n";
 #endif
-                PointerPointsTo *newPointsToObj = new PointerPointsTo();
-                newPointsToObj->propogatingInstruction = propInstruction;
                 newPointsToObj->targetPointer = resPointer;
                 AliasObject *newObj = this->createEmbObj(hostObj,dstField,srcPointer);
                 if(newObj){
@@ -337,14 +336,13 @@ namespace DRCHECKER {
 #ifdef DEBUG_GET_ELEMENT_PTR
                     errs() << "In AliasAnalysisVisitor::makePointsToCopy_emb(): cannot get or create embedded object.\n";
 #endif
+                    delete(newPointsToObj);
                 }
             }else if (hostArrSubTy && fieldId < hostSubTy->getArrayNumElements()) {
                 //It's an embedded array, the result pointer should point to one array element.
 #ifdef DEBUG_GET_ELEMENT_PTR
                 dbgs() << "AliasAnalysisVisitor::makePointsToCopy_emb(): current pointee obj is an embedded array..\n";
 #endif
-                PointerPointsTo *newPointsToObj = new PointerPointsTo();
-                newPointsToObj->propogatingInstruction = propInstruction;
                 newPointsToObj->targetPointer = resPointer;
                 newPointsToObj->dstfieldId = 0;
                 AliasObject *newObj = this->createEmbObj(hostObj,dstField,resPointer);
@@ -356,6 +354,7 @@ namespace DRCHECKER {
 #ifdef DEBUG_GET_ELEMENT_PTR
                     errs() << "In AliasAnalysisVisitor::makePointsToCopy_emb(): cannot get or create embedded object.\n";
 #endif
+                    delete(newPointsToObj);
                 }
             }
         }
@@ -1436,6 +1435,17 @@ Value* AliasAnalysisVisitor::visitGetElementPtrOperator(Instruction *I, GEPOpera
                     // we have a pointer which points to only one object.
                     // Do a strong update
                     // Basic sanity
+                    if(!((dstPointsToObject->targetPointer == targetPointer ||
+                                dstPointsToObject->targetPointer == targetPointer->stripPointerCasts()) &&
+                            dstPointsToObject->fieldId == 0)) {
+                        dbgs() << "We're going to crash in AliasAnalysisVisitor::visitStoreInst() :( ...\n";
+                        dbgs() << "Inst: " << InstructionUtils::getValueStr(&I) << "\n";
+                        dbgs() << "dstPointsToObject->targetPointer: " << InstructionUtils::getValueStr(dstPointsToObject->targetPointer) << "\n";
+                        dbgs() << "targetPointer: " << InstructionUtils::getValueStr(targetPointer) << "\n";
+                        dbgs() << "targetPointer->stripPointerCasts(): " << InstructionUtils::getValueStr(targetPointer->stripPointerCasts()) << "\n";
+                        dbgs() << (dstPointsToObject->targetPointer == targetPointer) << " | " << (dstPointsToObject->targetPointer == targetPointer->stripPointerCasts()) << "\n";
+                        dbgs() << "dstPointsToObject->fieldId: " << dstPointsToObject->fieldId << "\n";
+                    }
                     assert((dstPointsToObject->targetPointer == targetPointer ||
                                 dstPointsToObject->targetPointer == targetPointer->stripPointerCasts()) &&
                             dstPointsToObject->fieldId == 0);
