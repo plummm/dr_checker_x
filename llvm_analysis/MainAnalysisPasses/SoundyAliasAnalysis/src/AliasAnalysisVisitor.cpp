@@ -362,8 +362,30 @@ namespace DRCHECKER {
     }
 
     AliasObject *AliasAnalysisVisitor::createEmbObj(AliasObject *hostObj, long host_dstFieldId, Value *v) {
+#ifdef DEBUG_GET_ELEMENT_PTR
+        dbgs() << "AliasAnalysisVisitor::createEmbObj()\n";
+#endif
         AliasObject *newObj = nullptr;
         if (!hostObj) {
+            return nullptr;
+        }
+        Type *fieldTy = nullptr;
+        if (hostObj->targetType && hostObj->targetType->isStructTy() && host_dstFieldId >= 0 && host_dstFieldId < hostObj->targetType->getStructNumElements()) {
+            fieldTy = hostObj->targetType->getStructElementType(host_dstFieldId);
+        }
+        Type *expectedPointeeTy = nullptr;
+        if (v && v->getType() && v->getType()->isPointerTy()) {
+            expectedPointeeTy = v->getType()->getPointerElementType();
+        }
+#ifdef DEBUG_GET_ELEMENT_PTR
+        dbgs() << "AliasAnalysisVisitor::createEmbObj(): hostObj: " << (unsigned long)(hostObj) << " host_dstFieldId: " << host_dstFieldId << "\n";
+        dbgs() << "fieldTy: " << InstructionUtils::getTypeStr(fieldTy) << "\n";
+        dbgs() << "expectedPointeeTy: " << InstructionUtils::getTypeStr(expectedPointeeTy) << "\n";
+#endif
+        if (!fieldTy || !InstructionUtils::same_types(fieldTy,expectedPointeeTy)) {
+#ifdef DEBUG_GET_ELEMENT_PTR
+            dbgs() << "AliasAnalysisVisitor::createEmbObj(): fieldTy and expectedPointeeTy are different...\n";
+#endif
             return nullptr;
         }
         if (hostObj->embObjs.find(host_dstFieldId) != hostObj->embObjs.end()){
@@ -372,12 +394,14 @@ namespace DRCHECKER {
 #endif
             //We have created that embedded object previously.
             newObj = hostObj->embObjs[host_dstFieldId];
-        }else{
+        }
+        if (!newObj || !InstructionUtils::same_types(newObj->targetType,fieldTy)){
 #ifdef DEBUG_GET_ELEMENT_PTR
-            dbgs() << "AliasAnalysisVisitor::createEmbObj(): try to create a new embed object!\n";
-            dbgs() << "hostObj: " << (unsigned long)(hostObj) << " host_dstFieldId: " << host_dstFieldId << "\n";
-            if (v) {
-                dbgs() << "expected type: " << InstructionUtils::getTypeStr(v->getType()) << "\n";
+            dbgs() << "AliasAnalysisVisitor::createEmbObj(): try to create a new embed object because ";
+            if (!newObj) {
+                dbgs() << "there is no emb obj in cache...\n";
+            }else{
+                dbgs() << "the emb obj in cache has a different type than expected: " << InstructionUtils::getTypeStr(newObj->targetType) << "\n";
             }
 #endif
             //Need to create a new AliasObject for the embedded struct.

@@ -231,6 +231,7 @@ namespace DRCHECKER {
         }
         AliasObject() {
             //hz: init some extra fields
+            this->id = getCurrID();
             this->parent = nullptr;
             this->parent_field = 0;
         }
