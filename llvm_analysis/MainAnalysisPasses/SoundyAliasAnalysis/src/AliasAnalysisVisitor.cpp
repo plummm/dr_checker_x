@@ -370,8 +370,12 @@ namespace DRCHECKER {
             return nullptr;
         }
         Type *fieldTy = nullptr;
+        Type *fieldArrElemTy = nullptr; 
         if (hostObj->targetType && hostObj->targetType->isStructTy() && host_dstFieldId >= 0 && host_dstFieldId < hostObj->targetType->getStructNumElements()) {
             fieldTy = hostObj->targetType->getStructElementType(host_dstFieldId);
+            if (fieldTy->isArrayTy()){
+                fieldArrElemTy = fieldTy->getArrayElementType();
+            }
         }
         Type *expectedPointeeTy = nullptr;
         if (v && v->getType() && v->getType()->isPointerTy()) {
@@ -382,9 +386,11 @@ namespace DRCHECKER {
         dbgs() << "fieldTy: " << InstructionUtils::getTypeStr(fieldTy) << "\n";
         dbgs() << "expectedPointeeTy: " << InstructionUtils::getTypeStr(expectedPointeeTy) << "\n";
 #endif
-        if (!fieldTy || !InstructionUtils::same_types(fieldTy,expectedPointeeTy)) {
+        if ( (!fieldTy || !InstructionUtils::same_types(fieldTy,expectedPointeeTy)) &&
+             (!fieldArrElemTy || !InstructionUtils::same_types(fieldArrElemTy,expectedPointeeTy)) 
+        ){
 #ifdef DEBUG_GET_ELEMENT_PTR
-            dbgs() << "AliasAnalysisVisitor::createEmbObj(): fieldTy and expectedPointeeTy are different...\n";
+            dbgs() << "AliasAnalysisVisitor::createEmbObj(): fieldTy/fieldArrElemTy and expectedPointeeTy are different...\n";
 #endif
             return nullptr;
         }
@@ -1152,6 +1158,11 @@ Value* AliasAnalysisVisitor::visitGetElementPtrOperator(Instruction *I, GEPOpera
             currPointsTo = newPointsToInfo;
         }
         if(update && currPointsTo && !currPointsTo->empty()){
+            //make sure the points-to information includes the correct TargetPointer, which is current GEP inst.
+            //TODO: is this ok? Since the pointsTo->targetPointer may not be the "I", it may be a GEP with a subset of indices created by us.
+            for (PointerPointsTo *pointsTo : *currPointsTo) {
+                pointsTo->targetPointer = I;
+            }
             this->updatePointsToObjects(I, currPointsTo);
         }
     }
@@ -1466,7 +1477,7 @@ Value* AliasAnalysisVisitor::visitGetElementPtrOperator(Instruction *I, GEPOpera
                     if(!((dstPointsToObject->targetPointer == targetPointer ||
                                 dstPointsToObject->targetPointer == targetPointer->stripPointerCasts()) &&
                             dstPointsToObject->fieldId == 0)) {
-                        dbgs() << "We're going to crash in AliasAnalysisVisitor::visitStoreInst() :( ...\n";
+                        dbgs() << "We're going to crash in AliasAnalysisVisitor::visitStoreInst() - strong update:( ...\n";
                         dbgs() << "Inst: " << InstructionUtils::getValueStr(&I) << "\n";
                         dbgs() << "dstPointsToObject->targetPointer: " << InstructionUtils::getValueStr(dstPointsToObject->targetPointer) << "\n";
                         dbgs() << "targetPointer: " << InstructionUtils::getValueStr(targetPointer) << "\n";
@@ -1515,6 +1526,14 @@ Value* AliasAnalysisVisitor::visitGetElementPtrOperator(Instruction *I, GEPOpera
                 for (PointerPointsTo *currPointsTo: *dstPointsTo) {
                     PointerPointsTo *newPointsToObj = (PointerPointsTo *) currPointsTo->makeCopy();
                     //Basic Sanity
+                    if(!(newPointsToObj->targetPointer == targetPointer && newPointsToObj->fieldId == 0)) {
+                        dbgs() << "We're going to crash in AliasAnalysisVisitor::visitStoreInst() - weak update:( ...\n";
+                        dbgs() << "Inst: " << InstructionUtils::getValueStr(&I) << "\n";
+                        dbgs() << "newPointsToObj->targetPointer: " << InstructionUtils::getValueStr(newPointsToObj->targetPointer) << "\n";
+                        dbgs() << "targetPointer: " << InstructionUtils::getValueStr(targetPointer) << "\n";
+                        dbgs() << (newPointsToObj->targetPointer == targetPointer) << "\n";
+                        dbgs() << "newPointsToObj->fieldId: " << newPointsToObj->fieldId << "\n";
+                    }
                     assert(newPointsToObj->targetPointer == targetPointer && newPointsToObj->fieldId == 0);
                     // perform weak update
                     newPointsToObj->targetObject->performWeakUpdate(newPointsToObj->dstfieldId, srcPointsTo, &I);

@@ -136,7 +136,8 @@ namespace DRCHECKER {
         if (srcfieldId >= this->targetType->getStructNumElements()) {
             //This is a serious bug possibly due to "cast" IR.
             dbgs() << "!!! fetchPointsToObjects() outside: srcfieldId out of bound!\n";
-            //fetchPointsToObjects_log(srcfieldId, dstObjects, targetInstr, create_arg_obj);
+            dbgs() << "Below is the info about current AliasObject...\n";
+            fetchPointsToObjects_log(srcfieldId, dstObjects, targetInstr, create_arg_obj);
             return;
         }
         //NOTE: "pointsTo" should only store point-to information for the pointer fields.
