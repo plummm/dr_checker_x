@@ -12,7 +12,7 @@ namespace DRCHECKER {
     #define DEBUG_VISIT_SWITCH_INST
     #define RESOLVE_IMPLICIT_CMD
     #define DEBUG_RESOLVE_IMPLICIT_CMD
-    //TODO: we cannot guarantee this magic number will not be used as a valid case number actually...
+    //TODO: we cannot guarantee this magic number will not appear as a valid case number...
     #define DEFAULT_CASE_NUM 88888888
 
     bool SwitchAnalysisVisitor::is_cmd_switch(SwitchInst &I) {
