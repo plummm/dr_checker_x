@@ -17,7 +17,7 @@ namespace DRCHECKER {
 //#define DEBUG_RET_INSTR
 //#define FAST_HEURISTIC
 //#define MAX_ALIAS_OBJ 50
-//hz: Enable creating new objects on the fly when the pointer points to nothing.
+//hz: Enable creating new outside objects on the fly when the pointer points to nothing.
 #define CREATE_DUMMY_OBJ_IF_NULL
 //#define DEBUG_CREATE_DUMMY_OBJ_IF_NULL
 //#define DEBUG_UPDATE_POINTSTO
