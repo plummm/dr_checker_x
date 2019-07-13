@@ -92,7 +92,7 @@ namespace DRCHECKER {
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
         fetchPointsToObjects_log(srcfieldId, dstObjects, targetInstr, create_arg_obj);
 #endif
-        for(ObjectPointsTo *obj:pointsTo) {
+        for(ObjectPointsTo *obj : pointsTo) {
             if(obj->fieldId == srcfieldId) {
                 //We handle a special case here:
                 //Many malloc'ed HeapLocation object can be of the type i8*, while only in the later code the pointer will be converted to a certain struct*,

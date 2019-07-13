@@ -650,18 +650,50 @@ namespace DRCHECKER {
                 dbgs() << "\n";
 #endif
             }
+            //Filter out some tags w/o useful information.
+            for(auto it=uniqTags.begin(); it!=uniqTags.end(); ++it) {
+                if (!(*it)->has_mod_insts() && !(*it)->has_cmp_consts()) {
+                    uniqTags.erase(it);
+                }
+            }
+            //Cluster the tags w/ the same type into a same group. 
+            std::set<TaintTag*> uniqTags_copy = uniqTags;
+            std::set<std::set<TaintTag*>> tagGroups;
+            while(!uniqTags_copy.empty()) {
+                TaintTag *tgt = *(uniqTags_copy.begin());
+                std::set<TaintTag*> group;
+                for(auto it=uniqTags_copy.begin(); it!=uniqTags_copy.end(); ++it) {
+                    if (tgt->isTagEquals(*it)) {
+                        group.insert(*it);
+                        uniqTags_copy.erase(it);
+                    }
+                }
+                tagGroups.insert(group);
+            }
             //print the mod_inst_list of all unique taint tags.
             O << "++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n";
             O << "+++++++++++++++++++++++MOD INST & CMP CONST LIST++++++++++++++++++++++++++\n\n";
-            for (auto tag : uniqTags){
+            for (auto tag : uniqTags) {
                 if (!tag->has_mod_insts() && !tag->has_cmp_consts()) {
                     continue;
                 }
                 O << "--------------------------TAG--------------------------\n";
                 tag->dumpInfo(O);
+                //print the IDs of other tags w/ the same type as this one.
+                O << "===TAG GROUP: ";
+                for (auto& grp : tagGroups) {
+                    if (grp.find(tag) != grp.end()) {
+                        for (auto& t : grp) {
+                            O << static_cast<const void *>(t) << ", ";
+                        }
+                    }
+                }
+                O << "\n";
+                //Mod insts of this tag.
                 if (tag->has_mod_insts()) {
                     tag->printModInsts(O,&(this->switchMap));
                 }
+                //Cmp consts of this tag.
                 if (tag->has_cmp_consts()) {
                     tag->printCmpConsts(O);
                 }
@@ -789,6 +821,8 @@ namespace DRCHECKER {
                 const std::string& ty_str = tag->getTypeStr();
                 tagInfoMap[tag_id]["ty"] = ty_str;
                 tagInfoMap[tag_id]["is_global"] = (tag->is_global ? "true" : "false");
+                tagInfoMap[tag_id]["field"] = std::to_string(tag->fieldId);
+                tagInfoMap[tag_id]["v"] = InstructionUtils::getValueStr(tag->v);
                 if (tag->priv) {
                     std::set<std::string> *hstrs = getHierarchyStr((AliasObject*)tag->priv, tag->fieldId);
                     if (hstrs && !hstrs->empty()) {

@@ -115,7 +115,9 @@ namespace DRCHECKER {
             }
             //No need to compare mod_insts here since it's determined by other two fields.
             return this->fieldId == dstTag->fieldId &&
-                   this->v == dstTag->v;
+                   this->v == dstTag->v &&
+                   this->type == dstTag->type &&
+                   this->is_global == dstTag->is_global;
         }
 
         /*

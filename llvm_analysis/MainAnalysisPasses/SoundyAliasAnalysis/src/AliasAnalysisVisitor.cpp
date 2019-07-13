@@ -5,7 +5,7 @@
 
 namespace DRCHECKER {
 
-#define DEBUG_GET_ELEMENT_PTR
+//#define DEBUG_GET_ELEMENT_PTR
 //#define DEBUG_ALLOCA_INSTR
 //#define DEBUG_CAST_INSTR
 //#define DEBUG_BINARY_INSTR
