@@ -114,7 +114,7 @@ namespace DRCHECKER {
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
                     dbgs() << "Found an obj in |pointsTo| records:\n";
                     dbgs() << "Type: " << InstructionUtils::getTypeStr(obj->targetObject->targetType) << " | " << obj->dstfieldId << " | is_taint_src:" << obj->targetObject->is_taint_src << "\n";
-                    dbgs() << "Val: " << InstructionUtils::getValueStr(obj->targetObject->getValue()) << "\n";
+                    dbgs() << "Val: " << InstructionUtils::getValueStr(obj->targetObject->getValue()) << " ID: " << (const void*)(obj->targetObject) << "\n";
 #endif
                     dstObjects.insert(dstObjects.end(), p);
                     hasObjects = true;
@@ -166,7 +166,10 @@ namespace DRCHECKER {
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
                 dbgs() << "Creating a new dummy AliasObject...\n";
 #endif
-                OutsideObject *newObj = new OutsideObject(targetInstr,ety->getPointerElementType());
+                OutsideObject *newObj = new OutsideObject(targetInstr,e_pointto_ty);
+#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
+                dbgs() << "New obj Id: " << (const void*)newObj << "\n";
+#endif
                 ObjectPointsTo *newPointsToObj = new ObjectPointsTo();
                 newPointsToObj->propogatingInstruction = targetInstr;
                 newPointsToObj->targetObject = newObj;

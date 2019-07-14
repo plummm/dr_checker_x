@@ -5,7 +5,7 @@
 
 namespace DRCHECKER {
 
-//#define DEBUG_GET_ELEMENT_PTR
+#define DEBUG_GET_ELEMENT_PTR
 //#define DEBUG_ALLOCA_INSTR
 //#define DEBUG_CAST_INSTR
 //#define DEBUG_BINARY_INSTR
@@ -19,8 +19,8 @@ namespace DRCHECKER {
 //#define MAX_ALIAS_OBJ 50
 //hz: Enable creating new outside objects on the fly when the pointer points to nothing.
 #define CREATE_DUMMY_OBJ_IF_NULL
-//#define DEBUG_CREATE_DUMMY_OBJ_IF_NULL
-//#define DEBUG_UPDATE_POINTSTO
+#define DEBUG_CREATE_DUMMY_OBJ_IF_NULL
+#define DEBUG_UPDATE_POINTSTO
 //#define DEBUG_TMP
 
     //hz: A helper method to create and (taint) a new OutsideObject.
@@ -28,12 +28,7 @@ namespace DRCHECKER {
 #ifdef DEBUG_CREATE_DUMMY_OBJ_IF_NULL
         errs() << "AliasAnalysisVisitor::createOutsideObj(): ";
         if(p){
-            p->print(errs());
-            errs() << "  |  ";
-            errs() << p->getName().str() + " : ";
-            if(p->getType()){
-                p->getType()->print(errs());
-            }
+            errs() << InstructionUtils::getValueStr(p) << "  |  " << p->getName().str() + " : " << InstructionUtils::getTypeStr(p->getType());
         }
         errs() << "\n";
 #endif
@@ -57,6 +52,9 @@ namespace DRCHECKER {
         //Create a new outside object.
         //OutsideObject *newObj = new OutsideObject(p, p->getType()->getContainedType(0));
         OutsideObject *newObj = new OutsideObject(p, p->getType()->getPointerElementType());
+#ifdef DEBUG_CREATE_DUMMY_OBJ_IF_NULL
+        errs() << "New obj created: " << (const void*)newObj << "\n";
+#endif
         //All outside objects are generated automatically.
         newObj->auto_generated = true;
         //Set up point-to records inside the AliasObject.
@@ -115,9 +113,8 @@ namespace DRCHECKER {
          *  This also takes care of freeing the elements if they are already present.
          */
 #ifdef DEBUG_UPDATE_POINTSTO
-        dbgs() << "updatePointsToObjects for : ";
-        srcPointer->print(dbgs());
-        dbgs() << "\nnewPointsToInfo: " << newPointsToInfo->size();
+        dbgs() << "updatePointsToObjects for : " << InstructionUtils::getValueStr(srcPointer) << "\n";
+        dbgs() << "#newPointsToInfo: " << newPointsToInfo->size();
 #endif
         if(!newPointsToInfo || newPointsToInfo->size() <= 0){
             //nothing to update.
@@ -141,7 +138,7 @@ namespace DRCHECKER {
             std::set<PointerPointsTo*>* existingPointsTo = prevPointsToSet->second;
             assert(existingPointsTo != nullptr);
 #ifdef DEBUG_UPDATE_POINTSTO
-            dbgs() << " existingPointsTo: " << existingPointsTo->size() << "\n";
+            dbgs() << " #existingPointsTo: " << existingPointsTo->size() << "\n";
 #endif
             for(PointerPointsTo *currPointsTo: *newPointsToInfo) {
                 // for each points to, see if we already have that information, if yes, ignore it.
@@ -163,11 +160,7 @@ namespace DRCHECKER {
                     }
                     if(o0 && o1){
                         if(dbg){
-                            dbgs() << "Ty0: ";
-                            o0->targetType->print(dbgs());
-                            dbgs() << " Ty1: ";
-                            o1->targetType->print(dbgs());
-                            dbgs() << "\n";
+                            dbgs() << "Ty0: " << InstructionUtils::getTypeStr(o0->targetType) << " Ty1: " << InstructionUtils::getTypeStr(o1->targetType) << "\n";
                         }
                         if(o0->targetType != o1->targetType){
                             if(dbg){
@@ -180,15 +173,7 @@ namespace DRCHECKER {
                         Value *v0 = o0->getObjectPtr();
                         Value *v1 = o1->getObjectPtr();
                         if(dbg){
-                            dbgs() << "Ptr0: ";
-                            if(v0){
-                                v0->print(dbgs());
-                            }
-                            dbgs() << " Ptr1: ";
-                            if(v1){
-                                v1->print(dbgs());
-                            }
-                            dbgs() << "RES: " << (v0==v1?"T":"F") << "\n";
+                            dbgs() << "Ptr0: " << InstructionUtils::getValueStr(v0) << " Ptr1: " << InstructionUtils::getValueStr(v1) << "RES: " << (v0==v1?"T":"F") << "\n";
                         }
                         if(v0 || v1){
                             return (v0 == v1);
@@ -209,8 +194,7 @@ namespace DRCHECKER {
                         dbgs() << "############# Inserted!!!\n";
                     }
 #ifdef DEBUG_UPDATE_POINTSTO
-                    dbgs() << "Insert point-to: ";
-                    currPointsTo->targetObject->targetType->print(dbgs());
+                    dbgs() << "Insert point-to: " << InstructionUtils::getTypeStr(currPointsTo->targetObject->targetType);
                     dbgs() << " | " << currPointsTo->dstfieldId << " ,is_taint_src: " << currPointsTo->targetObject->is_taint_src << "\n";
                     Value *tv = currPointsTo->targetObject->getValue();
                     if (tv){
@@ -218,8 +202,7 @@ namespace DRCHECKER {
                         if (dyn_cast<Instruction>(tv)){
                             InstructionUtils::printInst(dyn_cast<Instruction>(tv),dbgs());
                         }else{
-                            tv->print(dbgs());
-                            dbgs() << "\n";
+                            dbgs() << InstructionUtils::getValueStr(tv) << "\n";
                         }
                     }
 #endif
@@ -249,7 +232,7 @@ namespace DRCHECKER {
             */
         }
 #ifdef DEBUG_UPDATE_POINTSTO
-        dbgs() << " After update: " << (*targetPointsToMap)[srcPointer]->size() << "\n";
+        dbgs() << " #After update: " << (*targetPointsToMap)[srcPointer]->size() << "\n";
 #endif
     }
 
@@ -382,7 +365,7 @@ namespace DRCHECKER {
             expectedPointeeTy = v->getType()->getPointerElementType();
         }
 #ifdef DEBUG_GET_ELEMENT_PTR
-        dbgs() << "AliasAnalysisVisitor::createEmbObj(): hostObj: " << (unsigned long)(hostObj) << " host_dstFieldId: " << host_dstFieldId << "\n";
+        dbgs() << "AliasAnalysisVisitor::createEmbObj(): hostObj: " << (const void*)(hostObj) << " host_dstFieldId: " << host_dstFieldId << "\n";
         dbgs() << "fieldTy: " << InstructionUtils::getTypeStr(fieldTy) << "\n";
         dbgs() << "expectedPointeeTy: " << InstructionUtils::getTypeStr(expectedPointeeTy) << "\n";
 #endif
@@ -442,7 +425,7 @@ namespace DRCHECKER {
         // to avoid added duplicate pointsto objects
         std::set<AliasObject*> visitedObjects;
 #ifdef DEBUG_GET_ELEMENT_PTR
-        dbgs() << "AliasAnalysisVisitor::makePointsToCopy(): elements in *srcPointsTo: " << srcPointsTo->size() << " \n";
+        dbgs() << "AliasAnalysisVisitor::makePointsToCopy(): #elements in *srcPointsTo: " << srcPointsTo->size() << " \n";
 #endif
         for(PointerPointsTo *currPointsToObj:*srcPointsTo) {
             AliasObject *hostObj = currPointsToObj->targetObject;
@@ -484,13 +467,9 @@ namespace DRCHECKER {
                     host_type = host_type->getPointerElementType();
                 }
 #ifdef DEBUG_GET_ELEMENT_PTR
-                dbgs() << "AliasAnalysisVisitor::makePointsToCopy(): basePointerType: ";
-                if(basePointerType){
-                    basePointerType->print(dbgs());
-                }
-                dbgs() << "\nCur Points-to, host_type: ";
-                host_type->print(dbgs());
-                dbgs() << " host_dstFieldId: " << host_dstFieldId << "\n";
+                dbgs() << "AliasAnalysisVisitor::makePointsToCopy(): basePointerType: " << InstructionUtils::getTypeStr(basePointerType) << "\n";
+                dbgs() << "Cur Points-to, host_type: " << InstructionUtils::getTypeStr(host_type) << " | " << host_dstFieldId << "\n";
+                dbgs() << "hostObj: " << (const void*)hostObj << "\n";
 #endif
                 //hz: the following several "if" try to decide whether we will actually index into an embedded struct in the host struct.
                 //NOTE: fieldId < 0 means that we simply want to copy the points-to information w/o changing anything.
@@ -505,15 +484,8 @@ namespace DRCHECKER {
                         src_fieldTy_arrElem = src_fieldTy->getArrayElementType();
                     }
 #ifdef DEBUG_GET_ELEMENT_PTR
-                    dbgs() << "src_fieldTy: ";
-                    if(src_fieldTy){
-                        src_fieldTy->print(dbgs());
-                    }
-                    if(src_fieldTy_arrElem){
-                        dbgs() << "src_fieldTy_arrElem: ";
-                        src_fieldTy_arrElem->print(dbgs());
-                    }
-                    dbgs() << "\n";
+                    dbgs() << "src_fieldTy: " << InstructionUtils::getTypeStr(src_fieldTy) << "\n";
+                    dbgs() << "src_fieldTy_arrElem: " << InstructionUtils::getTypeStr(src_fieldTy_arrElem) << "\n";
 #endif
                     if( (src_fieldTy && src_fieldTy == basePointToType) || 
                             (src_fieldTy_arrElem && src_fieldTy_arrElem == basePointToType)
@@ -542,9 +514,7 @@ namespace DRCHECKER {
                             //We cannot create the new OutsideObject, it's possibly because the target pointer doesn't point to a struct.
                             //In this case, rather than using the original wrong logic, we'd better make it point to nothing.
 #ifdef DEBUG_GET_ELEMENT_PTR
-                            errs() << "In makePointsToCopy(): cannot get or create embedded object for: ";
-                            gep->getPointerOperand()->print(errs());
-                            errs() << "\n";
+                            errs() << "In makePointsToCopy(): cannot get or create embedded object for: " << InstructionUtils::getValueStr(gep->getPointerOperand()) << "\n";
 #endif
                             goto fail_next;
                         }
@@ -581,9 +551,7 @@ namespace DRCHECKER {
 #ifdef DEBUG_GET_ELEMENT_PTR
                 dbgs() << "Assign points-to object: ";
                 if(newPointsToObj->targetObject){
-                    if(newPointsToObj->targetObject->targetType){
-                        newPointsToObj->targetObject->targetType->print(dbgs());
-                    }
+                    dbgs() << InstructionUtils::getTypeStr(newPointsToObj->targetObject->targetType);
                 }
                 dbgs() << " | dstField: " << newPointsToObj->dstfieldId << "\n";
 
@@ -1096,9 +1064,7 @@ Value* AliasAnalysisVisitor::visitGetElementPtrOperator(Instruction *I, GEPOpera
             //No way to sort this out...
 #ifdef DEBUG_GET_ELEMENT_PTR
             errs() << "Error occurred, Trying to dereference a structure, which does not point to any object.";
-            errs() << " Ignoring:" << srcPointer << "\n";
-            srcPointer->print(errs());
-            errs() << "  END\n";
+            errs() << " Ignoring: " << InstructionUtils::getValueStr(srcPointer) << "\n";
 #endif
             return;
         }
@@ -1182,9 +1148,7 @@ Value* AliasAnalysisVisitor::visitGetElementPtrOperator(Instruction *I, GEPOpera
             Value *srcPointer = I->getOperand(i);
 
 #ifdef DEBUG_GET_ELEMENT_PTR
-            dbgs() << "GEP instruction for array, operand: " << i << "\n";
-            srcPointer->print(dbgs());
-            dbgs() << "\n";
+            dbgs() << "GEP instruction for array, operand: " << i << " srcPointer: " << InstructionUtils::getValueStr(srcPointer) << "\n";
 #endif
 
             // OK, we are not indexing a struct. This means, we are indexing an array
@@ -1229,9 +1193,7 @@ Value* AliasAnalysisVisitor::visitGetElementPtrOperator(Instruction *I, GEPOpera
                 // however the src pointer does not point to any object.
                 // How sad??
 #ifdef DEBUG_GET_ELEMENT_PTR
-                errs() << "Array pointer does not point to any object:";
-                srcPointer->print(dbgs());
-                errs() << "Ignoring.\n";
+                errs() << "Array pointer does not point to any object: " << InstructionUtils::getValueStr(srcPointer) << " Ignoring.\n";
 #endif
                 //assert(false);
             }
