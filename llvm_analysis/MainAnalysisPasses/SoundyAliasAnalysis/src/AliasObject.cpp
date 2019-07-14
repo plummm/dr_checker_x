@@ -4,28 +4,23 @@ using namespace llvm;
 
 namespace DRCHECKER {
 
-    //#define DEBUG_CHANGE_HEAPLOCATIONTYPE
-
     void AliasObject::fetchPointsToObjects_log(long srcfieldId, std::set<std::pair<long, AliasObject*>> &dstObjects,
             Instruction *targetInstr, bool create_arg_obj) {
-        dbgs() << "\n*********fetchPointsToObjects(Outside Object)**********\n Current Inst: ";
-        if (targetInstr){
-            targetInstr->print(dbgs());
-        }
-        dbgs() << "\n Object Type: ";
-        this->targetType->print(dbgs());
-        dbgs() << "\n Object Ptr: ";
+        dbgs() << "\n*********fetchPointsToObjects**********\n";
+        dbgs() << "Current Inst: " << InstructionUtils::getValueStr(targetInstr) << "\n";
+        dbgs() << "Object Type: " << InstructionUtils::getTypeStr(this->targetType) << "\n";
+        dbgs() << "Object Ptr: " << InstructionUtils::getValueStr(this->getValue()) << "\n";
+        dbgs() << "Obj ID: " << (const void*)this << "\n";
         if (this->getValue()){
-            this->getValue()->print(dbgs());
             /*
                if(dyn_cast<Instruction>(this->targetVar)){
-               dbgs() << "\n";
-               dyn_cast<Instruction>(this->targetVar)->getFunction()->print(dbgs());
+                    dbgs() << "\n";
+                    dyn_cast<Instruction>(this->targetVar)->getFunction()->print(dbgs());
                }
              */
         }
-        dbgs() << "\n Target Field: " << srcfieldId;
-        dbgs() << "\n*******************\n";
+        dbgs() << "Target Field: " << srcfieldId << "\n";
+        dbgs() << "*******************\n";
     }
 
     //Taint the point-to object by field "srcfieldId" according to the field taint info.
@@ -43,7 +38,7 @@ namespace DRCHECKER {
                 newObj->taintAllFieldsWithTag(newTaint);
             }
             newObj->is_taint_src = true;
-#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS_OUTSIDE
+#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
             dbgs() << "##Set |is_taint_src| to true.\n";
 #endif
         } else {
@@ -56,7 +51,7 @@ namespace DRCHECKER {
                 TaintFlag *newTaint = new TaintFlag(this->all_contents_taint_flag,targetInstr,targetInstr);
                 newObj->taintAllFieldsWithTag(newTaint);
                 newObj->is_taint_src = true;
-#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS_OUTSIDE
+#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
                 dbgs() << "##Set |is_taint_src| to true.\n";
 #endif
             }
@@ -93,7 +88,7 @@ namespace DRCHECKER {
         fetchPointsToObjects_log(srcfieldId, dstObjects, targetInstr, create_arg_obj);
 #endif
         for(ObjectPointsTo *obj : pointsTo) {
-            if(obj->fieldId == srcfieldId) {
+            if(obj->fieldId == srcfieldId && obj->targetObject) {
                 //We handle a special case here:
                 //Many malloc'ed HeapLocation object can be of the type i8*, while only in the later code the pointer will be converted to a certain struct*,
                 //we choose to do this conversion here, specifically we need to:
@@ -101,10 +96,7 @@ namespace DRCHECKER {
                 //(2) setup the taint information properly.
 #ifdef DEBUG_CHANGE_HEAPLOCATIONTYPE
                 dbgs() << "AliasObject::fetchPointsToObjects: isHeapLocation: " << (obj->targetObject && obj->targetObject->isHeapLocation()) << " dstField: " << obj->dstfieldId;
-                if (expObjTy) {
-                    dbgs() << " expObjTy: " << InstructionUtils::getTypeStr(expObjTy);
-                }
-                dbgs() << "\n";
+                dbgs() << " expObjTy: " << InstructionUtils::getTypeStr(expObjTy) << "\n";
 #endif
                 if (obj->dstfieldId == 0 && obj->targetObject && obj->targetObject->isHeapLocation() && 
                     expObjTy && expObjTy->isStructTy() && obj->targetObject->targetType != expObjTy) 
@@ -120,9 +112,9 @@ namespace DRCHECKER {
                 auto p = std::make_pair(obj->dstfieldId, obj->targetObject);
                 if(std::find(dstObjects.begin(), dstObjects.end(), p) == dstObjects.end()) {
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-                    dbgs() << "Found an obj in |pointsTo| records.\n";
-                    obj->getValue()->print(dbgs());
-                    dbgs() << " | " << obj->dstfieldId << " | is_taint_src:" << obj->targetObject->is_taint_src << "\n";
+                    dbgs() << "Found an obj in |pointsTo| records:\n";
+                    dbgs() << "Type: " << InstructionUtils::getTypeStr(obj->targetObject->targetType) << " | " << obj->dstfieldId << " | is_taint_src:" << obj->targetObject->is_taint_src << "\n";
+                    dbgs() << "Val: " << InstructionUtils::getValueStr(obj->targetObject->getValue()) << "\n";
 #endif
                     dstObjects.insert(dstObjects.end(), p);
                     hasObjects = true;
@@ -172,9 +164,7 @@ namespace DRCHECKER {
             // if there are no struct objects that this pointer field points to, generate a dummy object.
             if(create_arg_obj || this->isFunctionArg() || this->isOutsideObject()) {
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-                dbgs() << "Creating a new dynamic AliasObject at:";
-                targetInstr->print(dbgs());
-                dbgs() << "\n";
+                dbgs() << "Creating a new dummy AliasObject...\n";
 #endif
                 OutsideObject *newObj = new OutsideObject(targetInstr,ety->getPointerElementType());
                 ObjectPointsTo *newPointsToObj = new ObjectPointsTo();
@@ -192,7 +182,7 @@ namespace DRCHECKER {
                 this->taintSubObj(newObj,srcfieldId,targetInstr);
 
                 //insert the newly create object.
-                pointsTo.push_back(newPointsToObj);
+                this->pointsTo.push_back(newPointsToObj);
 
                 dstObjects.insert(dstObjects.end(), std::make_pair(0, newObj));
             }

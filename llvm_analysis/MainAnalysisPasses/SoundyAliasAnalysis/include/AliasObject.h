@@ -23,14 +23,14 @@ using namespace llvm;
 
 //hz: some debug output options.
 //#define DEBUG_OUTSIDE_OBJ_CREATION
-//#define DEBUG_FETCH_POINTS_TO_OBJECTS_OUTSIDE
 #define ENABLE_SUB_OBJ_CACHE
 #define SMART_FUNC_PTR_RESOLVE
 #define DEBUG_SMART_FUNCTION_PTR_RESOLVE
+#define DEBUG_FETCH_POINTS_TO_OBJECTS
+#define DEBUG_CHANGE_HEAPLOCATIONTYPE
 
 namespace DRCHECKER {
 //#define DEBUG_FUNCTION_ARG_OBJ_CREATION
-//#define DEBUG_FETCH_POINTS_TO_OBJECTS
 
     class AliasObject;
 
