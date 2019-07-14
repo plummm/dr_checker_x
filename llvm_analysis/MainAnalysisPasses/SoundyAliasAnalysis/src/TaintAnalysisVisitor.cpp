@@ -12,11 +12,10 @@ namespace DRCHECKER {
 
 //#define DEBUG_CALL_INSTR
 //#define DEBUG_RET_INSTR
-//#define DEBUG_LOAD_INSTR
+#define DEBUG_LOAD_INSTR
 //#define DEBUG_CAST_INSTR
 //#define DEBUG
 //#define DEBUG_BIN_INSTR
-//#define DEBUG_LOAD_INSTR
 //#define DEBUG_TMP
 
     std::set<TaintFlag*>* TaintAnalysisVisitor::getTaintInfo(Value *targetVal) {
@@ -57,6 +56,10 @@ namespace DRCHECKER {
             bool add_taint = false;
             for (auto currTaint:*srcTaintInfo) {
                 add_taint = true;
+                //hz: we're doing the taint analysis for global states, which can survive function invocations,
+                //stmt0 in the 1st function call may affect stmt1 in the 2nd invocation of the same function,
+                //although stmt0 cannot reach stmt1 in the CFG of this function, so we disable the below reachability check.
+                /*
                 if(currTaint->targetInstr != nullptr) {
                     Instruction *srcInstruction = dyn_cast<Instruction>(currTaint->targetInstr);
                     if (srcInstruction != nullptr && targetInstruction != nullptr) {
@@ -64,6 +67,7 @@ namespace DRCHECKER {
                                                                    this->currFuncCallSites);
                     }
                 }
+                */
                 if(add_taint) {
                     TaintFlag *newTaintFlag = new TaintFlag(currTaint, targetInstruction, srcOperand);
                     newTaintInfo->insert(newTaintInfo->end(), newTaintFlag);
@@ -221,9 +225,7 @@ namespace DRCHECKER {
 
 
 #ifdef DEBUG_LOAD_INSTR
-        dbgs() << "TaintAnalysisVisitor::visitLoadInst(): ";
-        I.print(dbgs());
-        dbgs() << "\n";
+        dbgs() << "TaintAnalysisVisitor::visitLoadInst(): " << InstructionUtils::getValueStr(&I) << "\n";
 #endif
         Value *srcPointer = I.getPointerOperand();
         std::set<TaintFlag*> *srcTaintInfo = getTaintInfo(srcPointer);
@@ -232,11 +234,17 @@ namespace DRCHECKER {
 
         bool already_stripped = true;
         if(srcTaintInfo == nullptr) {
+#ifdef DEBUG_LOAD_INSTR
+            dbgs() << "TaintAnalysisVisitor::visitLoadInst(): No taint info for srcPointer: " << InstructionUtils::getValueStr(srcPointer) << "\n";
+#endif
             already_stripped = false;
             if(getTaintInfo(srcPointer->stripPointerCasts())) {
                 srcPointer = srcPointer->stripPointerCasts();
                 srcTaintInfo = getTaintInfo(srcPointer);
                 already_stripped = true;
+#ifdef DEBUG_LOAD_INSTR
+                dbgs() << "TaintAnalysisVisitor::visitLoadInst(): Got taint info after stripping: " << InstructionUtils::getValueStr(srcPointer) << "\n";
+#endif
             }
         }
 
@@ -253,6 +261,9 @@ namespace DRCHECKER {
 
         if(!already_stripped) {
             if(!PointsToUtils::hasPointsToObjects(currState, this->currFuncCallSites, srcPointer)) {
+#ifdef DEBUG_LOAD_INSTR
+                dbgs() << "Strip srcPointer since there is no point-to info.\n";
+#endif
                 srcPointer = srcPointer->stripPointerCasts();
             }
         }
@@ -276,6 +287,9 @@ namespace DRCHECKER {
             // make sure we have some objects.
             assert(targetObjects.size() > 0);
 
+#ifdef DEBUG_LOAD_INSTR
+            dbgs() << "Got point-to objs for srcPointer, #: " << targetObjects.size() << "\n";
+#endif
             // add the taint from the corresponding fields of the objects.
             for (auto fieldObject: targetObjects) {
                 long currFieldID = fieldObject.first;
@@ -283,7 +297,7 @@ namespace DRCHECKER {
                 // get the taint info of the field.
                 std::set<TaintFlag *> *fieldTaintInfo = currObject->getFieldTaintInfo(currFieldID);
 #ifdef DEBUG_LOAD_INSTR
-                dbgs() << "Trying to get taint from object:" << currObject << " fieldID:" << currFieldID << "\n";
+                dbgs() << "Trying to get taint from object: " << (const void*)currObject << " fieldID:" << currFieldID << "\n";
 #endif
                 // if the field is tainted, add the taint from the field
                 // to the result of this instruction.
@@ -297,18 +311,14 @@ namespace DRCHECKER {
             }
         } else {
 #ifdef DEBUG_LOAD_INSTR
-            dbgs() << "TaintAnalysis: Src Pointer does not point to any object:";
-            srcPointer->print(dbgs());
-            dbgs() << "\n";
+            dbgs() << "TaintAnalysis: Src Pointer does not point to any object.\n";
 #endif
         }
 
         if(newTaintInfo->size()) {
             // okay. Now add the newTaintInfo
 #ifdef DEBUG_LOAD_INSTR
-            dbgs() << "TaintAnalysis: Updating Taint in LoadInstruction, from:";
-            srcPointer->print(dbgs());
-            dbgs() << "\n";
+            dbgs() << "TaintAnalysis: Updating Taint in LoadInstruction..\n";
 #endif
             updateTaintInfo(&I, newTaintInfo);
         } else {

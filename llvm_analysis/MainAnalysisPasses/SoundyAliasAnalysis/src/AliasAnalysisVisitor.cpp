@@ -198,12 +198,14 @@ namespace DRCHECKER {
                     dbgs() << " | " << currPointsTo->dstfieldId << " ,is_taint_src: " << currPointsTo->targetObject->is_taint_src << "\n";
                     Value *tv = currPointsTo->targetObject->getValue();
                     if (tv){
-                        dbgs() << "Inst/Val: ";
+                        dbgs() << "Inst/Val: " << InstructionUtils::getValueStr(tv) << "\n";
+                        /*
                         if (dyn_cast<Instruction>(tv)){
                             InstructionUtils::printInst(dyn_cast<Instruction>(tv),dbgs());
                         }else{
                             dbgs() << InstructionUtils::getValueStr(tv) << "\n";
                         }
+                        */
                     }
 #endif
                     existingPointsTo->insert(existingPointsTo->end(), currPointsTo);

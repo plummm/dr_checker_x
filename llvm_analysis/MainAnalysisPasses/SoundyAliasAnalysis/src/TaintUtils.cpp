@@ -6,6 +6,8 @@
 
 using namespace llvm;
 
+#define DEBUG_ADD_NEW_TAINT_FLAG
+
 namespace DRCHECKER {
     std::set<TaintFlag*>* TaintUtils::getTaintInfo(GlobalState &currState,
                                                    std::vector<Instruction *> *currFuncCallSites,
@@ -52,6 +54,12 @@ namespace DRCHECKER {
             return  n->isTaintEquals(newTaintFlag);
         }) == newTaintInfo->end()) {
             // if not insert the new taint flag into the newTaintInfo.
+#ifdef DEBUG_ADD_NEW_TAINT_FLAG
+            if (newTaintFlag->tag) {
+                dbgs() << "TaintUtils::addNewTaintFlag: Add taint:\n";
+                newTaintFlag->tag->dumpInfo(dbgs());
+            }
+#endif
             newTaintInfo->insert(newTaintInfo->end(), newTaintFlag);
         } else {
             delete(newTaintFlag);

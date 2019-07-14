@@ -175,19 +175,9 @@ namespace DRCHECKER {
         }
 
         void dumpInfo(raw_ostream &OS) {
-            OS << "Taint Tag:\n";
-            OS << "ID: " << static_cast<const void *>(this) << "\n";
-            OS << "Value:\n";
-            if (this->v){
-                OS << InstructionUtils::getValueStr(this->v);
-            }
-            OS << "\nfieldId: " << this->fieldId << " \n";
-            OS << "Type: ";
-            if (this->type){
-                OS << InstructionUtils::getTypeStr(this->type);
-            }
-            OS << "\n";
-            OS << "is_global: " << this->is_global << "\n";
+            OS << "Taint Tag: " << static_cast<const void *>(this) << "\n";
+            OS << "Type: " << InstructionUtils::getTypeStr(this->type) << " | " << this->fieldId << " is_global: " << this->is_global << "\n";
+            OS << "Value: " << InstructionUtils::getValueStr(this->v) << "\n";
         }
 
         void printModInsts(raw_ostream &OS, std::map<BasicBlock*,std::set<uint64_t>> *switchMap) {

@@ -9,6 +9,7 @@
 #include "VisitorCallback.h"
 #include "TaintInfo.h"
 #include <FunctionChecker.h>
+#include "../../Utils/include/InstructionUtils.h"
 
 using namespace llvm;
 
