@@ -632,7 +632,13 @@ namespace DRCHECKER {
                     }
                     //Dump the TaintFlag(s) for current value under current context.
                     std::set<TaintFlag*> *pflags = jt.second;
+                    std::set<TaintTag*> uniqVarTags; 
                     for (TaintFlag *p : *pflags){
+                        if (!p->tag || uniqVarTags.find(p->tag) != uniqVarTags.end()) {
+                            continue;
+                        }else {
+                            uniqVarTags.insert(p->tag);
+                        }
                         O << "------------------Taint------------------\n";
                         p->dumpInfo(O,&uniqTags);
                         if (p->tag && p->tag->priv) {
@@ -645,6 +651,7 @@ namespace DRCHECKER {
                             }
                         }
                     }
+                    uniqVarTags.clear();
                 }
 #ifdef DEBUG_TAINT_DUMP_PROGRESS
                 dbgs() << "\n";

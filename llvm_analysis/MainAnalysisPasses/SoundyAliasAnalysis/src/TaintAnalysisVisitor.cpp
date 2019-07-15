@@ -12,7 +12,7 @@ namespace DRCHECKER {
 
 //#define DEBUG_CALL_INSTR
 //#define DEBUG_RET_INSTR
-#define DEBUG_LOAD_INSTR
+//#define DEBUG_LOAD_INSTR
 //#define DEBUG_CAST_INSTR
 //#define DEBUG
 //#define DEBUG_BIN_INSTR
