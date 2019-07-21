@@ -830,6 +830,7 @@ namespace DRCHECKER {
                 tagInfoMap[tag_id]["is_global"] = (tag->is_global ? "true" : "false");
                 tagInfoMap[tag_id]["field"] = std::to_string(tag->fieldId);
                 tagInfoMap[tag_id]["v"] = InstructionUtils::getValueStr(tag->v);
+                tagInfoMap[tag_id]["vid"] = std::to_string((unsigned long)(tag->v));
                 if (tag->priv) {
                     std::set<std::string> *hstrs = getHierarchyStr((AliasObject*)tag->priv, tag->fieldId);
                     if (hstrs && !hstrs->empty()) {

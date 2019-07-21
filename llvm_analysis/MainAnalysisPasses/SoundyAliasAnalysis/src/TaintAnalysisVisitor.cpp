@@ -17,6 +17,7 @@ namespace DRCHECKER {
 //#define DEBUG
 //#define DEBUG_BIN_INSTR
 //#define DEBUG_TMP
+#define ENFORCE_TAINT_PATH
 
     std::set<TaintFlag*>* TaintAnalysisVisitor::getTaintInfo(Value *targetVal) {
         return TaintUtils::getTaintInfo(this->currState, this->currFuncCallSites, targetVal);
@@ -59,7 +60,7 @@ namespace DRCHECKER {
                 //hz: we're doing the taint analysis for global states, which can survive function invocations,
                 //stmt0 in the 1st function call may affect stmt1 in the 2nd invocation of the same function,
                 //although stmt0 cannot reach stmt1 in the CFG of this function, so we disable the below reachability check.
-                /*
+#ifdef ENFORCE_TAINT_PATH
                 if(currTaint->targetInstr != nullptr) {
                     Instruction *srcInstruction = dyn_cast<Instruction>(currTaint->targetInstr);
                     if (srcInstruction != nullptr && targetInstruction != nullptr) {
@@ -67,7 +68,7 @@ namespace DRCHECKER {
                                                                    this->currFuncCallSites);
                     }
                 }
-                */
+#endif
                 if(add_taint) {
                     TaintFlag *newTaintFlag = new TaintFlag(currTaint, targetInstruction, srcOperand);
                     newTaintInfo->insert(newTaintInfo->end(), newTaintFlag);
