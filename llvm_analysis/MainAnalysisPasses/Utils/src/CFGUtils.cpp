@@ -24,7 +24,8 @@ namespace DRCHECKER {
                 for (Function::iterator b = currF.begin(), be = currF.end(); b != be; ++b) {
                     BasicBlock *BB = &(*b);
                     if (BB == (*currSCC)[i]) {
-                        newCurrSCC->insert(newCurrSCC->begin(), BB);
+                        //newCurrSCC->insert(newCurrSCC->begin(), BB);
+                        newCurrSCC->push_back(BB);
                         break;
                     }
                 }

@@ -204,16 +204,17 @@ namespace DRCHECKER {
                 if(!currFunction.isDeclaration()) {
                     std::vector<std::vector<BasicBlock *> *> *traversalOrder = BBTraversalHelper::getSCCTraversalOrder(currFunction);
 #ifdef DEBUG_TRAVERSAL_ORDER
-                    if(currFunction.getName().str() == "m4u_fill_sgtable_user") {
+                    if(currFunction.getName().str() == "n_tty_receive_char_special") {
                         std::cout << "Got Traversal order For:" << currFunction.getName().str() << "\n";
                         for (auto m1:*traversalOrder) {
                             std::cout << "SCC START:" << m1->size() << ":\n";
                             for (auto m2:*m1) {
-                                std::cout << m2->getName().str() << "->";
+                                std::cout << InstructionUtils::getBBStrID(m2) << " -> ";
                             }
                             std::cout << "SCC END\n";
                         }
                     }
+                    continue;
 #endif
 
 #ifdef DEBUG_SCC_GRAPH
