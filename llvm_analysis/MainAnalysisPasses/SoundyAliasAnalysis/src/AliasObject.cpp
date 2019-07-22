@@ -192,4 +192,34 @@ namespace DRCHECKER {
         }
     }
 
+    Type *ObjectPointsTo::getPointeeTy() {
+        if (!this->targetObject) {
+            return nullptr;
+        }
+        Type *objTy = this->targetObject->targetType;
+        if (!objTy) {
+            return nullptr;
+        }
+        if (objTy->isStructTy()) {
+            if (this->dstfieldId < 0) {
+                //Is this possible?
+                return objTy;
+            }else if (this->dstfieldId == 0) {
+                //TODO: this is subtle... We're actually not sure whether it points to the host obj itself, or the field 0 in the obj...
+                //For now we return the type of the field 0.
+                return objTy->getStructElementType(0);
+            }else if (this->dstfieldId < objTy->getStructNumElements()) {
+                return objTy->getStructElementType(this->dstfieldId);
+            }else {
+                //This is a bug...
+                dbgs() << "!!! ObjectPointsTo::getPointeeTy(): dstfieldId exceeds the limit, host obj ty: " << InstructionUtils::getTypeStr(objTy);
+                dbgs() << " dstfieldId: " << this->dstfieldId << "\n";
+                //TODO: return the nullptr or the obj type?
+                return nullptr;
+            }
+        }
+        //TODO: what if the targetObj is an array?
+        return objTy;
+    }
+
 }

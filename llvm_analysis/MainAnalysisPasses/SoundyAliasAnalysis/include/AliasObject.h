@@ -80,6 +80,8 @@ namespace DRCHECKER {
             return 1;
         }
 
+        Type *getPointeeTy();
+
         /*virtual std::ostream& operator<<(std::ostream& os, const ObjectPointsTo& obj) {
             os << "Field :" << fieldId << " points to " << dstfieldId <<" of the object, with ID:" << obj.targetObject;
             return os;

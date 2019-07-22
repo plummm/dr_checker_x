@@ -702,111 +702,96 @@ void AliasAnalysisVisitor::visitCastInst(CastInst &I) {
      * First check if we are converting to pointer, if yes, then we need to compute points to
      * If not, check if src value has points to information, if yes, then we need to compute points to
      */
-    Type* dstType = I.getDestTy();
-    Type* srcType = I.getSrcTy();
-
+    Type *dstType = I.getDestTy();
+    Type *srcType = I.getSrcTy();
+    Type *srcPointeeTy = nullptr;
+    Type *dstPointeeTy = nullptr;
+    if (srcType && srcType->isPointerTy()) {
+        srcPointeeTy = srcType->getPointerElementType();
+    }
+    if (dstType && dstType->isPointerTy()) {
+        dstPointeeTy = dstType->getPointerElementType();
+    }
+    Value *srcOperand = I.getOperand(0);
 #ifdef DEBUG_CAST_INSTR
-    dbgs() << "AliasAnalysis, visit Cast inst: ";
-    I.print(dbgs());
-    dbgs() << "\n";
-    dbgs() << "Src type: ";
-    srcType->print(dbgs());
-    dbgs() << " Dst type: ";
-    dstType->print(dbgs());
-    dbgs() << "\n";
-#endif
-    Value* srcOperand = I.getOperand(0);
-#ifdef DEBUG_CAST_INSTR
-    dbgs() << "srcOperand: ";
-    srcOperand->print(dbgs()); 
-    dbgs() << "\n";
+    dbgs() << "AliasAnalysisVisitor::visitCastInst: " << InstructionUtils::getValueStr(&I) << "\n";
+    dbgs() << "Convert: " << InstructionUtils::getTypeStr(srcType) << " --> " << InstructionUtils::getTypeStr(dstType) << "\n";
+    dbgs() << "srcOperand: " << InstructionUtils::getValueStr(srcOperand) << "\n";
 #endif
     // handle inline casting.
     if(!hasPointsToObjects(srcOperand)) {
         srcOperand = srcOperand->stripPointerCasts();
 #ifdef DEBUG_CAST_INSTR
-        dbgs() << "Src operand doesn't point to any objects, after strip, it becomes: ";
-        srcOperand->print(dbgs()); 
-        dbgs() << "\n";
+        dbgs() << "Src operand doesn't point to any objects, after strip, it becomes: " << InstructionUtils::getValueStr(srcOperand) << "\n";
 #endif
     }
 
-    if(dstType->isPointerTy() || hasPointsToObjects(srcOperand)) {
-        // OK, we need to compute points to information for the current instruction.
-        if(hasPointsToObjects(srcOperand)) {
-            std::set<PointerPointsTo*>* srcPointsToInfo = getPointsToObjects(srcOperand);
-
-            assert(srcPointsToInfo != nullptr);
-            // Create new pointsTo info for the current instruction.
-            std::set<PointerPointsTo*>* newPointsToInfo = new std::set<PointerPointsTo*>();
-            for(PointerPointsTo *currPointsToObj: *srcPointsToInfo) {
-                PointerPointsTo *newPointsToObj = (PointerPointsTo*)currPointsToObj->makeCopy();
-                newPointsToObj->propogatingInstruction = &I;
-                newPointsToObj->targetPointer = &I;
-                newPointsToObj->targetObject->is_taint_src = currPointsToObj->targetObject->is_taint_src;
-                // If the destination object is void type and
-                // we are trying to cast into non-void type?
-                // change the type of the object.
-                Type *currSrcType = newPointsToObj->targetObject->targetType;
+    if(hasPointsToObjects(srcOperand)) {
+        //In this situation, our overall logic is to propagate all point-to information from the src operand to the dst operand,
+        //however, we may have some special processing about the point-to information (e.g. change the type of the point-to obj).
+        std::set<PointerPointsTo*>* srcPointsToInfo = getPointsToObjects(srcOperand);
+        assert(srcPointsToInfo != nullptr);
+        //Create new pointsTo info for the current instruction.
+        std::set<PointerPointsTo*>* newPointsToInfo = new std::set<PointerPointsTo*>();
+        for(PointerPointsTo *currPointsToObj: *srcPointsToInfo) {
+            //NOTE: the "targetObject" will not be copied.
+            PointerPointsTo *newPointsToObj = (PointerPointsTo*)currPointsToObj->makeCopy();
+            newPointsToObj->propogatingInstruction = &I;
+            newPointsToObj->targetPointer = &I;
+            //TODO: this may be unnecessary since the "targetObject" will not be copied.
+            newPointsToObj->targetObject->is_taint_src = currPointsToObj->targetObject->is_taint_src;
+            Type *currTgtObjType = newPointsToObj->targetObject->targetType;
 #ifdef DEBUG_CAST_INSTR
-                dbgs() << "currSrcType of the target object: ";
-                currSrcType->print(dbgs()); 
-                dbgs() << "\n";
+            dbgs() << "AliasAnalysisVisitor::visitCastInst: current target object: " << InstructionUtils::getTypeStr(currTgtObjType) << " | " << currPointsToObj->dstfieldId << "\n";
 #endif
-                if(!dstType->isVoidTy()) {
-                    //src type is i8* || i8
-                    if((currSrcType->isPointerTy() && currSrcType->getContainedType(0)->isIntegerTy(8)) || currSrcType->isIntegerTy(8)){
-                        // No need to make copy
-                        if(dstType->isPointerTy()) {
-                            dstType = dstType->getContainedType(0);
-                        }
-                        newPointsToObj->targetObject->targetType = dstType;
-                    }else{
-                        //hz: what if src pointer is not i8*?
-                        //hz: we need make a copy of original targetObject and change its type to dstType,
-                        //hz: we also need to properly handle the taint information.
-                        if (currSrcType->isStructTy() && dstType->isPointerTy() && dstType->getPointerElementType()->isStructTy()){
-#ifdef DEBUG_CAST_INSTR
-                            dbgs() << "About to copy src object to dst object of a different type.\n";
-#endif
-                            AliasObject *newTargetObj = this->x_type_obj_copy(newPointsToObj->targetObject,dstType->getPointerElementType());
-                            if (newTargetObj){
-                                newPointsToObj->targetObject = newTargetObj;
-                            }else{
-                                //TODO: what to do now..
-#ifdef DEBUG_CAST_INSTR
-                                dbgs() << "x_type_obj_copy failed..\n";
-#endif
-                            }
-                        }
+            //--------below are special processings for the point-to information---------
+            if(!dstType->isVoidTy()) {
+                //src type is i8* || i8
+                if((currTgtObjType->isPointerTy() && currTgtObjType->getContainedType(0)->isIntegerTy(8)) || currTgtObjType->isIntegerTy(8)){
+                    // No need to make copy
+                    if(dstType->isPointerTy()) {
+                        dstType = dstType->getContainedType(0);
                     }
-                }else{
-                    //TODO: hz: what if dst pointer is void?
+                    newPointsToObj->targetObject->targetType = dstType;
+                }else if (srcPointeeTy && srcPointeeTy->isStructTy() && dstPointeeTy && dstPointeeTy->isStructTy() &&
+                          currTgtObjType == srcPointeeTy && newPointsToObj->dstfieldId == 0){
+                    //TODO: what if the pointee is an embedded struct (dstfieldId != 0) in the host obj...
+                    //hz: what if src pointer is not i8*?
+                    //hz: we need make a copy of original targetObject and change its type to dstType,
+                    //hz: we also need to properly handle the taint information.
 #ifdef DEBUG_CAST_INSTR
-                    dbgs() << "dstType is void...\n";
+                    dbgs() << "About to copy src object to dst object of a different type.\n";
 #endif
+                    AliasObject *newTargetObj = this->x_type_obj_copy(newPointsToObj->targetObject,dstPointeeTy);
+                    if (newTargetObj){
+                        newPointsToObj->targetObject = newTargetObj;
+                    }else{
+                        //TODO: what to do now..
+#ifdef DEBUG_CAST_INSTR
+                        dbgs() << "x_type_obj_copy failed..\n";
+#endif
+                    }
                 }
-                newPointsToInfo->insert(newPointsToInfo->end(), newPointsToObj);
-            }
-            // Update the points to Info of the current instruction.
+            }else{
+                //TODO: hz: what if dst pointer is void?
 #ifdef DEBUG_CAST_INSTR
-            dbgs() << "Adding new points to information in cast instruction\n";
+                dbgs() << "dstType is void...\n";
 #endif
-            this->updatePointsToObjects(&I, newPointsToInfo);
-        } else {
-            //hz: TODO: do we need to create new OutsideObject here of the dstType?
-            //
-            // we are type casting to a pointer and there is no points to information for
-            // the srcOperand, what should be done here?
-            // Should we leave empty?
+            }
+            //--------above are special processings for the point-to information---------
+            newPointsToInfo->insert(newPointsToInfo->end(), newPointsToObj);
+        }
+        // Update the points to Info of the current instruction.
+        this->updatePointsToObjects(&I, newPointsToInfo);
+    }else if (dstType->isPointerTy()) {
+        //hz: TODO: do we need to create new OutsideObject here of the dstType?
 #ifdef DEBUG_CAST_INSTR
             dbgs() << "WARNING: Trying to cast a value (that points to nothing) to pointer, Ignoring\n";
 #endif
             //assert(false);
-        }
-    } else {
-        //Should we ignore?
-        // make sure that source type is not pointer
+    }else {
+        //This can be a value conversion (e.g. i32 -> i64) that can be ignored.
+        //Below is the original Dr.Checker's logic.
         if(!this->inside_loop) {
 #ifdef STRICT_CAST
             assert(!srcType->isPointerTy());
@@ -814,7 +799,7 @@ void AliasAnalysisVisitor::visitCastInst(CastInst &I) {
 #ifdef DEBUG_CAST_INSTR
             dbgs() << "Ignoring casting as pointer does not point to anything\n";
 #endif
-        } else {
+        }else {
 #ifdef DEBUG_CAST_INSTR
             dbgs() << "Is inside the loop..Ignoring\n";
 #endif
@@ -824,24 +809,18 @@ void AliasAnalysisVisitor::visitCastInst(CastInst &I) {
 
 //hz: make a copy for the src AliasObject of a different type. 
 AliasObject* AliasAnalysisVisitor::x_type_obj_copy(AliasObject *srcObj, Type *dstType) {
-#ifdef DEBUG_CAST_INSTR
-    dbgs() << "In AliasAnalysisVisitor::x_type_obj_copy, srcObj type: ";
-    if(srcObj){
-        srcObj->targetType->print(dbgs());
-    }
-    dbgs() << " dstType: ";
-    if(dstType){
-        dstType->print(dbgs());
-    }
-    dbgs() << "\n";
-#endif
     if (!srcObj || !dstType){
         return nullptr;
     }
     Type *srcType = srcObj->targetType;
+#ifdef DEBUG_CAST_INSTR
+    dbgs() << "In AliasAnalysisVisitor::x_type_obj_copy, srcObj type: " << InstructionUtils::getTypeStr(srcType);
+    dbgs() << " dstType: " << InstructionUtils::getTypeStr(dstType) << "\n";
+#endif
     if(!srcType->isStructTy() || !dstType->isStructTy()){
         return nullptr;
     }
+    //TODO: Should we add this new obj to the "pointsTo" or "embObjCache" of the parent object of the copied object?
     AliasObject *newObj = srcObj->makeCopy();
     //We are far from done...
     //First, we need to change the object type.
