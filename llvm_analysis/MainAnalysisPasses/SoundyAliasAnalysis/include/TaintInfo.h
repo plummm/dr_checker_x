@@ -304,7 +304,7 @@ namespace DRCHECKER {
         Value *targetInstr;
         // trace of instructions that resulted in this taint.
         std::vector<Instruction *> instructionTrace;
-        void dumpInfo(raw_ostream &OS, std::set<TaintTag*> *uniqTags) {
+        void dumpInfo(raw_ostream &OS, std::set<TaintTag*> *uniqTags = nullptr) {
 
             //OS << "Taint Flag for:";
             //this->targetInstr->print(OS);

@@ -18,6 +18,7 @@ namespace DRCHECKER {
 //#define DEBUG_BIN_INSTR
 //#define DEBUG_TMP
 #define ENFORCE_TAINT_PATH
+#define DEBUG_ENFORCE_TAINT_PATH
 
     std::set<TaintFlag*>* TaintAnalysisVisitor::getTaintInfo(Value *targetVal) {
         return TaintUtils::getTaintInfo(this->currState, this->currFuncCallSites, targetVal);
@@ -56,6 +57,9 @@ namespace DRCHECKER {
             std::set<TaintFlag *> *newTaintInfo = new std::set<TaintFlag *>();
             bool add_taint = false;
             for (auto currTaint:*srcTaintInfo) {
+                if (!currTaint) {
+                    continue;
+                }
                 add_taint = true;
                 //hz: we're doing the taint analysis for global states, which can survive function invocations,
                 //stmt0 in the 1st function call may affect stmt1 in the 2nd invocation of the same function,
@@ -72,6 +76,19 @@ namespace DRCHECKER {
                 if(add_taint) {
                     TaintFlag *newTaintFlag = new TaintFlag(currTaint, targetInstruction, srcOperand);
                     newTaintInfo->insert(newTaintInfo->end(), newTaintFlag);
+                }else {
+#ifdef DEBUG_ENFORCE_TAINT_PATH
+                    dbgs() << "TaintAnalysisVisitor::makeTaintInfoCopy: Failed to pass the taint path test, the TaintFlag:\n";
+                    currTaint->dumpInfo(dbgs());
+                    dbgs() << "Current Inst: ";
+                    InstructionUtils::printInst(targetInstruction,dbgs());
+                    dbgs() << "currTaint->targetInstr: ";
+                    if (currTaint->targetInstr != nullptr) {
+                        InstructionUtils::printInst(dyn_cast<Instruction>(currTaint->targetInstr),dbgs());
+                    }else {
+                        dbgs() << "nullptr\n";
+                    }
+#endif
                 }
             }
             // if no taint info is propagated.
