@@ -336,6 +336,11 @@ namespace DRCHECKER {
 
         //hz: add taint tag support.
         TaintTag *tag;
+
+        //hz: "inherent" means this TaintFlag is not propagated to a value, instead, it's created together w/ the value, indicating
+        //that the value itself is a taint source (i.e. an OutsideObject).
+        bool is_inherent = false;
+
     private:
         // flag to indicate the taint flag.
         bool is_tainted;

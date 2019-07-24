@@ -684,6 +684,7 @@ namespace DRCHECKER {
                 //"0" represents that we are not referring to a certain field.
                 TaintTag *all_taint_tag = new TaintTag(0,v,is_global,(void*)this);
                 this->all_contents_taint_flag = new TaintFlag(targetTaintFlag,all_taint_tag);
+                this->all_contents_taint_flag->is_inherent = true;
                 std::set<long> allAvailableFields = getAllAvailableFields();
 
                 // add the taint to all available fields.
@@ -695,6 +696,7 @@ namespace DRCHECKER {
                     targetObjects.insert(std::make_pair(fieldId,this));
                     TaintTag *tag = new TaintTag(fieldId,v,is_global,(void*)this);
                     TaintFlag *newFlag = new TaintFlag(targetTaintFlag,tag);
+                    newFlag->is_inherent = true;
                     addFieldTaintFlag(fieldId, newFlag);
                 }
 

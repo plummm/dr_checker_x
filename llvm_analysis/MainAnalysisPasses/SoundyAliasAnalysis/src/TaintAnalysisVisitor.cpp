@@ -65,7 +65,7 @@ namespace DRCHECKER {
                 //stmt0 in the 1st function call may affect stmt1 in the 2nd invocation of the same function,
                 //although stmt0 cannot reach stmt1 in the CFG of this function, so we disable the below reachability check.
 #ifdef ENFORCE_TAINT_PATH
-                if(currTaint->targetInstr != nullptr) {
+                if(currTaint->targetInstr != nullptr && !currTaint->is_inherent) {
                     Instruction *srcInstruction = dyn_cast<Instruction>(currTaint->targetInstr);
                     if (srcInstruction != nullptr && targetInstruction != nullptr) {
                         add_taint = BBTraversalHelper::isReachable(srcInstruction, targetInstruction,
@@ -460,6 +460,7 @@ namespace DRCHECKER {
         assert(false);
     }
 
+    //hz: this function tries to init the taint from user arg for functions like copy_from_user().
     void TaintAnalysisVisitor::propogateTaintToArguments(std::set<long> &taintedArgs, CallInst &I) {
         assert(taintedArgs.size() > 0);
 #ifdef DEBUG_CALL_INSTR
