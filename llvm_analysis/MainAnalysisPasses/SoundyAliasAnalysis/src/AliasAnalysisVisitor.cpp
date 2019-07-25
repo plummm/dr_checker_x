@@ -1410,6 +1410,7 @@ Value* AliasAnalysisVisitor::visitGetElementPtrOperator(Instruction *I, GEPOpera
             std::set<PointerPointsTo *> *newPointsToInfo = new std::set<PointerPointsTo *>();
             newPointsToInfo->insert(dstPointsTo->begin(), dstPointsTo->end());
 
+            //hz: "newPointsToInfo: is where we need to store into.
             if (newPointsToInfo->size() <= 1) {
                 //Strong update.
                 if (newPointsToInfo->size() == 1) {

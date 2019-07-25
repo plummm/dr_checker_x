@@ -289,6 +289,10 @@ namespace DRCHECKER {
             // remove all objects, that could be pointed by srcfield id.
             for(auto a: this->pointsTo) {
                 if(a->fieldId == srcfieldId) {
+                    //hz: we also need to remove current object from the "pointsFrom" vector of the deleted point-to object...
+                    if (a->targetObject) {
+                        a->targetObject->pointsFrom.erase(std::remove(a->targetObject->pointsFrom.begin(), a->targetObject->pointsFrom.end(), this), a->targetObject->pointsFrom.end());
+                    }
                     delete(a);
                 } else {
                     tmpCopy.push_back(a);
@@ -393,23 +397,26 @@ namespace DRCHECKER {
             //
             bool hasObjects = false;
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-            dbgs() << "In AliasObject fetch pointsTo object\n";
+            dbgs() << "AliasObject::fetchPointsToObjects_default():\n";
 #endif
             for(ObjectPointsTo *obj:pointsTo) {
-                if(obj->fieldId == srcfieldId) {
+                if(obj->fieldId == srcfieldId && obj->targetObject) {
                     auto p = std::make_pair(obj->dstfieldId, obj->targetObject);
                     if(std::find(dstObjects.begin(), dstObjects.end(), p) == dstObjects.end()) {
+#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
+                        dbgs() << "Found an obj in |pointsTo| records:\n";
+                        dbgs() << "Type: " << InstructionUtils::getTypeStr(obj->targetObject->targetType) << " | " << obj->dstfieldId << " | is_taint_src:" << obj->targetObject->is_taint_src << "\n";
+                        dbgs() << "Val: " << InstructionUtils::getValueStr(obj->targetObject->getValue()) << " ID: " << (const void*)(obj->targetObject) << "\n";
+#endif
                         dstObjects.insert(dstObjects.end(), p);
                         hasObjects = true;
                     }
                 }
             }
             // if there are no objects that this field points to, generate a dummy object.
-            if(!hasObjects && (create_arg_obj || this->isFunctionArg() || this->isOutsideObject())) {
+            if (!hasObjects && (create_arg_obj || this->isFunctionArg() || this->isOutsideObject())) {
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-                dbgs() << "Creating a new dynamic AliasObject at:";
-                targetInstr->print(dbgs());
-                dbgs() << "\n";
+                dbgs() << "Creating a new dynamic AliasObject at: " << InstructionUtils::getValueStr(targetInstr) << "\n";
 #endif
                 AliasObject *newObj = this->makeCopy();
                 ObjectPointsTo *newPointsToObj = new ObjectPointsTo();
@@ -423,6 +430,7 @@ namespace DRCHECKER {
 
                 // get the taint for the field and add that taint to the newly created object
                 this->taintSubObj(newObj,srcfieldId,targetInstr);
+                //Below are original Dr.Checker's code, which is now modified and wrapped in the "taintSubObj" function.
                 /*
                 std::set<TaintFlag*> *fieldTaint = getFieldTaintInfo(srcfieldId);
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
@@ -864,6 +872,10 @@ namespace DRCHECKER {
                         newPointsTo->fieldId = srcfieldId;
                         newPointsTo->propogatingInstruction = propogatingInstr;
                         this->pointsTo.push_back(newPointsTo);
+                        //hz: don't forget the "pointsFrom", it is a double link list...
+                        if (newPointsTo->targetObject && std::find(newPointsTo->targetObject->pointsFrom.begin(),newPointsTo->targetObject->pointsFrom.end(),this) == newPointsTo->targetObject->pointsFrom.end()) {
+                            newPointsTo->targetObject->pointsFrom.push_back(this);
+                        }
                     }
                 }
             }

@@ -323,6 +323,7 @@ namespace DRCHECKER {
                 OS << "\n";
             }
             OS << "]\n";
+            OS << "is_inherent: " << this->is_inherent << "\n";
             //hz: dump tag information if any.
             if (this->tag) {
                 //TODO: is it enough to depend on the pointer value to filter out duplications?

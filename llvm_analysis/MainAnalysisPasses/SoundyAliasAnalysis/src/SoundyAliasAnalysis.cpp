@@ -625,22 +625,18 @@ namespace DRCHECKER {
                     continue;
                 }
 #ifdef DEBUG_GLOBAL_TAINT
-                dbgs() << "addGlobalTaintSource(): Set the glob var as taint source: ";
-                v->print(dbgs());
-                dbgs() << "\n";
+                dbgs() << "addGlobalTaintSource(): Set the glob var as taint source: " << InstructionUtils::getValueStr(v) << "\n";
 #endif
                 for(auto const &p : *ps){
+                    if (!p->targetObject) {
+                        continue;
+                    }
                     p->targetObject->taintAllFieldsWithTag(currFlag);
                     p->targetObject->is_taint_src = true;
 #ifdef DEBUG_GLOBAL_TAINT
                     dbgs() << "addGlobalTaintSource(): Set the alias obj as taint source:\n";
-                    dbgs() << "Object Type: ";
-                    p->targetObject->targetType->print(dbgs());
-                    dbgs() << "\n Object Ptr: ";
-                    if (p->targetObject->getObjectPtr()){
-                        p->targetObject->getObjectPtr()->print(dbgs());
-                    }
-                    dbgs() << "\n";
+                    dbgs() << "Object Type: " << InstructionUtils::getTypeStr(p->targetObject->targetType) << "\n";
+                    dbgs() << " Object Ptr: " << InstructionUtils::getValueStr(p->targetObject->getObjectPtr()) << "\n";
 #endif
                 }
             }

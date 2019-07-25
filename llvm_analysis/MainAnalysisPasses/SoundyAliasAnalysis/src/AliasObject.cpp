@@ -27,11 +27,11 @@ namespace DRCHECKER {
     void AliasObject::taintSubObj(AliasObject *newObj, long srcfieldId, Instruction *targetInstr) {
         std::set<TaintFlag*> *fieldTaint = getFieldTaintInfo(srcfieldId);
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-        dbgs() << "Trying to get taint for field:" << srcfieldId << " for object:" << this << "\n";
+        dbgs() << "AliasObject::taintSubObj(): Trying to get taint for field:" << srcfieldId << " for object:" << this << "\n";
 #endif
         if(fieldTaint != nullptr) {
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-            dbgs() << "Adding taint for field:" << srcfieldId << " for object:" << newObj << "\n";
+            dbgs() << "AliasObject::taintSubObj(): Adding taint for field:" << srcfieldId << " for object:" << newObj << "\n";
 #endif
             for(auto existingTaint:*fieldTaint) {
                 TaintFlag *newTaint = new TaintFlag(existingTaint,targetInstr,targetInstr);
@@ -45,7 +45,7 @@ namespace DRCHECKER {
             // if all the contents are tainted?
             if(this->all_contents_tainted) {
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-                dbgs() << "Trying to get field from an object whose contents are fully tainted\n";
+                dbgs() << "AliasObject::taintSubObj(): Trying to get field from an object whose contents are fully tainted\n";
 #endif
                 assert(this->all_contents_taint_flag != nullptr);
                 TaintFlag *newTaint = new TaintFlag(this->all_contents_taint_flag,targetInstr,targetInstr);
@@ -69,10 +69,12 @@ namespace DRCHECKER {
          */
         //assert(this->targetType);
         //assert(this->targetType->isStructTy());
+        /*
         if (!this->targetType || !this->targetType->isStructTy()) {
             //fallback method
             return this->fetchPointsToObjects_default(srcfieldId,dstObjects,targetInstr,create_arg_obj);
         }
+        */
         //What's the expected type of the fetched point-to object?
         Type *expFieldTy = nullptr;
         Type *expObjTy = nullptr;
@@ -125,16 +127,32 @@ namespace DRCHECKER {
             return;
         }
         //Below we try to create a dummy object.
-        if (srcfieldId >= this->targetType->getStructNumElements()) {
-            //This is a serious bug possibly due to "cast" IR.
-            dbgs() << "!!! fetchPointsToObjects() outside: srcfieldId out of bound!\n";
-            dbgs() << "Below is the info about current AliasObject...\n";
-            fetchPointsToObjects_log(srcfieldId, dstObjects, targetInstr, create_arg_obj);
+        Type *ety = nullptr;
+        if (!this->targetType) {
+            return;
+        }else if (this->targetType->isStructTy()) {
+            if (srcfieldId >= this->targetType->getStructNumElements()) {
+                //This is a serious bug possibly due to "cast" IR.
+                dbgs() << "!!! fetchPointsToObjects(): srcfieldId out of bound (struct)!\n";
+                dbgs() << "Below is the info about current AliasObject...\n";
+                fetchPointsToObjects_log(srcfieldId, dstObjects, targetInstr, create_arg_obj);
+                return;
+            }
+            ety = this->targetType->getStructElementType(srcfieldId);
+        }else if (dyn_cast<SequentialType>(this->targetType)) {
+            SequentialType *seqTy = dyn_cast<SequentialType>(this->targetType);
+            if (srcfieldId >= seqTy->getNumElements()) {
+                dbgs() << "!!! fetchPointsToObjects(): srcfieldId out of bound (array/vector)!\n";
+                dbgs() << "Below is the info about current AliasObject...\n";
+                fetchPointsToObjects_log(srcfieldId, dstObjects, targetInstr, create_arg_obj);
+                return;
+            }
+            ety = seqTy->getElementType();
+        }else {
             return;
         }
         //NOTE: "pointsTo" should only store point-to information for the pointer fields.
         //So if "hasObjects" is false, we need to first ensure that the field is a pointer before creating new objects.
-        Type *ety = this->targetType->getStructElementType(srcfieldId);
         if (!ety->isPointerTy()) {
             return;
         }
