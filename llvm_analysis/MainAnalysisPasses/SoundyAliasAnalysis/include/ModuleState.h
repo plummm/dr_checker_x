@@ -545,15 +545,28 @@ namespace DRCHECKER {
             return nullptr;
         };
 
-        std::set<std::string> *getHierarchyStr(AliasObject *obj, long field) {
+        std::set<std::string> *getHierarchyStr(AliasObject *obj, long field, int layer) {
             if (!obj) {
+#ifdef DEBUG_HIERARCHY
+                dbgs() << layer << " getHierarchyStr(): null obj.\n";
+#endif
                 return nullptr;
             }
+#ifdef DEBUG_HIERARCHY
+            dbgs() << layer << " getHierarchyStr(): " << InstructionUtils::getTypeStr(obj->targetType) << " | " << field << "\n";
+#endif
             std::set<std::string> *strs = new std::set<std::string>();
             std::string currStr = InstructionUtils::getTypeStr(obj->targetType) + ":" + std::to_string(field);
             if (obj->parent) {
                 //Current obj is embedded in another obj.
-                std::set<std::string> *rs = getHierarchyStr(obj->parent,obj->parent_field);
+                std::set<std::string> *rs = getHierarchyStr(obj->parent,obj->parent_field,layer+1);
+#ifdef DEBUG_HIERARCHY
+                dbgs() << layer << " getHierarchyStr(): embedded in another obj! #rs: ";
+                if (rs) {
+                    dbgs() << rs->size();
+                }
+                dbgs() << "\n";
+#endif
                 if (rs) {
                     for (auto& x : *rs) {
                         strs->insert(x + "." + currStr);
@@ -564,11 +577,21 @@ namespace DRCHECKER {
             if (!obj->pointsFrom.empty()) {
                 //Current obj may be pointed to by a field in another obj.
                 for (AliasObject *x : obj->pointsFrom) {
+#ifdef DEBUG_HIERARCHY
+                    dbgs() << layer << " getHierarchyStr(): find a host object that can point to this one...\n";
+#endif
                     for (ObjectPointsTo *y : x->pointsTo) {
-                        if (y->targetObject != obj) {
+                        if (y->targetObject != obj || (y->dstfieldId > 0 && y->dstfieldId != field)) {
                             continue;
                         }
-                        std::set<std::string> *rs = getHierarchyStr(x,y->fieldId);
+                        std::set<std::string> *rs = getHierarchyStr(x,y->fieldId,layer+1);
+#ifdef DEBUG_HIERARCHY
+                        dbgs() << layer << " getHierarchyStr(): host point-to, #rs: ";
+                        if (rs) {
+                            dbgs() << rs->size();
+                        }
+                        dbgs() << "\n";
+#endif
                         if (rs) {
                             for (auto& z : *rs) {
                                 strs->insert(z + "->" + currStr);
@@ -581,6 +604,9 @@ namespace DRCHECKER {
             if (strs->empty()) {
                 strs->insert(currStr);
             }
+#ifdef DEBUG_HIERARCHY
+            dbgs() << layer << " getHierarchyStr(): #strs: " << strs->size() << "\n";
+#endif
             return strs; 
         }
 
@@ -642,7 +668,7 @@ namespace DRCHECKER {
                         O << "------------------Taint------------------\n";
                         p->dumpInfo(O,&uniqTags);
                         if (p->tag && p->tag->priv) {
-                            std::set<std::string> *strs = getHierarchyStr((AliasObject*)p->tag->priv, p->tag->fieldId);
+                            std::set<std::string> *strs = getHierarchyStr((AliasObject*)p->tag->priv, p->tag->fieldId, 0);
                             if (strs && !strs->empty()) {
                                 O << "---TAG OBJ HIERARCHY---\n";
                                 for (auto& hs : *strs) {
@@ -832,7 +858,7 @@ namespace DRCHECKER {
                 tagInfoMap[tag_id]["v"] = InstructionUtils::getValueStr(tag->v);
                 tagInfoMap[tag_id]["vid"] = std::to_string((unsigned long)(tag->v));
                 if (tag->priv) {
-                    std::set<std::string> *hstrs = getHierarchyStr((AliasObject*)tag->priv, tag->fieldId);
+                    std::set<std::string> *hstrs = getHierarchyStr((AliasObject*)tag->priv, tag->fieldId, 0);
                     if (hstrs && !hstrs->empty()) {
                         int hc = 0;
                         for (auto& hs : *hstrs) {

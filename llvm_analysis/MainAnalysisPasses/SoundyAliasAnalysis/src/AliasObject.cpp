@@ -172,7 +172,7 @@ namespace DRCHECKER {
                 newPointsToObj->dstfieldId = 0;
 
                 // Record the pointsFrom info in the newly created obj.
-                newObj->pointsFrom.push_back(this);
+                this->addToPointsFrom(newObj);
 
                 pointsTo.push_back(newPointsToObj);
                 dstObjects.insert(dstObjects.end(), std::make_pair(0, newObj));
@@ -197,7 +197,7 @@ namespace DRCHECKER {
                 newPointsToObj->dstfieldId = 0;
                 newObj->auto_generated = true;
                 // Record the pointsFrom info in the newly created obj.
-                newObj->pointsFrom.push_back(this);
+                this->addToPointsFrom(newObj);
 
                 // get the taint for the field and add that taint to the newly created object
                 this->taintSubObj(newObj,srcfieldId,targetInstr);

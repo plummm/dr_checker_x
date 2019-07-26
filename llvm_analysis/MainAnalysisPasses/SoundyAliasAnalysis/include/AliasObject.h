@@ -275,6 +275,24 @@ namespace DRCHECKER {
             }
         }
 
+        //Erase this object from the "pointsFrom" of another object.
+        void eraseFromPointsFrom(AliasObject *obj) {
+            if (!obj) {
+                return;
+            }
+            obj->pointsFrom.erase(std::remove(obj->pointsFrom.begin(), obj->pointsFrom.end(), this), obj->pointsFrom.end());
+        }
+
+        //Add this object to the "pointsFrom" of another object.
+        void addToPointsFrom(AliasObject *obj) {
+            if (!obj) {
+                return;
+            }
+            if (std::find(obj->pointsFrom.begin(),obj->pointsFrom.end(),this) == obj->pointsFrom.end()) {
+                obj->pointsFrom.push_back(this);
+            }
+        }
+
         void performStrongUpdate(long srcfieldId, std::set<PointerPointsTo*>* dstPointsTo, Instruction *propogatingInstr) {
             /***
              * Make the field (srcfieldId) of this object point to
@@ -286,19 +304,35 @@ namespace DRCHECKER {
 
             std::vector<ObjectPointsTo*> tmpCopy;
             tmpCopy.clear();
+            std::vector<ObjectPointsTo*> delCopy;
+            delCopy.clear();
             // remove all objects, that could be pointed by srcfield id.
             for(auto a: this->pointsTo) {
                 if(a->fieldId == srcfieldId) {
-                    //hz: we also need to remove current object from the "pointsFrom" vector of the deleted point-to object...
-                    if (a->targetObject) {
-                        a->targetObject->pointsFrom.erase(std::remove(a->targetObject->pointsFrom.begin(), a->targetObject->pointsFrom.end(), this), a->targetObject->pointsFrom.end());
-                    }
-                    delete(a);
+                    delCopy.push_back(a);
                 } else {
                     tmpCopy.push_back(a);
                 }
             }
 
+            for (auto& x : delCopy) {
+                AliasObject *obj = x->targetObject;
+                if (obj) {
+                    //hz: we also need to remove current object from the "pointsFrom" vector of the deleted point-to object...
+                    //Can other fields in this object point to "obj"? If not, we need to remove current object from obj->pointsFrom...
+                    bool is_pt = false;
+                    for (auto& y : tmpCopy) {
+                        if (y->targetObject == obj) {
+                            is_pt = true;
+                            break;
+                        }
+                    }
+                    if (!is_pt) {
+                        this->eraseFromPointsFrom(obj);
+                    }
+                }
+                delete(x);
+            }
 
             this->pointsTo.clear();
             this->pointsTo.insert(this->pointsTo.end(), tmpCopy.begin(), tmpCopy.end());
@@ -357,6 +391,8 @@ namespace DRCHECKER {
                         ObjectPointsTo *newPointsTo = currPointsTo->makeCopy();
                         newPointsTo->propogatingInstruction = propagatingInstr;
                         this->pointsTo.push_back(newPointsTo);
+                        //hz: update the "pointsFrom" of the pointee object.
+                        this->addToPointsFrom(newPointsTo->targetObject);
                     }
                 }
             }
@@ -382,6 +418,8 @@ namespace DRCHECKER {
                     newPointsTo->dstfieldId = 0;
                     newPointsTo->targetObject = dstObject;
                     this->pointsTo.push_back(newPointsTo);
+                    //hz: update the "PointsFrom"...
+                    this->addToPointsFrom(dstObject);
                 }
             }
         }
@@ -873,9 +911,7 @@ namespace DRCHECKER {
                         newPointsTo->propogatingInstruction = propogatingInstr;
                         this->pointsTo.push_back(newPointsTo);
                         //hz: don't forget the "pointsFrom", it is a double link list...
-                        if (newPointsTo->targetObject && std::find(newPointsTo->targetObject->pointsFrom.begin(),newPointsTo->targetObject->pointsFrom.end(),this) == newPointsTo->targetObject->pointsFrom.end()) {
-                            newPointsTo->targetObject->pointsFrom.push_back(this);
-                        }
+                        this->addToPointsFrom(newPointsTo->targetObject);
                     }
                 }
             }
