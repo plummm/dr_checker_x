@@ -545,21 +545,48 @@ namespace DRCHECKER {
             return nullptr;
         };
 
-        std::set<std::string> *getHierarchyStr(AliasObject *obj, long field, int layer) {
+        bool in_hierarchy_history(AliasObject *obj, long field, std::vector<std::pair<long, AliasObject*>>& history, bool to_add) {
+            //
+            auto to_check = std::make_pair(field, obj);
+            if (std::find(history.begin(),history.end(),to_check) != history.end()) {
+                return true;
+            }
+            if (to_add) {
+                history.push_back(to_check);
+            }
+            return false;
+        }
+
+        std::set<std::string> *getHierarchyStr(AliasObject *obj, long field, int layer, std::vector<std::pair<long, AliasObject*>>& history) {
+#ifdef DEBUG_HIERARCHY
+            dbgs() << layer << " getHierarchyStr(): " << (obj ? InstructionUtils::getTypeStr(obj->targetType) : "") << " | " << field << " ID: " << (const void*)obj << "\n";
+#endif
             if (!obj) {
 #ifdef DEBUG_HIERARCHY
                 dbgs() << layer << " getHierarchyStr(): null obj.\n";
 #endif
                 return nullptr;
             }
+            if (obj->isFunctionLocal()) {
+                //We're not interested in function local variables as they are not persistent.
 #ifdef DEBUG_HIERARCHY
-            dbgs() << layer << " getHierarchyStr(): " << InstructionUtils::getTypeStr(obj->targetType) << " | " << field << "\n";
+                dbgs() << layer << " getHierarchyStr(): function local objs.\n";
 #endif
+                return nullptr;
+            }
             std::set<std::string> *strs = new std::set<std::string>();
             std::string currStr = InstructionUtils::getTypeStr(obj->targetType) + ":" + std::to_string(field);
+            if (this->in_hierarchy_history(obj,field,history,true)) {
+                //Exists in the history obj chain, should be a loop..
+#ifdef DEBUG_HIERARCHY
+                dbgs() << layer << " getHierarchyStr(): Exists in the obj chain..\n";
+#endif
+                strs->insert("<->" + currStr);
+                return strs;
+            }
             if (obj->parent) {
                 //Current obj is embedded in another obj.
-                std::set<std::string> *rs = getHierarchyStr(obj->parent,obj->parent_field,layer+1);
+                std::set<std::string> *rs = getHierarchyStr(obj->parent,obj->parent_field,layer+1,history);
 #ifdef DEBUG_HIERARCHY
                 dbgs() << layer << " getHierarchyStr(): embedded in another obj! #rs: ";
                 if (rs) {
@@ -576,7 +603,14 @@ namespace DRCHECKER {
             }
             if (!obj->pointsFrom.empty()) {
                 //Current obj may be pointed to by a field in another obj.
+                std::set<AliasObject*> visitedObjs;
+                visitedObjs.clear();
                 for (AliasObject *x : obj->pointsFrom) {
+                    if (visitedObjs.find(x) != visitedObjs.end()) {
+                        //has visited before.
+                        continue;
+                    }
+                    visitedObjs.insert(x);
 #ifdef DEBUG_HIERARCHY
                     dbgs() << layer << " getHierarchyStr(): find a host object that can point to this one...\n";
 #endif
@@ -584,7 +618,7 @@ namespace DRCHECKER {
                         if (y->targetObject != obj || (y->dstfieldId > 0 && y->dstfieldId != field)) {
                             continue;
                         }
-                        std::set<std::string> *rs = getHierarchyStr(x,y->fieldId,layer+1);
+                        std::set<std::string> *rs = getHierarchyStr(x,y->fieldId,layer+1,history);
 #ifdef DEBUG_HIERARCHY
                         dbgs() << layer << " getHierarchyStr(): host point-to, #rs: ";
                         if (rs) {
@@ -607,6 +641,7 @@ namespace DRCHECKER {
 #ifdef DEBUG_HIERARCHY
             dbgs() << layer << " getHierarchyStr(): #strs: " << strs->size() << "\n";
 #endif
+            history.pop_back();
             return strs; 
         }
 
@@ -668,7 +703,9 @@ namespace DRCHECKER {
                         O << "------------------Taint------------------\n";
                         p->dumpInfo(O,&uniqTags);
                         if (p->tag && p->tag->priv) {
-                            std::set<std::string> *strs = getHierarchyStr((AliasObject*)p->tag->priv, p->tag->fieldId, 0);
+                            std::vector<std::pair<long, AliasObject*>> history;
+                            history.clear();
+                            std::set<std::string> *strs = getHierarchyStr((AliasObject*)p->tag->priv, p->tag->fieldId, 0, history);
                             if (strs && !strs->empty()) {
                                 O << "---TAG OBJ HIERARCHY---\n";
                                 for (auto& hs : *strs) {
@@ -858,7 +895,9 @@ namespace DRCHECKER {
                 tagInfoMap[tag_id]["v"] = InstructionUtils::getValueStr(tag->v);
                 tagInfoMap[tag_id]["vid"] = std::to_string((unsigned long)(tag->v));
                 if (tag->priv) {
-                    std::set<std::string> *hstrs = getHierarchyStr((AliasObject*)tag->priv, tag->fieldId, 0);
+                    std::vector<std::pair<long, AliasObject*>> history;
+                    history.clear();
+                    std::set<std::string> *hstrs = getHierarchyStr((AliasObject*)tag->priv, tag->fieldId, 0, history);
                     if (hstrs && !hstrs->empty()) {
                         int hc = 0;
                         for (auto& hs : *hstrs) {
