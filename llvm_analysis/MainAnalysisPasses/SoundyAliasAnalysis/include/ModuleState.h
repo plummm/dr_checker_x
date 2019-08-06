@@ -31,7 +31,7 @@ using json = nlohmann::json;
 
 #define DEBUG_TAINT_DUMP_PROGRESS
 #define DEBUG_TAINT_SERIALIZE_PROGRESS
-//#define DEBUG_HIERARCHY
+#define DEBUG_HIERARCHY
 
 using namespace llvm;
 
