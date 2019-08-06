@@ -9,7 +9,7 @@ using namespace llvm;
 namespace DRCHECKER {
 
     //#define DEBUG_CALL_INST
-    #define DEBUG_VISIT_SWITCH_INST
+    //#define DEBUG_VISIT_SWITCH_INST
     #define RESOLVE_IMPLICIT_CMD
     #define DEBUG_RESOLVE_IMPLICIT_CMD
     //TODO: we cannot guarantee this magic number will not appear as a valid case number...

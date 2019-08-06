@@ -479,6 +479,20 @@ namespace DRCHECKER {
 
         }
 
+		//Copied from online source...
+        std::vector<std::string> split(const std::string& str, const std::string& delim) {
+    		std::vector<std::string> tokens;
+    		size_t prev = 0, pos = 0;
+    		do{
+        		pos = str.find(delim, prev);
+        		if (pos == std::string::npos) pos = str.length();
+        		std::string token = str.substr(prev, pos-prev);
+        		if (!token.empty()) tokens.push_back(token);
+        		prev = pos + delim.length();
+    		}while (pos < str.length() && prev < str.length());
+    		return tokens;
+		}
+
         void setupFunctionArgs(Function *targetFunction, GlobalState &targetState, std::vector<Instruction *> *callSites) {
             /***
              * Set up the function args for the main entry function(s).
@@ -502,9 +516,20 @@ namespace DRCHECKER {
             //hz: We want to set all global variables as taint source,
             //for ioctl() in driver code, the FILE pointer should also
             //be regarded as a global variable.
-            if(functionType == MY_IOCTL) {
-                // last argument is the user pointer.
-                taintedArgs.insert(targetFunction->arg_size() - 1);
+            if(functionType.find(MY_IOCTL) == 0) {
+                //Extract the user arg indices if any.
+                std::vector<std::string> tks = split(functionType,"_");
+                if (tks.size() > 2) {
+                    for (int i = 2; i < tks.size(); ++i) {
+                        //NOTE: Here may occur exception if the invalid arg is passed-in.
+                        int idx = std::stoi(tks[i]);
+                        dbgs() << "Set " << idx << "th arg of " << targetFunction->getName().str() << " as user arg (taint source)...\n";
+                        taintedArgs.insert(idx);
+                    }
+                }else {
+                    //by default the last argument is the user pointer.
+                    taintedArgs.insert(targetFunction->arg_size() - 1);
+                }
                 is_handled = true;
             }
             if(functionType == READ_HDR || functionType == WRITE_HDR) {
