@@ -17,7 +17,11 @@ namespace DRCHECKER {
 
     bool SwitchAnalysisVisitor::is_cmd_switch(SwitchInst &I) {
         Value *cond_var = I.getCondition();
-        if ((!cond_var) || cond_var->getName().empty() || cond_var->getName().str() != "cmd") {
+        if ((!cond_var) || cond_var->getName().empty()) {
+            return false;
+        }
+        std::string cond_name = cond_var->getName().str();
+        if (cond_name != "cmd" && cond_name != "cmd_in") {
             return false;
         }
         return true;
@@ -157,7 +161,9 @@ namespace DRCHECKER {
             //We have already visited this bb (i.e. loop) or it's currently being processed.
             return;
         }
+#ifdef DEBUG_VISIT_SWITCH_INST
         dbgs() << "get_case_successors,BB: " << InstructionUtils::getBBStrID(bb) << "/" << InstructionUtils::getBBStrID_No(bb) << " cn: " << cn << "\n";
+#endif
         //inclusive
         res->insert(bb);
         //Does current BB end with a switch-case inst?
