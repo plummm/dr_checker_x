@@ -392,7 +392,8 @@ namespace DRCHECKER {
                         newPointsTo->propogatingInstruction = propagatingInstr;
                         this->pointsTo.push_back(newPointsTo);
                         //hz: update the "pointsFrom" of the pointee object.
-                        this->addToPointsFrom(newPointsTo->targetObject);
+                        //TODO: it seems that enabling the below line will cause many strange point-to relationship...
+                        //this->addToPointsFrom(newPointsTo->targetObject);
                     }
                 }
             }
@@ -419,7 +420,8 @@ namespace DRCHECKER {
                     newPointsTo->targetObject = dstObject;
                     this->pointsTo.push_back(newPointsTo);
                     //hz: update the "PointsFrom"...
-                    this->addToPointsFrom(dstObject);
+                    //TODO
+                    //this->addToPointsFrom(dstObject);
                 }
             }
         }
@@ -911,7 +913,8 @@ namespace DRCHECKER {
                         newPointsTo->propogatingInstruction = propogatingInstr;
                         this->pointsTo.push_back(newPointsTo);
                         //hz: don't forget the "pointsFrom", it is a double link list...
-                        this->addToPointsFrom(newPointsTo->targetObject);
+                        //TODO
+                        //this->addToPointsFrom(newPointsTo->targetObject);
                     }
                 }
             }
@@ -1144,49 +1147,6 @@ namespace DRCHECKER {
         Value* getObjectPtr() {
             return this->targetArgument;
         }
-
-        /*void fetchPointsToObjects(long srcfieldId, std::set<AliasObject *> &dstObjects, Instruction *targetInstr = nullptr, bool create_arg_obj=false) {
-            /***
-             * Get all objects pointed by field identified by srcfieldID
-             *
-             * If this is a function argument, we should be able to generate the object on demand.
-             *
-             * i.e if a field does not point to any object.
-             * Automatically generate an object and link it with srcFieldId
-
-            bool hasObjects = false;
-#ifdef DEBUG_FUNCTION_ARG_OBJ_CREATION
-            dbgs() << "In Function ARG fetch pointsTo object\n";
-#endif
-            for(ObjectPointsTo *obj:pointsTo) {
-                if(obj->fieldId == srcfieldId) {
-                    if(std::find(dstObjects.begin(), dstObjects.end(), obj->targetObject) == dstObjects.end()) {
-                        dstObjects.insert(dstObjects.end(), obj->targetObject);
-                        hasObjects = true;
-                    }
-                }
-            }
-            // if there are no objects that this field points to, generate a dummy object.
-            if(!hasObjects && create_arg_obj) {
-#ifdef DEBUG_FUNCTION_ARG_OBJ_CREATION
-                dbgs() << "Creating a new dynamic function arg object at:";
-                targetInstr->print(dbgs());
-                dbgs() << "\n";
-#endif
-                AliasObject *newObj = this->makeCopy();
-                ObjectPointsTo *newPointsToObj = new ObjectPointsTo();
-                newPointsToObj->propogatingInstruction = targetInstr;
-                newPointsToObj->targetObject = newObj;
-                newPointsToObj->fieldId = srcfieldId;
-                newPointsToObj->dstfieldId = 0;
-                newObj->auto_generated = true;
-
-                //insert the newly create object.
-                pointsTo.push_back(newPointsToObj);
-
-                dstObjects.insert(dstObjects.end(), newObj);
-            }
-        }*/
 
         bool isFunctionArg() {
             return true;

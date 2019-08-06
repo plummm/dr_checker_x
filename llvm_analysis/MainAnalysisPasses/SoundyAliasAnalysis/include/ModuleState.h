@@ -584,8 +584,11 @@ namespace DRCHECKER {
                 strs->insert("<->" + currStr);
                 return strs;
             }
-            if (obj->parent) {
+            if (obj->parent && obj->parent->embObjs.find(obj->parent_field) != obj->parent->embObjs.end() && obj->parent->embObjs[obj->parent_field] == obj) {
                 //Current obj is embedded in another obj.
+#ifdef DEBUG_HIERARCHY
+                dbgs() << layer << " getHierarchyStr(): find a host obj that embeds this one..";
+#endif
                 std::set<std::string> *rs = getHierarchyStr(obj->parent,obj->parent_field,layer+1,history);
 #ifdef DEBUG_HIERARCHY
                 dbgs() << layer << " getHierarchyStr(): embedded in another obj! #rs: ";
