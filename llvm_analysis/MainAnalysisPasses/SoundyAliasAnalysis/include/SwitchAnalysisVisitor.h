@@ -59,6 +59,8 @@ namespace DRCHECKER {
 
         virtual void visitSwitchInst(SwitchInst &I);
 
+        virtual void visitBranchInst(BranchInst &I);
+
         virtual void visit(BasicBlock *BB);
 
         virtual VisitorCallback* visitCallInst(CallInst &I, Function *targetFunction,
@@ -66,6 +68,8 @@ namespace DRCHECKER {
                                                std::vector<Instruction *> *currFuncCallSites);
 
         std::set<BasicBlock*>* get_all_successors(BasicBlock*);
+
+        void _get_all_successors(BasicBlock *bb, std::set<BasicBlock*> &res);
 
         std::set<BasicBlock*>* get_shared_switch_bbs(SwitchInst *I);
 

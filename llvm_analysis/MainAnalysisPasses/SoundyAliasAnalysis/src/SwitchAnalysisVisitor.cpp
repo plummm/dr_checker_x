@@ -113,21 +113,37 @@ namespace DRCHECKER {
         return &this->shared_bb_map[I];
     }
 
-    //TODO: this function will produce wrong results in the presence of loop now.
-    std::set<BasicBlock*>* SwitchAnalysisVisitor::get_all_successors(BasicBlock *bb) {
-        if(this->succ_map.find(bb) != this->succ_map.end()){
-            return &this->succ_map[bb];
+    //NOTE: this will be inclusive (the successor list also contains the root BB.)
+    void SwitchAnalysisVisitor::_get_all_successors(BasicBlock *bb, std::set<BasicBlock*> &res) {
+        if (!bb || res.find(bb) != res.end()) {
+            return;
+        }
+        //A result cache.
+        if (this->succ_map.find(bb) != this->succ_map.end()) {
+            res.insert(this->succ_map[bb].begin(),this->succ_map[bb].end());
+            return;
         }
         //inclusive
-        this->succ_map[bb].insert(bb);
-        for(succ_iterator sit = succ_begin(bb), set = succ_end(bb); sit != set; ++sit) {
-            BasicBlock *curr_bb = *sit;
-            this->succ_map[bb].insert(curr_bb);
-            if(this->succ_map.find(curr_bb) == this->succ_map.end()){
-                this->get_all_successors(curr_bb);
-            }
-            this->succ_map[bb].insert(this->succ_map[curr_bb].begin(),this->succ_map[curr_bb].end());
+        res.insert(bb);
+        for (llvm::succ_iterator sit = llvm::succ_begin(bb), set = llvm::succ_end(bb); sit != set; ++sit) {
+            this->_get_all_successors(*sit,res);
         }
+        return;
+    }
+
+    //NOTE: this will be inclusive (the successor list also contains the root BB.)
+    std::set<BasicBlock*> *SwitchAnalysisVisitor::get_all_successors(BasicBlock *bb) {
+        if (!bb) {
+            return nullptr;
+        }
+        //A result cache.
+        if (this->succ_map.find(bb) != this->succ_map.end()) {
+            return &this->succ_map[bb];
+        }
+        std::set<BasicBlock*> res;
+        res.clear();
+        this->_get_all_successors(bb,res);
+        this->succ_map[bb] = res;
         return &this->succ_map[bb];
     }
 
@@ -274,6 +290,11 @@ namespace DRCHECKER {
         SwitchAnalysisVisitor *vis = new SwitchAnalysisVisitor(currState, currFunc, callSiteContext);
 
         return vis;
+    }
+
+    //Count the #BB of each branch of the branch inst.
+    void SwitchAnalysisVisitor::visitBranchInst(BranchInst &I) {
+        //
     }
 
 }// namespace DRCHECKER
