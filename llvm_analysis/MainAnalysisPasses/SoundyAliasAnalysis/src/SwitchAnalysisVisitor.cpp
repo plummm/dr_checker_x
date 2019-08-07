@@ -21,7 +21,7 @@ namespace DRCHECKER {
             return false;
         }
         std::string cond_name = cond_var->getName().str();
-        if (cond_name != "cmd" && cond_name != "cmd_in") {
+        if (cond_name != "cmd" && cond_name != "cmd_in" && cond_name != "ioctl") {
             return false;
         }
         return true;
