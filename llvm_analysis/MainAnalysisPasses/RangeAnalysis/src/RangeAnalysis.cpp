@@ -1099,6 +1099,20 @@ Range Range::Or_conservative(const Range &other) const {
   return Range(umax, APInt::getNullValue(MAX_BIT_INT));
 }
 
+//There is a chance that getSExtValue() can throw an assertation error due to the large bitWidth, we need
+//to properly handle it, otherwise the RangeAnalysis may crash the whole analysis process.
+int64_t GetSExtValue(const APInt &n) {
+    if (n.getBitWidth() <= 64 || n.getMinSignedBits() <= 64) {
+        return n.getSExtValue();
+    }
+    //It should be rare to have an integer in the driver that has more than 64 bits but it's possible,
+    //in this case, since getSExtValue() can only handle 64 bits value, we will return min/max instead.
+    if (n.isNonNegative()) {
+        return INT64_MAX;
+    }
+    return INT64_MIN;
+}
+
 /*
  * 	This or operation is coded following Hacker's Delight algorithm.
  * 	According to the author, it provides tight results.
@@ -1129,20 +1143,17 @@ Range Range::Or(const Range &other) const {
 
   switch (switchval) {
   case 0:
-    l = minOR(a.getSExtValue(), b.getSExtValue(), c.getSExtValue(),
-              d.getSExtValue());
-    u = maxOR(a.getSExtValue(), b.getSExtValue(), c.getSExtValue(),
-              d.getSExtValue());
+  case 3:
+  case 12:
+  case 15:
+    l = minOR(GetSExtValue(a), GetSExtValue(b), GetSExtValue(c),
+              GetSExtValue(d));
+    u = maxOR(GetSExtValue(a), GetSExtValue(b), GetSExtValue(c),
+              GetSExtValue(d));
     break;
   case 1:
     l = a;
     u = -1;
-    break;
-  case 3:
-    l = minOR(a.getSExtValue(), b.getSExtValue(), c.getSExtValue(),
-              d.getSExtValue());
-    u = maxOR(a.getSExtValue(), b.getSExtValue(), c.getSExtValue(),
-              d.getSExtValue());
     break;
   case 4:
     l = c;
@@ -1150,27 +1161,15 @@ Range Range::Or(const Range &other) const {
     break;
   case 5:
     l = (a.slt(c) ? a : c);
-    u = maxOR(0, b.getSExtValue(), 0, d.getSExtValue());
+    u = maxOR(0, GetSExtValue(b), 0, GetSExtValue(d));
     break;
   case 7:
-    l = minOR(a.getSExtValue(), 0xFFFFFFFF, c.getSExtValue(), d.getSExtValue());
-    u = minOR(0, b.getSExtValue(), c.getSExtValue(), d.getSExtValue());
-    break;
-  case 12:
-    l = minOR(a.getSExtValue(), b.getSExtValue(), c.getSExtValue(),
-              d.getSExtValue());
-    u = maxOR(a.getSExtValue(), b.getSExtValue(), c.getSExtValue(),
-              d.getSExtValue());
+    l = minOR(GetSExtValue(a), 0xFFFFFFFF, GetSExtValue(c), GetSExtValue(d));
+    u = minOR(0, GetSExtValue(b), GetSExtValue(c), GetSExtValue(d));
     break;
   case 13:
-    l = minOR(a.getSExtValue(), b.getSExtValue(), c.getSExtValue(), 0xFFFFFFFF);
-    u = maxOR(a.getSExtValue(), b.getSExtValue(), 0, d.getSExtValue());
-    break;
-  case 15:
-    l = minOR(a.getSExtValue(), b.getSExtValue(), c.getSExtValue(),
-              d.getSExtValue());
-    u = maxOR(a.getSExtValue(), b.getSExtValue(), c.getSExtValue(),
-              d.getSExtValue());
+    l = minOR(GetSExtValue(a), GetSExtValue(b), GetSExtValue(c), 0xFFFFFFFF);
+    u = maxOR(GetSExtValue(a), GetSExtValue(b), 0, GetSExtValue(d));
     break;
   }
 
