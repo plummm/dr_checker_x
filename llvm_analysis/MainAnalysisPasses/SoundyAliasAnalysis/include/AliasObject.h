@@ -26,8 +26,10 @@ using namespace llvm;
 #define ENABLE_SUB_OBJ_CACHE
 #define SMART_FUNC_PTR_RESOLVE
 //#define DEBUG_SMART_FUNCTION_PTR_RESOLVE
-//#define DEBUG_FETCH_POINTS_TO_OBJECTS
-//#define DEBUG_CHANGE_HEAPLOCATIONTYPE
+#define DEBUG_FETCH_POINTS_TO_OBJECTS
+#define DEBUG_CHANGE_HEAPLOCATIONTYPE
+#define DEBUG_UPDATE_FIELD_POINT
+//#define DEBUG_UPDATE_FIELD_TAINT
 
 namespace DRCHECKER {
 //#define DEBUG_FUNCTION_ARG_OBJ_CREATION
@@ -90,6 +92,8 @@ namespace DRCHECKER {
             os << "Field :" << obj.fieldId << " points to " << obj.dstfieldId <<" of the object, with ID:" << obj.targetObject;
             return os;
         }
+
+        void print(llvm::raw_ostream& OS);
     };
 
 
@@ -301,7 +305,9 @@ namespace DRCHECKER {
              * This function does strong update, i.e first it removes all points to information
              * for the field srcfieldId and then adds the new objects into points to set.
              */
-
+#ifdef DEBUG_UPDATE_FIELD_POINT
+            dbgs() << "Perform strong update...\n";
+#endif
             std::vector<ObjectPointsTo*> tmpCopy;
             tmpCopy.clear();
             std::vector<ObjectPointsTo*> delCopy;
@@ -345,6 +351,9 @@ namespace DRCHECKER {
              * Similar to strong update but does weak update.
              * i.e it does not remove existing points to information of the field srcFieldId
              */
+#ifdef DEBUG_UPDATE_FIELD_POINT
+            dbgs() << "Perform weak update...\n";
+#endif
             this->updateFieldPointsTo(srcfieldId, dstPointsTo, propogatingInstr);
 
         }
@@ -377,6 +386,10 @@ namespace DRCHECKER {
             /***
             * Add all objects in the provided pointsTo set to be pointed by the provided srcFieldID
             */
+#ifdef DEBUG_UPDATE_FIELD_POINT
+            dbgs() << "updateFieldPointsToFromObjects() for: " << InstructionUtils::getTypeStr(this->targetType);
+            dbgs() << " Host Obj ID: " << (const void*)this << "\n";
+#endif
             if(dstPointsToObject != nullptr) {
                 std::set<AliasObject *> currObjects;
                 //Add all objects that are in the provided set.
@@ -390,6 +403,10 @@ namespace DRCHECKER {
                     if (currObjects.find(currPointsTo->targetObject) == currObjects.end()) {
                         ObjectPointsTo *newPointsTo = currPointsTo->makeCopy();
                         newPointsTo->propogatingInstruction = propagatingInstr;
+#ifdef DEBUG_UPDATE_FIELD_POINT
+                        dbgs() << "updateFieldPointsToFromObjects(), add point-to:\n";
+                        newPointsTo->print(dbgs());
+#endif
                         this->pointsTo.push_back(newPointsTo);
                         //hz: update the "pointsFrom" of the pointee object.
                         //TODO: it seems that enabling the below line will cause many strange point-to relationship...
@@ -403,6 +420,10 @@ namespace DRCHECKER {
             /***
             * Add provided object into pointsTo set of the provided fieldId
             */
+#ifdef DEBUG_UPDATE_FIELD_POINT
+            dbgs() << "addObjectToFieldPointsTo() for: " << InstructionUtils::getTypeStr(this->targetType) << " | " << fieldId;
+            dbgs() << " Host Obj ID: " << (const void*)this << "\n";
+#endif
             if(dstObject != nullptr) {
                 std::set<AliasObject *> currObjects;
                 long srcfieldId = fieldId;
@@ -418,6 +439,10 @@ namespace DRCHECKER {
                     newPointsTo->fieldId = srcfieldId;
                     newPointsTo->dstfieldId = 0;
                     newPointsTo->targetObject = dstObject;
+#ifdef DEBUG_UPDATE_FIELD_POINT
+                    dbgs() << "addObjectToFieldPointsTo(), add point-to:\n";
+                    newPointsTo->print(dbgs());
+#endif
                     this->pointsTo.push_back(newPointsTo);
                     //hz: update the "PointsFrom"...
                     //TODO
@@ -691,7 +716,7 @@ namespace DRCHECKER {
 
                 // add the taint to all available fields.
                 for (auto fieldId:allAvailableFields) {
-#ifdef DEBUG
+#ifdef DEBUG_UPDATE_FIELD_TAINT
                     dbgs() << "Adding taint to field:" << fieldId << "\n";
 #endif
                     addFieldTaintFlag(fieldId, targetTaintFlag);
@@ -737,7 +762,7 @@ namespace DRCHECKER {
 
                 // add the taint to all available fields.
                 for (auto fieldId:allAvailableFields) {
-#ifdef DEBUG
+#ifdef DEBUG_UPDATE_FIELD_TAINT
                     dbgs() << "Adding taint to field:" << fieldId << "\n";
 #endif
                     targetObjects.clear();
@@ -900,6 +925,10 @@ namespace DRCHECKER {
             /***
              * Add all objects in the provided pointsTo set to be pointed by the provided srcFieldID
              */
+#ifdef DEBUG_UPDATE_FIELD_POINT
+            dbgs() << "updateFieldPointsTo() for: " << InstructionUtils::getTypeStr(this->targetType) << " | " << srcfieldId;
+            dbgs() << " Host Obj ID: " << (const void*)this << "\n";
+#endif
             if(dstPointsTo != nullptr) {
                 std::set<AliasObject*> currObjects;
                 // first get all objects that could be pointed by srcfieldId of the current object.
@@ -911,6 +940,10 @@ namespace DRCHECKER {
                         ObjectPointsTo *newPointsTo = currPointsTo->makeCopy();
                         newPointsTo->fieldId = srcfieldId;
                         newPointsTo->propogatingInstruction = propogatingInstr;
+#ifdef DEBUG_UPDATE_FIELD_POINT
+                        dbgs() << "updateFieldPointsTo(), add point-to: ";
+                        newPointsTo->print(dbgs());
+#endif
                         this->pointsTo.push_back(newPointsTo);
                         //hz: don't forget the "pointsFrom", it is a double link list...
                         //TODO

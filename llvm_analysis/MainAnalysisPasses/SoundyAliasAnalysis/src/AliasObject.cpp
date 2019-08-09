@@ -27,11 +27,11 @@ namespace DRCHECKER {
     void AliasObject::taintSubObj(AliasObject *newObj, long srcfieldId, Instruction *targetInstr) {
         std::set<TaintFlag*> *fieldTaint = getFieldTaintInfo(srcfieldId);
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-        dbgs() << "AliasObject::taintSubObj(): Trying to get taint for field:" << srcfieldId << " for object:" << this << "\n";
+        dbgs() << "AliasObject::taintSubObj(): Trying to get taint for field:" << srcfieldId << " for object: " << (const void*)this << "\n";
 #endif
         if(fieldTaint != nullptr) {
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-            dbgs() << "AliasObject::taintSubObj(): Adding taint for field:" << srcfieldId << " for object:" << newObj << "\n";
+            dbgs() << "AliasObject::taintSubObj(): Adding taint for field:" << srcfieldId << " for object: " << (const void*)newObj << "\n";
 #endif
             for(auto existingTaint:*fieldTaint) {
                 TaintFlag *newTaint = new TaintFlag(existingTaint,targetInstr,targetInstr);
@@ -238,6 +238,13 @@ namespace DRCHECKER {
         }
         //TODO: what if the targetObj is an array?
         return objTy;
+    }
+
+    void ObjectPointsTo::print(llvm::raw_ostream& OS) {
+        if (this->targetObject) {
+            OS << InstructionUtils::getTypeStr(this->targetObject->targetType) << " | " << this->fieldId << " -> " << this->dstfieldId;
+            OS << " Tgt Obj ID: " << (const void*)(this->targetObject) << "\n";
+        }
     }
 
 }

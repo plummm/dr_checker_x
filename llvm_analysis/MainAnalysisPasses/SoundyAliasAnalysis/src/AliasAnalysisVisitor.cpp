@@ -5,13 +5,13 @@
 
 namespace DRCHECKER {
 
-//#define DEBUG_GET_ELEMENT_PTR
+#define DEBUG_GET_ELEMENT_PTR
 //#define DEBUG_ALLOCA_INSTR
 //#define DEBUG_CAST_INSTR
 //#define DEBUG_BINARY_INSTR
 //#define DEBUG_PHI_INSTR
 //#define DEBUG_LOAD_INSTR
-//#define DEBUG_STORE_INSTR
+#define DEBUG_STORE_INSTR
 //#define DEBUG_CALL_INSTR
 //#define STRICT_CAST
 //#define DEBUG_RET_INSTR
@@ -19,8 +19,8 @@ namespace DRCHECKER {
 //#define MAX_ALIAS_OBJ 50
 //hz: Enable creating new outside objects on the fly when the pointer points to nothing.
 #define CREATE_DUMMY_OBJ_IF_NULL
-//#define DEBUG_CREATE_DUMMY_OBJ_IF_NULL
-//#define DEBUG_UPDATE_POINTSTO
+#define DEBUG_CREATE_DUMMY_OBJ_IF_NULL
+#define DEBUG_UPDATE_POINTSTO
 //#define DEBUG_TMP
 
     //hz: A helper method to create and (taint) a new OutsideObject.
@@ -196,6 +196,7 @@ namespace DRCHECKER {
 #ifdef DEBUG_UPDATE_POINTSTO
                     dbgs() << "Insert point-to: " << InstructionUtils::getTypeStr(currPointsTo->targetObject->targetType);
                     dbgs() << " | " << currPointsTo->dstfieldId << " ,is_taint_src: " << currPointsTo->targetObject->is_taint_src << "\n";
+                    dbgs() << "Obj ID: " << (const void*)(currPointsTo->targetObject) << "\n"; 
                     Value *tv = currPointsTo->targetObject->getValue();
                     if (tv){
                         dbgs() << "Inst/Val: " << InstructionUtils::getValueStr(tv) << "\n";
@@ -550,20 +551,20 @@ namespace DRCHECKER {
                     }
                 }
                 //----------MOD----------
-#ifdef DEBUG_GET_ELEMENT_PTR
-                dbgs() << "Assign points-to object: ";
-                if(newPointsToObj->targetObject){
-                    dbgs() << InstructionUtils::getTypeStr(newPointsToObj->targetObject->targetType);
-                }
-                dbgs() << " | dstField: " << newPointsToObj->dstfieldId << "\n";
-
-#endif
                 if (newPointsToObj){
                     //Insert the points-to info in two cases:
                     //(1) It indexes into an embedded structure (that we have already properly handled)
                     //(2) It's not an embedded structure, and the target field ID doesn't exceed the host structure's limit.
                     if (is_emb || fieldId <= 0 || (!host_type->isStructTy()) || host_type->getStructNumElements() > fieldId){
                         newPointsToInfo->insert(newPointsToInfo->begin(), newPointsToObj);
+#ifdef DEBUG_GET_ELEMENT_PTR
+                        dbgs() << "Assign points-to object: ";
+                        if(newPointsToObj->targetObject){
+                            dbgs() << InstructionUtils::getTypeStr(newPointsToObj->targetObject->targetType);
+                        }
+                        dbgs() << " | dstField: " << newPointsToObj->dstfieldId << "\n";
+
+#endif
                     }
                 }
                 visitedObjects.insert(visitedObjects.begin(), hostObj);
@@ -1318,17 +1319,13 @@ Value* AliasAnalysisVisitor::visitGetElementPtrOperator(Instruction *I, GEPOpera
 
     void AliasAnalysisVisitor::visitStoreInst(StoreInst &I) {
 #ifdef DEBUG_STORE_INSTR
-        dbgs() << "AliasAnalysisVisitor::visitStoreInst(): ";
-        I.print(dbgs());
-        dbgs() << "\n";
+        dbgs() << "AliasAnalysisVisitor::visitStoreInst(): " << InstructionUtils::getValueStr(&I) << "\n";
 #endif
         Value *targetPointer = I.getPointerOperand();
         GEPOperator *gep = dyn_cast<GEPOperator>(I.getPointerOperand());
         if(gep && gep->getNumOperands() > 0 && gep->getPointerOperand() && !dyn_cast<GetElementPtrInst>(I.getPointerOperand())) {
 #ifdef DEBUG_STORE_INSTR
-            dbgs() << "There is a GEP operator for targetPointer: ";
-            gep->print(dbgs());
-            dbgs() << "\n";
+            dbgs() << "There is a GEP operator for targetPointer: " << InstructionUtils::getValueStr(gep) << "\n";
 #endif
             //targetPointer = gep->getPointerOperand();
             //hz: get field-sensitive point-to information for this GEP operator and record it in the global status.
@@ -1338,9 +1335,7 @@ Value* AliasAnalysisVisitor::visitGetElementPtrOperator(Instruction *I, GEPOpera
                 targetPointer = targetPointer->stripPointerCasts();
 #ifdef DEBUG_STORE_INSTR
                 dbgs() << "No point-to info for targetPointer, try to strip the pointer casts -0.\n";
-                dbgs() << "After strip, the targetPointer is: ";
-                targetPointer->print(dbgs());
-                dbgs() << "\n";
+                dbgs() << "After strip, the targetPointer is: " << InstructionUtils::getValueStr(targetPointer) << "\n";
 #endif
             }
         }
@@ -1348,9 +1343,7 @@ Value* AliasAnalysisVisitor::visitGetElementPtrOperator(Instruction *I, GEPOpera
         gep = dyn_cast<GEPOperator>(targetValue);
         if(gep && gep->getNumOperands() > 0 && gep->getPointerOperand() && !dyn_cast<GetElementPtrInst>(targetValue)) {
 #ifdef DEBUG_STORE_INSTR
-            dbgs() << "There is a GEP operator for targetValue: ";
-            gep->print(dbgs());
-            dbgs() << "\n";
+            dbgs() << "There is a GEP operator for targetValue: " << InstructionUtils::getValueStr(gep) << "\n";
 #endif
             //targetValue = gep->getPointerOperand();
             //hz: get field-sensitive point-to information for this GEP operator and record it in the global status.
@@ -1361,10 +1354,8 @@ Value* AliasAnalysisVisitor::visitGetElementPtrOperator(Instruction *I, GEPOpera
         if(!hasPointsToObjects(targetValue)) {
             targetValue = targetValue->stripPointerCasts();
 #ifdef DEBUG_STORE_INSTR
-            dbgs() << "No point-to info for targetValue, try to strip the pointer casts -0.\n";
-            dbgs() << "After strip, the targetValue is: ";
-            targetValue->print(dbgs());
-            dbgs() << "\n";
+            dbgs() << "No point-to info for targetValue, try to strip the pointer casts -1.\n";
+            dbgs() << "After strip, the targetValue is: " << InstructionUtils::getValueStr(targetValue) << "\n";
 #endif
         }
 #ifdef CREATE_DUMMY_OBJ_IF_NULL
@@ -1372,9 +1363,7 @@ Value* AliasAnalysisVisitor::visitGetElementPtrOperator(Instruction *I, GEPOpera
         //since it can be an outside global variable. (e.g. platform_device).
         if(!hasPointsToObjects(targetValue)) {
 #ifdef DEBUG_STORE_INSTR
-            dbgs() << "Still no point-to for targetValue, try to create an outside object for: ";
-            targetValue_pre_strip->print(dbgs());
-            dbgs() << "\n";
+            dbgs() << "Still no point-to for targetValue, try to create an outside object for: " << InstructionUtils::getValueStr(targetValue_pre_strip) << "\n";
 #endif
             if(this->createOutsideObj(targetValue_pre_strip,true)){
 #ifdef DEBUG_STORE_INSTR
@@ -1412,8 +1401,11 @@ Value* AliasAnalysisVisitor::visitGetElementPtrOperator(Instruction *I, GEPOpera
 
             //hz: "newPointsToInfo: is where we need to store into.
             if (newPointsToInfo->size() <= 1) {
-                //Strong update.
                 if (newPointsToInfo->size() == 1) {
+                    //TargetPointer only has one point-to record.
+#ifdef DEBUG_STORE_INSTR
+                    dbgs() << "There is only 1 point-to record for the TargetPointer, *might* need a strong update.\n";
+#endif
                     PointerPointsTo *dstPointsToObject = *(newPointsToInfo->begin());
                     // we have a pointer which points to only one object.
                     // Do a strong update
@@ -1442,11 +1434,6 @@ Value* AliasAnalysisVisitor::visitGetElementPtrOperator(Instruction *I, GEPOpera
                     newDstPointsToObject->targetObject->performUpdate(newDstPointsToObject->dstfieldId,
                             srcPointsTo, &I);
 
-#ifdef DEBUG_STORE_INSTR
-                    dbgs() << "Trying to perform strong update for store instruction:";
-                    I.print(dbgs());
-                    dbgs() << "\n";
-#endif
                     // Now insert
                     newPointsToInfo->clear();
                     newPointsToInfo->insert(newPointsToInfo->begin(), newDstPointsToObject);
@@ -1455,8 +1442,7 @@ Value* AliasAnalysisVisitor::visitGetElementPtrOperator(Instruction *I, GEPOpera
                     // we are trying to store a value into pointer and the pointer
                     // cannot point to any object???
 #ifdef DEBUG_STORE_INSTR
-                    errs() << "Trying to store a value into pointer, which does not point to any object:";
-                    I.print(errs());
+                    errs() << "Trying to store a value into a pointer, which does not point to any object.\n";
 #endif
 #ifdef STRICT_STORE
                     assert(false);
@@ -1466,6 +1452,9 @@ Value* AliasAnalysisVisitor::visitGetElementPtrOperator(Instruction *I, GEPOpera
             } else {
                 //Ok, this pointer can point to multiple objects
                 //Perform weak update for each of the dst pointer points to
+#ifdef DEBUG_STORE_INSTR
+                dbgs() << "Performing weak update since there are multiple point-to for the targetPointer..\n";
+#endif
                 newPointsToInfo->clear();
                 for (PointerPointsTo *currPointsTo: *dstPointsTo) {
                     PointerPointsTo *newPointsToObj = (PointerPointsTo *) currPointsTo->makeCopy();
@@ -1481,11 +1470,6 @@ Value* AliasAnalysisVisitor::visitGetElementPtrOperator(Instruction *I, GEPOpera
                     assert(newPointsToObj->targetPointer == targetPointer && newPointsToObj->fieldId == 0);
                     // perform weak update
                     newPointsToObj->targetObject->performWeakUpdate(newPointsToObj->dstfieldId, srcPointsTo, &I);
-#ifdef DEBUG_STORE_INSTR
-                    dbgs() << "Performing weak update for store instruction:";
-                    I.print(dbgs());
-                    dbgs() << "\n";
-#endif
                     newPointsToInfo->insert(newPointsToInfo->end(), newPointsToObj);
                 }
             }
