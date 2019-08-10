@@ -124,6 +124,12 @@ namespace DRCHECKER {
 
         //Create a new GEP from an existing one, using only the first few indices.
         static GetElementPtrInst *createSubGEP(GEPOperator*,unsigned);
+
+        static bool isAsanInst(Instruction *inst);
+
+        static Instruction *isAsanReportBB(BasicBlock *bb);
+
+        static bool isPotentialAsanInst(Instruction *inst);
     };
 }
 #endif //PROJECT_INSTRUCTIONUTILS_H

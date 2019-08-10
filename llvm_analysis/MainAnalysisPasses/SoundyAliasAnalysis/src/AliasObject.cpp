@@ -123,7 +123,7 @@ namespace DRCHECKER {
                 }
             }
         }
-        if(hasObjects) {
+        if(hasObjects || InstructionUtils::isAsanInst(targetInstr)) {
             return;
         }
         //Below we try to create a dummy object.

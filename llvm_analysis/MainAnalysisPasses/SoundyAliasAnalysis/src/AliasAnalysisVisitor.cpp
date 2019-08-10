@@ -875,9 +875,11 @@ void AliasAnalysisVisitor::visitBinaryOperator(BinaryOperator &I) {
     allVals.insert(allVals.end(), I.getOperand(0));
     allVals.insert(allVals.end(), I.getOperand(1));
 #ifdef CREATE_DUMMY_OBJ_IF_NULL
-    for (Value *v : allVals) {
-        if (!hasPointsToObjects(v)) {
-            this->createOutsideObj(v,true);
+    if (!InstructionUtils::isAsanInst(&I)) {
+        for (Value *v : allVals) {
+            if (!InstructionUtils::isScalar(v) && !hasPointsToObjects(v)) {
+                this->createOutsideObj(v,true);
+            }
         }
     }
 #endif
@@ -921,7 +923,7 @@ void AliasAnalysisVisitor::visitPHINode(PHINode &I) {
     }
 #ifdef CREATE_DUMMY_OBJ_IF_NULL
     for (Value *v : allVals) {
-        if (!hasPointsToObjects(v)) {
+        if (!InstructionUtils::isScalar(v) && !hasPointsToObjects(v)) {
             this->createOutsideObj(v,true);
         }
     }
@@ -956,7 +958,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
     allVals.insert(allVals.end(), I.getFalseValue());
 #ifdef CREATE_DUMMY_OBJ_IF_NULL
     for (Value *v : allVals) {
-        if (!hasPointsToObjects(v)) {
+        if (!InstructionUtils::isScalar(v) && !hasPointsToObjects(v)) {
             this->createOutsideObj(v,true);
         }
     }
@@ -1235,7 +1237,7 @@ Value* AliasAnalysisVisitor::visitGetElementPtrOperator(Instruction *I, GEPOpera
 #ifdef CREATE_DUMMY_OBJ_IF_NULL
         //hz: try to create dummy objects if there is no point-to information about the pointer variable,
         //since it can be an outside global variable. (e.g. platform_device).
-        if(!hasPointsToObjects(srcPointer)) {
+        if(!InstructionUtils::isAsanInst(&I) && !hasPointsToObjects(srcPointer)) {
             this->createOutsideObj(srcPointer,true);
         }
 #endif

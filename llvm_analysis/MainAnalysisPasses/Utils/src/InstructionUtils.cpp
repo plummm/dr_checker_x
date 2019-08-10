@@ -12,6 +12,7 @@ using namespace llvm;
 
 namespace DRCHECKER {
 
+#define DEBUG_IS_ASAN_INST
 
     bool InstructionUtils::isPointerInstruction(Instruction *I) {
         bool retVal = false;
@@ -643,6 +644,186 @@ namespace DRCHECKER {
         }
         ArrayRef<Value*> IdxList(indices);
         return GetElementPtrInst::Create(nullptr/*PointeeType*/, gep->getPointerOperand()/*Value *Ptr*/, IdxList/*ArrayRef<Value*> IdxList*//*const Twine &NameStr="", Instruction *InsertBefore=nullptr*/);
+    }
+
+    //To decide whether a Instruction is generated and inserted by ASAN.
+    //NOTE: I simply use a pattern I found from the ASAN instrumented code here, may need to update later.  
+    //Pattern 0, E.g.:
+    /***********************************************************************
+    73:                                               ; preds = %63, %72
+    %74 = load i64, i64* %65, align 8, !dbg !13242
+    call void @llvm.dbg.value(metadata i64* %65, metadata !12875, metadata !DIExpression(DW_OP_deref)) #9, !dbg !13241
+    %bp.i = getelementptr inbounds %struct.pt_regs, %struct.pt_regs* %53, i64 0, i32 4, !dbg !13243
+    %75 = ptrtoint i64* %bp.i to i64, !dbg !13244
+    %76 = lshr i64 %75, 3, !dbg !13244
+    %77 = add i64 %76, -2305847407260205056, !dbg !13244
+    %78 = inttoptr i64 %77 to i8*, !dbg !13244
+    %79 = load i8, i8* %78, !dbg !13244
+    %80 = icmp ne i8 %79, 0, !dbg !13244
+    br i1 %80, label %81, label %82, !dbg !13244
+
+    81:                                               ; preds = %73
+    call void @__asan_report_store8_noabort(i64 %75), !dbg !13244
+    call void asm sideeffect "", ""(), !dbg !13244
+    br label %82, !dbg !13244
+    ************************************************************************/
+    //the arg "%75" of "__asan_report_store8_noabort()" -- the call instruction itself all belong to ASAN instructions
+    //Pattern 1, E.g.:
+    /***********************************************************************
+    158:                                              ; preds = %142, %157
+    store i32 %143, i32* %144, align 4, !dbg !13257
+    %debug_id19 = getelementptr inbounds %struct.binder_ref_data, %struct.binder_ref_data* %src_ref, i64 0, i32 0, !dbg !13258
+    %159 = ptrtoint i32* %debug_id19 to i64, !dbg !13258
+    %160 = lshr i64 %159, 3, !dbg !13258
+    %161 = add i64 %160, -2305847407260205056, !dbg !13258
+    %162 = inttoptr i64 %161 to i8*, !dbg !13258
+    %163 = load i8, i8* %162, !dbg !13258
+    %164 = icmp ne i8 %163, 0, !dbg !13258
+    br i1 %164, label %165, label %172, !dbg !13258, !prof !12767
+
+    165:                                              ; preds = %158
+    %166 = and i64 %159, 7, !dbg !13258
+    %167 = add i64 %166, 3, !dbg !13258
+    %168 = trunc i64 %167 to i8, !dbg !13258
+    %169 = icmp sge i8 %168, %163, !dbg !13258
+    br i1 %169, label %170, label %171, !dbg !13258
+
+    170:                                              ; preds = %165
+    call void @__asan_report_load4_noabort(i64 %159), !dbg !13258
+    call void asm sideeffect "", ""(), !dbg !13258
+    br label %171, !dbg !13258
+    ************************************************************************/
+    //The difference is from %159 to the call inst there are three BBs instead of 2 in the pattern 0.
+    bool InstructionUtils::isAsanInst(Instruction *inst) {
+        //Set up a cache.
+        static std::map<Function*,std::set<Instruction*>> asanInstCache;
+        if (!inst) {
+            return false;
+        }
+        Function *func = inst->getFunction();
+        if (!func) {
+            return false;
+        }
+        //We will generate the results for all instructions in the host function per invocation,
+        //so if current inst's host function is already in the cache, we already have the results for current inst.
+        if (asanInstCache.find(func) != asanInstCache.end()) {
+            bool r = (asanInstCache[func].find(inst) != asanInstCache[func].end());
+#ifdef DEBUG_IS_ASAN_INST
+            if (r) {
+                dbgs() << "InstructionUtils::isAsanInst(): " << InstructionUtils::getValueStr(inst) << " is an asan inst!\n";
+            }
+#endif
+            return r;
+        }
+        //Ok, now analyze the host function to identify all ASAN related insts according to the patterns.
+        asanInstCache[func].clear();
+        for (BasicBlock &bb : *func) {
+            //Step 0: get all BBs that invoke __asan_report_XXX.
+            Instruction *repInst = InstructionUtils::isAsanReportBB(&bb);
+            if (repInst == nullptr) {
+                continue;
+            }
+            //Step 1: add all insts in the middle (between the report inst and the call inst) to the cache.
+            BasicBlock *m_bb = bb.getSinglePredecessor();
+            BasicBlock *c_bb = repInst->getParent();
+            if (!m_bb || !c_bb) {
+                continue;
+            }
+            if (m_bb == c_bb) {
+                //Pattern 0.
+                m_bb = nullptr;
+            }else if (m_bb->getSinglePredecessor() != c_bb) {
+                //Cannot match any patterns.
+                continue;
+            }
+            std::set<Instruction*> asanInsts;
+            asanInsts.clear();
+            //If the intermiediate BB is valid, we should add all its insts to the asan-related insts.
+            bool is_asan_bb = true;
+            if (m_bb) {
+                for (Instruction &i : *m_bb) {
+                    if (!InstructionUtils::isPotentialAsanInst(&i)) {
+                        is_asan_bb = false;
+                        break;
+                    }
+                    asanInsts.insert(&i);
+                }
+                if (!is_asan_bb) {
+                    continue;
+                }
+            }
+            bool after_rep_inst = false;
+            is_asan_bb = true;
+            for (Instruction &i : *c_bb) {
+                if (&i == repInst) {
+                    after_rep_inst = true;
+                }
+                if (!after_rep_inst) {
+                    continue;
+                }
+                if (!InstructionUtils::isPotentialAsanInst(&i)) {
+                    is_asan_bb = false;
+                    break;
+                }
+                asanInsts.insert(&i);
+            }
+            if (!is_asan_bb) {
+                continue;
+            }
+            asanInstCache[func].insert(asanInsts.begin(),asanInsts.end());
+        }
+        bool r = (asanInstCache[func].find(inst) != asanInstCache[func].end());
+#ifdef DEBUG_IS_ASAN_INST
+        if (r) {
+            dbgs() << "InstructionUtils::isAsanInst(): " << InstructionUtils::getValueStr(inst) << " is an asan inst!\n";
+        }
+#endif
+        return r;
+    }
+
+    //An ASAN error report BB is as below:
+    /*****************************************
+    170:                                              ; preds = %165
+    call void @__asan_report_load4_noabort(i64 %159), !dbg !13258
+    call void asm sideeffect "", ""(), !dbg !13258
+    br label %171, !dbg !13258
+    *****************************************/
+    //If it's an ASAN report BB, return the variable/inst in the report (i.e. the report function's arg: %159 in above example).
+    Instruction *InstructionUtils::isAsanReportBB(BasicBlock *bb) {
+        if (!bb) {
+            return nullptr;
+        }
+        //The Asan report BB only has one predecessor.
+        if (bb->getSinglePredecessor() == nullptr) {
+            return nullptr;
+        }
+        Instruction *firstInst = &(*(bb->begin()));
+        if (!firstInst || !dyn_cast<CallInst>(firstInst)) {
+            return nullptr;
+        }
+        CallInst *repInst = dyn_cast<CallInst>(firstInst);
+        std::string funcname = InstructionUtils::getCalleeName(repInst,false);
+        if (funcname.find("__asan_report_") == 0) {
+            //Return the inst/value as the arg.
+            Value *arg = repInst->getArgOperand(0);
+            return (arg ? dyn_cast<Instruction>(arg) : nullptr);
+        }
+        return nullptr;
+    }
+
+    bool InstructionUtils::isPotentialAsanInst(Instruction *inst) {
+        if (!inst) {
+            return false;
+        }
+        //Asan inserted insts don't have names.
+        if (inst->hasName()) {
+            return false;
+        }
+        //As far as I can see now, Asan will not insert any "store".
+        if (dyn_cast<StoreInst>(inst)) {
+            return false;
+        }
+        return true;
     }
 
 }
