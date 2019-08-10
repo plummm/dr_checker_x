@@ -754,6 +754,11 @@ void AliasAnalysisVisitor::visitCastInst(CastInst &I) {
                         dstType = dstType->getContainedType(0);
                     }
                     newPointsToObj->targetObject->targetType = dstType;
+                    //We also need to re-taint the object (if necessary) since its type has changed.  
+                    std::set<TaintFlag*> *fieldTaint = newPointsToObj->targetObject->getFieldTaintInfo(0);
+                    for (TaintFlag *tf : *fieldTaint) {
+                        newPointsToObj->targetObject->taintAllFieldsWithTag(tf);
+                    }
                 }else if (srcPointeeTy && srcPointeeTy->isStructTy() && dstPointeeTy && dstPointeeTy->isStructTy() &&
                           currTgtObjType == srcPointeeTy && newPointsToObj->dstfieldId == 0){
                     //TODO: what if the pointee is an embedded struct (dstfieldId != 0) in the host obj...

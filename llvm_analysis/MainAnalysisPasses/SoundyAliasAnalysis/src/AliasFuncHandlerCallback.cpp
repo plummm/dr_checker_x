@@ -55,6 +55,12 @@ namespace DRCHECKER {
             targetObj->is_initialized = true;
             targetObj->initializingInstructions.insert(&callInst);
         }
+
+        //HZ: we also need to treat heap objects as taint source...
+        TaintFlag *tf = new TaintFlag(&callInst,true);
+        targetObj->taintAllFieldsWithTag(tf);
+        targetObj->is_taint_src = true;
+
         PointerPointsTo *newPointsTo = new PointerPointsTo();
         newPointsTo->fieldId = 0;
         newPointsTo->dstfieldId = 0;

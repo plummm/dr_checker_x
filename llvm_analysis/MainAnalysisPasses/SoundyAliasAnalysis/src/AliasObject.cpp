@@ -165,16 +165,21 @@ namespace DRCHECKER {
             this->getPossibleMemberFunctions(targetInstr, dyn_cast<FunctionType>(e_pointto_ty), this->targetType, srcfieldId, candidateFuncs);
             for (Function *func : candidateFuncs) {
                 GlobalObject *newObj = new GlobalObject(func);
-                ObjectPointsTo *newPointsToObj = new ObjectPointsTo();
+
+                //Update pointsFrom info in the newly created obj.
+                this->addToPointsFrom(newObj);
+
+                //Update points-to
+                std::set<PointerPointsTo*> dstPointsTo;
+                PointerPointsTo *newPointsToObj = new PointerPointsTo();
                 newPointsToObj->propogatingInstruction = targetInstr;
                 newPointsToObj->targetObject = newObj;
                 newPointsToObj->fieldId = srcfieldId;
                 newPointsToObj->dstfieldId = 0;
+                //TODO: newPointsToObj->targetPointer may not need be set since "pointsTo" will only contain "ObjectPointsTo" type that doesn't have targetPointer.
+                dstPointsTo.insert(newPointsToObj);
+                this->updateFieldPointsTo(srcfieldId,&dstPointsTo,targetInstr);
 
-                // Record the pointsFrom info in the newly created obj.
-                this->addToPointsFrom(newObj);
-
-                pointsTo.push_back(newPointsToObj);
                 dstObjects.insert(dstObjects.end(), std::make_pair(0, newObj));
             }
 #endif
@@ -188,22 +193,26 @@ namespace DRCHECKER {
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
                 dbgs() << "New obj Id: " << (const void*)newObj << "\n";
 #endif
-                ObjectPointsTo *newPointsToObj = new ObjectPointsTo();
+                newObj->auto_generated = true;
+                // get the taint for the field and add that taint to the newly created object
+                this->taintSubObj(newObj,srcfieldId,targetInstr);
+
+                //Update the pointsFrom info in the newly created obj.
+                this->addToPointsFrom(newObj);
+
+                //Update points-to
+                std::set<PointerPointsTo*> dstPointsTo;
+                PointerPointsTo *newPointsToObj = new PointerPointsTo();
                 newPointsToObj->propogatingInstruction = targetInstr;
                 newPointsToObj->targetObject = newObj;
                 newPointsToObj->fieldId = srcfieldId;
                 // this is the field of the newly created object to which
                 // new points to points to
                 newPointsToObj->dstfieldId = 0;
-                newObj->auto_generated = true;
-                // Record the pointsFrom info in the newly created obj.
-                this->addToPointsFrom(newObj);
-
-                // get the taint for the field and add that taint to the newly created object
-                this->taintSubObj(newObj,srcfieldId,targetInstr);
-
-                //insert the newly create object.
-                this->pointsTo.push_back(newPointsToObj);
+                //TODO: newPointsToObj->targetPointer may not need be set since "pointsTo" will only contain "ObjectPointsTo" type that doesn't have targetPointer.
+                dstPointsTo.insert(newPointsToObj);
+                //NOTE: if we reach here, then there must be no point-to records for this "srcfieldId" yet, so we can directly use updateFieldPointsTo to do a strong update.
+                this->updateFieldPointsTo(srcfieldId,&dstPointsTo,targetInstr);
 
                 dstObjects.insert(dstObjects.end(), std::make_pair(0, newObj));
             }
