@@ -1027,7 +1027,7 @@ Value* AliasAnalysisVisitor::visitGetElementPtrOperator(Instruction *I, GEPOpera
         }
         if (I.getNumOperands() > 2) {
             this->processMultiDimensionGEP(&I,dyn_cast<GEPOperator>(&I),srcPointer);
-        }else {
+        } else {
             //One-dimension GEP.
             //Here we reserve the default Dr.Checker's logic - simply copy the point-to info.
             this->processOneDimensionGEP(&I, dyn_cast<GEPOperator>(&I));
@@ -1062,7 +1062,7 @@ Value* AliasAnalysisVisitor::visitGetElementPtrOperator(Instruction *I, GEPOpera
         //We process every index (but still ignore the 1st one) in the GEP, instead of the only 2nd one in the original Dr.Checker.
         for (int i=2; i<I->getNumOperands(); ++i) {
 #ifdef DEBUG_GET_ELEMENT_PTR
-            dbgs() << "About to process index: " << (i-2) << "\n";
+            dbgs() << "About to process index: " << (i-1) << "\n";
 #endif
             ConstantInt *CI = dyn_cast<ConstantInt>(I->getOperand(i));
             if (!CI) {
@@ -1122,8 +1122,160 @@ Value* AliasAnalysisVisitor::visitGetElementPtrOperator(Instruction *I, GEPOpera
         }
     }
 
+    //Analyze the 1st dimension of the GEP and return a point-to set of the 1st dimension.
+    //NOTE: we assume that "srcPointer" has already been processed regarding inlined GEP operator and strip by the caller.
+    std::set<PointerPointsTo*> *AliasAnalysisVisitor::processGEPFirstDimension(Instruction *propInst, GEPOperator *I, Value *srcPointer) {
+        //First try to get the point-to of the srcPointer..
+        if (!I || !srcPointer) {
+#ifdef DEBUG_GET_ELEMENT_PTR
+            dbgs() << "AliasAnalysisVisitor::processGEPFirstDimension(): Null I or srcPointer..\n";
+#endif
+            return nullptr;
+        }
+#ifdef CREATE_DUMMY_OBJ_IF_NULL
+        //hz: try to create dummy objects if there is no point-to information about the pointer variable,
+        //since it can be an outside global variable. (e.g. platform_device).
+        //TODO: are there any ASAN inserted GEP insts and do we need to exclude them?
+        if (!hasPointsToObjects(srcPointer)) {
+            this->createOutsideObj(srcPointer,true);
+        }
+#endif
+        if (!hasPointsToObjects(srcPointer)) {
+            //No way to sort this out...
+#ifdef DEBUG_GET_ELEMENT_PTR
+            errs() << "AliasAnalysisVisitor::processGEPFirstDimension(): No points-to for: " << InstructionUtils::getValueStr(srcPointer) << ", return\n";
+#endif
+            return nullptr;
+        }
+        std::set<PointerPointsTo*> *srcPointsTo = getPointsToObjects(srcPointer);
+        //Get the original pointer operand used in this GEP and its type info.
+        Value *orgPointer = I->getPointerOperand();
+        if (!orgPointer) {
+#ifdef DEBUG_GET_ELEMENT_PTR
+            dbgs() << "AliasAnalysisVisitor::processGEPFirstDimension(): Null orgPointer..\n";
+#endif
+            return srcPointsTo;
+        }
+        Type *basePointerTy = orgPointer->getType();
+        Type *basePointeeTy = nullptr;
+        if (basePointerTy && basePointerTy->isPointerTy()) {
+            basePointeeTy = basePointerTy->getPointerElementType();
+        }
+        //Get the 1st dimension, note that we can only process the constant dimension.
+        ConstantInt *CI = dyn_cast<ConstantInt>(I->getOperand(1));
+        if (!CI) {
+#ifdef DEBUG_GET_ELEMENT_PTR
+            dbgs() << "AliasAnalysisVisitor::processGEPFirstDimension(): Non-constant 0st index!\n";
+#endif
+            return srcPointsTo;
+        }
+        long index = CI->getSExtValue();
+#ifdef DEBUG_GET_ELEMENT_PTR
+        dbgs() << "AliasAnalysisVisitor::processGEPFirstDimension(): 0st index: " << index << "\n";
+#endif
+        //If the index is zero then 0st dimension will change nothing.
+        //Note that this index can be negative.
+        if (index == 0) {
+            return srcPointsTo;
+        }
+        //Ok, basically we want to deal w/ a special case here:
+        //the pointer operand points to some structs, but the "basePointerTy" of this GEP is an integer pointer (e.g. i8*),
+        //this means the struct pointer has been converted to the integer pointer and the struct fields will be accessed in the byte-style...
+        //In this situation, we need to calculate which field will actually be pointed-to by the 1st GEP dimention.
+        //If this is not the case (e.g. the "basePointerTy" is a normal struct pointer), for now we will just ignore the 1st dimention just as the original Dr.Checker does.
+        std::set<PointerPointsTo*> *resPointsTo = new std::set<PointerPointsTo*>();
+        if (basePointeeTy && dyn_cast<IntegerType>(basePointeeTy)) {
+            Type *int_ty = dyn_cast<IntegerType>(basePointeeTy);
+            unsigned width = int_ty->getBitWidth();
+            for (PointerPointsTo *currPto : *srcPointsTo) {
+                if (!currPto || !currPto->targetObject) {
+                    //In this case we will exclude this point-to record in the "resPointsTo" to be returned..
+                    continue;
+                }
+                //The "newPto" will be the point-to record after we process the 1st dimension.
+                //By default it will the same as the original point-to since we will ignore 1st dimension in most cases.
+                PointerPointsTo *newPto = new PointerPointsTo();
+                newPto->propogatingInstruction = propInst;
+                newPto->fieldId = 0;
+                newPto->targetPointer = propInst;
+                newPto->targetObject = targetObj;
+                newPto->dstfieldId = dstfield;
+                resPointsTo->insert(newPto);
+                //Now we will process the special cases where the integer pointer points to a struct...
+                this->bit2Field(newPto,width,index);
+            }
+        } else {
+            return srcPointsTo;
+        }
+        return resPointsTo;
+    }
+
+    //Starting from "dstfieldId" in the target object (struct) as specified in "pto", if we step bitWidth*index bits, which field will we point to then? 
+    //The passed-in "pto" will be updated to point to the resulted object and field. (e.g. we may end up reaching a field in an embed obj in the host obj).
+    //NOTE: we assume the "pto" has been verified to be a struct pointer.
+    void AliasAnalysisVisitor::bit2Field(PointerPointsTo *pto, unsigned bitWidth, long index) {
+        DataLayout *dl = this->currState->targetDataLayout;
+        if (!dl || !pto) {
+            return;
+        }
+        AliasObject *targetObj = pto->targetObject;
+        long dstfield = pto->dstfieldId; 
+        Type *targetObjTy = targetObj->targetType;
+        if (!targetObjTy || !targetObjTy->isStructTy()) {
+            return;
+        }
+        StructType *stTy = dyn_cast<StructType>(targetObjTy);
+        unsigned ne = stTy->getNumElements();
+        if (dstfield < 0 || dstfield >= ne) {
+#ifdef DEBUG_GET_ELEMENT_PTR
+            dbgs() << "AliasAnalysisVisitor::bit2Field(): dstfield out-of-bound.\n";
+#endif
+            return;
+        }
+        //NOTE: StructLayout describes the offset/size of each field in a struct, including the possible padding.
+        const StructLayout *stLayout = dl->getStructLayout(stTy);
+        if (!stLayout) {
+            return;
+        }
+        //NOTE: both "dstOffset" and "bits" can be divided by 8, "bits" can be negative.
+        long dstOffset = stLayout->getElementOffsetInBits(dstfield);
+        long bits = index * (long)bitWidth;
+        long resOffset = dstOffset + bits;
+        if (resOffset < 0 || resOffset >= stLayout->getSizeInBits()) {
+#ifdef DEBUG_GET_ELEMENT_PTR
+            dbgs() << "AliasAnalysisVisitor::bit2Field(): resOffset (in bits) out-of-bound.\n";
+#endif
+            return;
+        }
+        unsigned resIndex = stLayout->getElementContainingOffset(resOffset/8);
+        pto->dstfieldId = resIndex;
+
+        long delta = resOffset - (long)(stLayout->getElementOffsetInBits(resIndex));
+        if (!delta) {
+            //An exact match, just update the "pto" to the target field (already done) and return.
+            return;
+        } else if (delta > 0) {
+            //Ok, we have possibly stepped into an embedded object (struct or array/vector).
+            //If it's an embedded struct, we need to recursively retrieve/create it and then position the "pto".
+            Type *ety = stTy->getElementType(resIndex);
+            if (!ety) {
+                return;
+            }
+            if (ety->isStructTy()) {
+                //First get/create the embedded struct..
+                //TODO: how to provide the arg "v" for createEmbObj()...
+            } else {
+                //TODO: need to do anything for array/vector?
+            }
+        } else {
+            //This should be impossible...
+            assert(false && "AliasAnalysisVisitor::bit2Field(): delta < 0");
+        }
+        return;
+    }
+
+    //NOTE: this function wraps the logic of the original Dr.Checker to process GEP w/ only one index/dimension.
     void AliasAnalysisVisitor::processOneDimensionGEP(Instruction *propInst, GEPOperator *I) {
-        assert(I);
         if (!I) {
             return;
         }
