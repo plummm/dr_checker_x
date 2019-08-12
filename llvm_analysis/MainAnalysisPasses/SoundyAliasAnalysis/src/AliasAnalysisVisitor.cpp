@@ -130,7 +130,7 @@ namespace DRCHECKER {
         auto prevPointsToSet = targetPointsToMap->find(srcPointer);
         //hz: slightly change the logic here in case that "newPointsToInfo" contains some duplicated items.
         if(prevPointsToSet == targetPointsToMap->end()) {
-            (*targetPointsToMap)[srcPointer] = new std::set<PointerPointsTo*>;
+            (*targetPointsToMap)[srcPointer] = new std::set<PointerPointsTo*>();
         }
         prevPointsToSet = targetPointsToMap->find(srcPointer);
         if(prevPointsToSet != targetPointsToMap->end()) {
@@ -1134,7 +1134,18 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
 #endif
             return nullptr;
         }
-        std::set<PointerPointsTo*> *srcPointsTo = getPointsToObjects(srcPointer);
+        std::set<PointerPointsTo*> *basePointsTo = getPointsToObjects(srcPointer);
+        //Make a copy of the basePointsTo
+        std::set<PointerPointsTo*> *srcPointsTo = new std::set<PointerPointsTo*>();
+        for (PointerPointsTo *p : *basePointsTo) {
+            if (!p) {
+                continue;
+            }
+            PointerPointsTo *np = p->makeCopyP();
+            np->propogatingInstruction = propInst;
+            np->targetPointer = I;
+            srcPointsTo->insert(np);
+        }
         //Get the original pointer operand used in this GEP and its type info.
         Value *orgPointer = I->getPointerOperand();
         if (!orgPointer) {
@@ -1203,6 +1214,11 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
         } else {
             return srcPointsTo;
         }
+        //release the memory of "srcPointsTo"
+        for (PointerPointsTo *p : *srcPointsTo) {
+            delete(p);
+        }
+        delete(srcPointsTo);
         return resPointsTo;
     }
 
@@ -1276,8 +1292,11 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
             if (ety->isStructTy() && I) {
                 //First get/create the embedded struct..
                 //To invoke createEmbObj() we need a Value that is a pointer to the emb struct, to obtain this pointer, we can:
+                //Method 0:
                 //(1) First create a cast instruction that convert integer *srcPointer in the "I" to stTy*.
                 //(2) Then create a GEP inst that obtains the pointer to the emb obj.
+                //Method 1 (in use):
+                //Directly create a cast inst to convert srcPointer to ety*.
                 Value *orgPointer = I->getPointerOperand();
                 ConstantInt *CI = dyn_cast<ConstantInt>(I->getOperand(1));
                 if (!orgPointer || !CI) {
@@ -1286,7 +1305,15 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
 #endif
                     return;
                 }
-                BitCastInst *castInst = new BitCastInst(orgPointer, PointerType::get(stTy, orgPointer->getType()->getPointerAddressSpace()));
+                //BitCastInst *castInst = new BitCastInst(orgPointer, PointerType::get(stTy, orgPointer->getType()->getPointerAddressSpace()));
+                BitCastInst *castInst = new BitCastInst(orgPointer, PointerType::get(ety, orgPointer->getType()->getPointerAddressSpace()), "tmp_cast_" + std::to_string(suff++));
+                if (!castInst) {
+                    return;
+                }
+#ifdef DEBUG_GET_ELEMENT_PTR
+                dbgs() << "BitCastInst: " << InstructionUtils::getValueStr(castInst) << " | ty: " << InstructionUtils::getTypeStr(castInst->getType()) << "\n";
+#endif
+                /*
                 //NOTE: we should give a name to the newly created GEP so that it can pass the sanity check in createOutsideObj().
                 std::vector<Value*> indices;
                 //0st dimension - keep it to 0.
@@ -1295,19 +1322,21 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
                 indices.push_back(ConstantInt::get(CI->getType(),resIndex));
                 ArrayRef<Value*> IdxList(indices);
                 GetElementPtrInst *gepInst = GetElementPtrInst::Create(stTy, castInst, IdxList, "tmp_gep_" + std::to_string(suff++));
+                if (!gepInst) {
+                    return;
+                }
 #ifdef DEBUG_GET_ELEMENT_PTR
-                dbgs() << "AliasAnalysisVisitor::bit2Field(): the created cast+gep for the emb obj:\n";
-                dbgs() << " - " << InstructionUtils::getValueStr(castInst) << "\n";
-                dbgs() << " - " << InstructionUtils::getValueStr(gepInst) << "\n";
+                dbgs() << "GEPInst: " << InstructionUtils::getValueStr(gepInst) << " | ty: " << InstructionUtils::getTypeStr(gepInst->getType()) << "\n";
 #endif
-                AliasObject *newObj = this->createEmbObj(targetObj, resIndex, gepInst);
+                */
+                AliasObject *newObj = this->createEmbObj(targetObj, resIndex, castInst);
                 if (!newObj) {
                     //TODO: what to do now...
                     pto->dstfieldId = 0;
 #ifdef DEBUG_GET_ELEMENT_PTR
                     dbgs() << "AliasAnalysisVisitor::bit2Field(): fail to get/create the embedded struct!\n";
 #endif
-                    delete(gepInst);
+                    //delete(gepInst);
                     delete(castInst);
                     return;
                 }

@@ -118,6 +118,11 @@ namespace DRCHECKER {
         ObjectPointsTo* makeCopy() {
             return new PointerPointsTo(this);
         }
+
+        PointerPointsTo* makeCopyP() {
+            return new PointerPointsTo(this);
+        }
+
         long getTargetType() const {
             // Simple polymorphism.
             return PointerPointsTo::TYPE_CONST;
