@@ -972,39 +972,38 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
 
 }
 
-//hz: this method aims to deal with the embedded GEP operator (in "I") in a recursive way.
-//It will try to analyze and record the point-to information in the global state for each GEP operator.
-Value* AliasAnalysisVisitor::visitGetElementPtrOperator(Instruction *I, GEPOperator *gep) {
+    //hz: this method aims to deal with the embedded GEP operator (in "I") in a recursive way.
+    //It will try to analyze and record the point-to information in the global state for each GEP operator.
+    Value* AliasAnalysisVisitor::visitGetElementPtrOperator(Instruction *I, GEPOperator *gep) {
 #ifdef DEBUG_GET_ELEMENT_PTR
-    dbgs() << "AliasAnalysisVisitor::visitGetElementPtrOperator(): " << InstructionUtils::getValueStr(I) << "\n";
-    dbgs() << "GEP: " << InstructionUtils::getValueStr(gep) << "\n";
+        dbgs() << "AliasAnalysisVisitor::visitGetElementPtrOperator(): " << InstructionUtils::getValueStr(I) << "\n";
+        dbgs() << "GEP: " << InstructionUtils::getValueStr(gep) << "\n";
 #endif
-    //Null pointer or we have processed it before.
-    if(!gep || hasPointsToObjects(gep)){
+        //Null pointer or we have processed it before.
+        if(!gep || hasPointsToObjects(gep)){
         return gep;
-    }
-    if(gep->getNumOperands() <= 0 || !gep->getPointerOperand()){
-        //What happens...
-        return gep;
-    }
-    //Ok, does it contain another GEP operator as its pointer operand?
-    Value* srcPointer = gep->getPointerOperand();
-    GEPOperator *op = dyn_cast<GEPOperator>(srcPointer);
-    if(op && op->getNumOperands() > 0 && op->getPointerOperand() && !dyn_cast<GetElementPtrInst>(srcPointer)){
-        //Do the recursion.
-        srcPointer = visitGetElementPtrOperator(I,op);
-    }else{
-        if(!hasPointsToObjects(srcPointer)) {
-            srcPointer = srcPointer->stripPointerCasts();
         }
+        if(gep->getNumOperands() <= 0 || !gep->getPointerOperand()){
+            //What happens...
+            return gep;
+        }
+        //Ok, does it contain another GEP operator as its pointer operand?
+        Value* srcPointer = gep->getPointerOperand();
+        GEPOperator *op = dyn_cast<GEPOperator>(srcPointer);
+        if(op && op->getNumOperands() > 0 && op->getPointerOperand() && !dyn_cast<GetElementPtrInst>(srcPointer)){
+            //Do the recursion.
+            srcPointer = visitGetElementPtrOperator(I,op);
+        }else{
+            if(!hasPointsToObjects(srcPointer)) {
+                srcPointer = srcPointer->stripPointerCasts();
+            }
+        }
+        //Process the 1st index at first...
+        std::set<PointerPointsTo*> *initialPointsTo = this->processGEPFirstDimension(I, gep, srcPointer);
+        //Then the remaining indices if any and update the point-to for this GEP.
+        this->processMultiDimensionGEP(I, gep, initialPointsTo);
+        return gep;
     }
-    if(gep->getNumOperands() > 2) {
-        this->processMultiDimensionGEP(I,gep,srcPointer);
-    } else {
-        this->processOneDimensionGEP(I,gep);
-    }
-    return gep;
-}
 
     void AliasAnalysisVisitor::visitGetElementPtrInst(GetElementPtrInst &I) {
         /***
@@ -1025,39 +1024,21 @@ Value* AliasAnalysisVisitor::visitGetElementPtrOperator(Instruction *I, GEPOpera
                 srcPointer = srcPointer->stripPointerCasts();
             }
         }
-        if (I.getNumOperands() > 2) {
-            this->processMultiDimensionGEP(&I,dyn_cast<GEPOperator>(&I),srcPointer);
-        } else {
-            //One-dimension GEP.
-            //Here we reserve the default Dr.Checker's logic - simply copy the point-to info.
-            this->processOneDimensionGEP(&I, dyn_cast<GEPOperator>(&I));
-        }
+        //Process the 1st index at first...
+        std::set<PointerPointsTo*> *initialPointsTo = this->processGEPFirstDimension(&I, dyn_cast<GEPOperator>(&I), srcPointer);
+        //Then the remaining indices if any and update the point-to for this GEP.
+        this->processMultiDimensionGEP(&I, dyn_cast<GEPOperator>(&I), initialPointsTo);
     }
 
-    void AliasAnalysisVisitor::processMultiDimensionGEP(Instruction *propInst, GEPOperator *I, Value *srcPointer) {
+    void AliasAnalysisVisitor::processMultiDimensionGEP(Instruction *propInst, GEPOperator *I, std::set<PointerPointsTo*> *srcPointsTo) {
         assert(I);
-        if (!I || !srcPointer) {
-            return;
-        }
-        if (I->getNumOperands() <= 2) {
-            return;
-        }
-#ifdef CREATE_DUMMY_OBJ_IF_NULL
-        //hz: try to create dummy objects if there is no point-to information about the pointer variable,
-        //since it can be an outside global variable. (e.g. platform_device).
-        if(!hasPointsToObjects(srcPointer)) {
-            this->createOutsideObj(srcPointer,true);
-        }
-#endif
-        if (!hasPointsToObjects(srcPointer)) {
-            //No way to sort this out...
+        if (!I || !srcPointsTo || srcPointsTo->empty()) {
 #ifdef DEBUG_GET_ELEMENT_PTR
-            errs() << "Error occurred, Trying to dereference a structure, which does not point to any object.";
-            errs() << " Ignoring: " << InstructionUtils::getValueStr(srcPointer) << "\n";
+            dbgs() << "AliasAnalysisVisitor::processMultiDimensionGEP(): !I || !srcPointsTo || srcPointsTo->empty()\n";
 #endif
             return;
         }
-        std::set<PointerPointsTo*> *currPointsTo = getPointsToObjects(srcPointer);
+        std::set<PointerPointsTo*> *currPointsTo = srcPointsTo;
         bool update = true;
         //We process every index (but still ignore the 1st one) in the GEP, instead of the only 2nd one in the original Dr.Checker.
         for (int i=2; i<I->getNumOperands(); ++i) {
@@ -1113,6 +1094,9 @@ Value* AliasAnalysisVisitor::visitGetElementPtrOperator(Instruction *I, GEPOpera
             currPointsTo = newPointsToInfo;
         }
         if(update && currPointsTo && !currPointsTo->empty()){
+#ifdef DEBUG_GET_ELEMENT_PTR
+            dbgs() << "AliasAnalysisVisitor::processMultiDimensionGEP(): updating the point-to for current GEP...\n";
+#endif
             //make sure the points-to information includes the correct TargetPointer, which is current GEP inst.
             //TODO: is this ok? Since the pointsTo->targetPointer may not be the "I", it may be a GEP with a subset of indices created by us.
             for (PointerPointsTo *pointsTo : *currPointsTo) {
@@ -1137,6 +1121,9 @@ Value* AliasAnalysisVisitor::visitGetElementPtrOperator(Instruction *I, GEPOpera
         //since it can be an outside global variable. (e.g. platform_device).
         //TODO: are there any ASAN inserted GEP insts and do we need to exclude them?
         if (!hasPointsToObjects(srcPointer)) {
+#ifdef DEBUG_GET_ELEMENT_PTR
+            dbgs() << "AliasAnalysisVisitor::processGEPFirstDimension(): Try to create an OutsideObject for srcPointer: " << InstructionUtils::getValueStr(srcPointer) << "\n";
+#endif
             this->createOutsideObj(srcPointer,true);
         }
 #endif
@@ -1152,7 +1139,7 @@ Value* AliasAnalysisVisitor::visitGetElementPtrOperator(Instruction *I, GEPOpera
         Value *orgPointer = I->getPointerOperand();
         if (!orgPointer) {
 #ifdef DEBUG_GET_ELEMENT_PTR
-            dbgs() << "AliasAnalysisVisitor::processGEPFirstDimension(): Null orgPointer..\n";
+            dbgs() << "AliasAnalysisVisitor::processGEPFirstDimension(): Null orgPointer..return\n";
 #endif
             return srcPointsTo;
         }
@@ -1171,7 +1158,7 @@ Value* AliasAnalysisVisitor::visitGetElementPtrOperator(Instruction *I, GEPOpera
         }
         long index = CI->getSExtValue();
 #ifdef DEBUG_GET_ELEMENT_PTR
-        dbgs() << "AliasAnalysisVisitor::processGEPFirstDimension(): 0st index: " << index << "\n";
+        dbgs() << "AliasAnalysisVisitor::processGEPFirstDimension():: basePointeeTy: " << InstructionUtils::getTypeStr(basePointeeTy) << " 0st index: " << index << "\n";
 #endif
         //If the index is zero then 0st dimension will change nothing.
         //Note that this index can be negative.
@@ -1185,11 +1172,17 @@ Value* AliasAnalysisVisitor::visitGetElementPtrOperator(Instruction *I, GEPOpera
         //If this is not the case (e.g. the "basePointerTy" is a normal struct pointer), for now we will just ignore the 1st dimention just as the original Dr.Checker does.
         std::set<PointerPointsTo*> *resPointsTo = new std::set<PointerPointsTo*>();
         if (basePointeeTy && dyn_cast<IntegerType>(basePointeeTy)) {
-            Type *int_ty = dyn_cast<IntegerType>(basePointeeTy);
+            IntegerType *int_ty = dyn_cast<IntegerType>(basePointeeTy);
             unsigned width = int_ty->getBitWidth();
+#ifdef DEBUG_GET_ELEMENT_PTR
+            dbgs() << "AliasAnalysisVisitor::processGEPFirstDimension(): basePointeeTy is i" << width <<"*\n";
+#endif
             for (PointerPointsTo *currPto : *srcPointsTo) {
                 if (!currPto || !currPto->targetObject) {
                     //In this case we will exclude this point-to record in the "resPointsTo" to be returned..
+#ifdef DEBUG_GET_ELEMENT_PTR
+                    dbgs() << "AliasAnalysisVisitor::processGEPFirstDimension(): !currPto || !currPto->targetObject\n";
+#endif
                     continue;
                 }
                 //The "newPto" will be the point-to record after we process the 1st dimension.
@@ -1197,12 +1190,15 @@ Value* AliasAnalysisVisitor::visitGetElementPtrOperator(Instruction *I, GEPOpera
                 PointerPointsTo *newPto = new PointerPointsTo();
                 newPto->propogatingInstruction = propInst;
                 newPto->fieldId = 0;
-                newPto->targetPointer = propInst;
-                newPto->targetObject = targetObj;
-                newPto->dstfieldId = dstfield;
+                newPto->targetPointer = I;
+                newPto->targetObject = currPto->targetObject;
+                newPto->dstfieldId = currPto->dstfieldId;
                 resPointsTo->insert(newPto);
                 //Now we will process the special cases where the integer pointer points to a struct...
-                this->bit2Field(newPto,width,index);
+#ifdef DEBUG_GET_ELEMENT_PTR
+                dbgs() << "AliasAnalysisVisitor::processGEPFirstDimension(): invoke bit2Field()...\n";
+#endif
+                this->bit2Field(I,newPto,width,index);
             }
         } else {
             return srcPointsTo;
@@ -1213,14 +1209,21 @@ Value* AliasAnalysisVisitor::visitGetElementPtrOperator(Instruction *I, GEPOpera
     //Starting from "dstfieldId" in the target object (struct) as specified in "pto", if we step bitWidth*index bits, which field will we point to then? 
     //The passed-in "pto" will be updated to point to the resulted object and field. (e.g. we may end up reaching a field in an embed obj in the host obj).
     //NOTE: we assume the "pto" has been verified to be a struct pointer.
-    void AliasAnalysisVisitor::bit2Field(PointerPointsTo *pto, unsigned bitWidth, long index) {
-        DataLayout *dl = this->currState->targetDataLayout;
+    void AliasAnalysisVisitor::bit2Field(GEPOperator *I, PointerPointsTo *pto, unsigned bitWidth, long index) {
+        static unsigned long suff = 0;
+        DataLayout *dl = this->currState.targetDataLayout;
         if (!dl || !pto) {
+#ifdef DEBUG_GET_ELEMENT_PTR
+            dbgs() << "AliasAnalysisVisitor::bit2Field(): !dl || !pto\n";
+#endif
             return;
         }
         AliasObject *targetObj = pto->targetObject;
         long dstfield = pto->dstfieldId; 
         Type *targetObjTy = targetObj->targetType;
+#ifdef DEBUG_GET_ELEMENT_PTR
+        dbgs() << "AliasAnalysisVisitor::bit2Field(): host obj: " << InstructionUtils::getTypeStr(targetObjTy) << " | " << dstfield << " obj ID: " << (const void*)targetObj << "\n";
+#endif
         if (!targetObjTy || !targetObjTy->isStructTy()) {
             return;
         }
@@ -1235,6 +1238,9 @@ Value* AliasAnalysisVisitor::visitGetElementPtrOperator(Instruction *I, GEPOpera
         //NOTE: StructLayout describes the offset/size of each field in a struct, including the possible padding.
         const StructLayout *stLayout = dl->getStructLayout(stTy);
         if (!stLayout) {
+#ifdef DEBUG_GET_ELEMENT_PTR
+            dbgs() << "AliasAnalysisVisitor::bit2Field(): !stLayout\n";
+#endif
             return;
         }
         //NOTE: both "dstOffset" and "bits" can be divided by 8, "bits" can be negative.
@@ -1251,6 +1257,9 @@ Value* AliasAnalysisVisitor::visitGetElementPtrOperator(Instruction *I, GEPOpera
         pto->dstfieldId = resIndex;
 
         long delta = resOffset - (long)(stLayout->getElementOffsetInBits(resIndex));
+#ifdef DEBUG_GET_ELEMENT_PTR
+        dbgs() << "AliasAnalysisVisitor::bit2Field(): dstOffset: " << dstOffset << " bits: " << bits << " resOffset: " << resOffset << " resIndex: " << resIndex << " delta: " << delta << "\n";
+#endif
         if (!delta) {
             //An exact match, just update the "pto" to the target field (already done) and return.
             return;
@@ -1258,12 +1267,56 @@ Value* AliasAnalysisVisitor::visitGetElementPtrOperator(Instruction *I, GEPOpera
             //Ok, we have possibly stepped into an embedded object (struct or array/vector).
             //If it's an embedded struct, we need to recursively retrieve/create it and then position the "pto".
             Type *ety = stTy->getElementType(resIndex);
+#ifdef DEBUG_GET_ELEMENT_PTR
+            dbgs() << "AliasAnalysisVisitor::bit2Field(): ety: " << InstructionUtils::getTypeStr(ety) << "\n";
+#endif
             if (!ety) {
                 return;
             }
-            if (ety->isStructTy()) {
+            if (ety->isStructTy() && I) {
                 //First get/create the embedded struct..
-                //TODO: how to provide the arg "v" for createEmbObj()...
+                //To invoke createEmbObj() we need a Value that is a pointer to the emb struct, to obtain this pointer, we can:
+                //(1) First create a cast instruction that convert integer *srcPointer in the "I" to stTy*.
+                //(2) Then create a GEP inst that obtains the pointer to the emb obj.
+                Value *orgPointer = I->getPointerOperand();
+                ConstantInt *CI = dyn_cast<ConstantInt>(I->getOperand(1));
+                if (!orgPointer || !CI) {
+#ifdef DEBUG_GET_ELEMENT_PTR
+                    dbgs() << "AliasAnalysisVisitor::bit2Field(): !orgPointer || !CI\n";
+#endif
+                    return;
+                }
+                BitCastInst *castInst = new BitCastInst(orgPointer, PointerType::get(stTy, orgPointer->getType()->getPointerAddressSpace()));
+                //NOTE: we should give a name to the newly created GEP so that it can pass the sanity check in createOutsideObj().
+                std::vector<Value*> indices;
+                //0st dimension - keep it to 0.
+                indices.push_back(ConstantInt::get(CI->getType(),0));
+                //1st dimension - set it to the index of the emb struct.
+                indices.push_back(ConstantInt::get(CI->getType(),resIndex));
+                ArrayRef<Value*> IdxList(indices);
+                GetElementPtrInst *gepInst = GetElementPtrInst::Create(stTy, castInst, IdxList, "tmp_gep_" + std::to_string(suff++));
+#ifdef DEBUG_GET_ELEMENT_PTR
+                dbgs() << "AliasAnalysisVisitor::bit2Field(): the created cast+gep for the emb obj:\n";
+                dbgs() << " - " << InstructionUtils::getValueStr(castInst) << "\n";
+                dbgs() << " - " << InstructionUtils::getValueStr(gepInst) << "\n";
+#endif
+                AliasObject *newObj = this->createEmbObj(targetObj, resIndex, gepInst);
+                if (!newObj) {
+                    //TODO: what to do now...
+                    pto->dstfieldId = 0;
+#ifdef DEBUG_GET_ELEMENT_PTR
+                    dbgs() << "AliasAnalysisVisitor::bit2Field(): fail to get/create the embedded struct!\n";
+#endif
+                    delete(gepInst);
+                    delete(castInst);
+                    return;
+                }
+                //Recursively update the "pto".
+                pto->targetObject = newObj;
+                pto->dstfieldId = 0;
+                //TODO: we *might* need to create a different "popInst" here w/ its pointer operand pointing to the embedded struct,
+                //but since our current logic will force convert the pointer operand to the target struct type * at first, it should be ok.
+                this->bit2Field(I, pto, 8, delta/8);
             } else {
                 //TODO: need to do anything for array/vector?
             }

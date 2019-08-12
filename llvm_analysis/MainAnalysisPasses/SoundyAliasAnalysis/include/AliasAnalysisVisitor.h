@@ -199,7 +199,12 @@ namespace DRCHECKER {
         //hz:
         void processOneDimensionGEP(Instruction *propInst, GEPOperator *I);
 
-        void processMultiDimensionGEP(Instruction *propInst, GEPOperator *I, Value *srcPointer);
+        void processMultiDimensionGEP(Instruction *propInst, GEPOperator *I, std::set<PointerPointsTo*> *srcPointsTo);
+
+        //Process the 1st index of the GEP, return the resulted points-to.
+        std::set<PointerPointsTo*> *processGEPFirstDimension(Instruction *propInst, GEPOperator *I, Value *srcPointer);
+
+        void bit2Field(GEPOperator *I, PointerPointsTo *pto, unsigned bitWidth, long index);
     };
 
 }
