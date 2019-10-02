@@ -29,7 +29,7 @@ using namespace llvm;
 #define DEBUG_FETCH_POINTS_TO_OBJECTS
 #define DEBUG_CHANGE_HEAPLOCATIONTYPE
 #define DEBUG_UPDATE_FIELD_POINT
-//#define DEBUG_UPDATE_FIELD_TAINT
+#define DEBUG_UPDATE_FIELD_TAINT
 
 namespace DRCHECKER {
 //#define DEBUG_FUNCTION_ARG_OBJ_CREATION
@@ -576,7 +576,7 @@ namespace DRCHECKER {
                             dbgs() << "constF: " << InstructionUtils::getValueStr(constF) << "\n";
                             Function *dstFunc = dyn_cast<Function>(constF);
                             if (!dstFunc && dyn_cast<ConstantExpr>(constF)) {
-                                dbgs() << "!dstFunc && dyn_cast<ConstantExpr>(constF)\n"; 
+                                dbgs() << "!dstFunc && dyn_cast<ConstantExpr>(constF)\n";
                                 //Maybe this field is a casted function pointer.
                                 ConstantExpr *constE = dyn_cast<ConstantExpr>(constF);
                                 if (constE->isCast()) {

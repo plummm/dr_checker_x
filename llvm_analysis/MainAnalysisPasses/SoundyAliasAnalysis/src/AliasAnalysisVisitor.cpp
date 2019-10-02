@@ -196,7 +196,7 @@ namespace DRCHECKER {
 #ifdef DEBUG_UPDATE_POINTSTO
                     dbgs() << "Insert point-to: " << InstructionUtils::getTypeStr(currPointsTo->targetObject->targetType);
                     dbgs() << " | " << currPointsTo->dstfieldId << " ,is_taint_src: " << currPointsTo->targetObject->is_taint_src << "\n";
-                    dbgs() << "Obj ID: " << (const void*)(currPointsTo->targetObject) << "\n"; 
+                    dbgs() << "Obj ID: " << (const void*)(currPointsTo->targetObject) << "\n";
                     Value *tv = currPointsTo->targetObject->getValue();
                     if (tv){
                         dbgs() << "Inst/Val: " << InstructionUtils::getValueStr(tv) << "\n";
@@ -279,7 +279,7 @@ namespace DRCHECKER {
             if (!hostSubTy) {
                 continue;
             }
-            Type *hostArrSubTy = nullptr; 
+            Type *hostArrSubTy = nullptr;
             if (hostSubTy->isArrayTy()){
                 hostArrSubTy = hostSubTy->getArrayElementType();
             }
@@ -356,7 +356,7 @@ namespace DRCHECKER {
             return nullptr;
         }
         Type *fieldTy = nullptr;
-        Type *fieldArrElemTy = nullptr; 
+        Type *fieldArrElemTy = nullptr;
         if (hostObj->targetType && hostObj->targetType->isStructTy() && host_dstFieldId >= 0 && host_dstFieldId < hostObj->targetType->getStructNumElements()) {
             fieldTy = hostObj->targetType->getStructElementType(host_dstFieldId);
             if (fieldTy->isArrayTy()){
@@ -373,7 +373,7 @@ namespace DRCHECKER {
         dbgs() << "expectedPointeeTy: " << InstructionUtils::getTypeStr(expectedPointeeTy) << "\n";
 #endif
         if ( (!fieldTy || !InstructionUtils::same_types(fieldTy,expectedPointeeTy)) &&
-             (!fieldArrElemTy || !InstructionUtils::same_types(fieldArrElemTy,expectedPointeeTy)) 
+             (!fieldArrElemTy || !InstructionUtils::same_types(fieldArrElemTy,expectedPointeeTy))
         ){
 #ifdef DEBUG_GET_ELEMENT_PTR
             dbgs() << "AliasAnalysisVisitor::createEmbObj(): fieldTy/fieldArrElemTy and expectedPointeeTy are different...\n";
@@ -482,7 +482,7 @@ namespace DRCHECKER {
                     Type *src_fieldTy = host_type->getStructElementType(host_dstFieldId);
                     //It's also possible that the field is an array of a certain struct, if so, we should also regard this field as
                     //a "struct" field (i.e. the first struct in the array).
-                    Type *src_fieldTy_arrElem = nullptr; 
+                    Type *src_fieldTy_arrElem = nullptr;
                     if(src_fieldTy && src_fieldTy->isArrayTy()){
                         src_fieldTy_arrElem = src_fieldTy->getArrayElementType();
                     }
@@ -490,7 +490,7 @@ namespace DRCHECKER {
                     dbgs() << "src_fieldTy: " << InstructionUtils::getTypeStr(src_fieldTy) << "\n";
                     dbgs() << "src_fieldTy_arrElem: " << InstructionUtils::getTypeStr(src_fieldTy_arrElem) << "\n";
 #endif
-                    if( (src_fieldTy && src_fieldTy == basePointToType) || 
+                    if( (src_fieldTy && src_fieldTy == basePointToType) ||
                             (src_fieldTy_arrElem && src_fieldTy_arrElem == basePointToType)
                       )
                     {
@@ -754,10 +754,12 @@ void AliasAnalysisVisitor::visitCastInst(CastInst &I) {
                         dstType = dstType->getContainedType(0);
                     }
                     newPointsToObj->targetObject->targetType = dstType;
-                    //We also need to re-taint the object (if necessary) since its type has changed.  
+                    //We also need to re-taint the object (if necessary) since its type has changed.
                     std::set<TaintFlag*> *fieldTaint = newPointsToObj->targetObject->getFieldTaintInfo(0);
-                    for (TaintFlag *tf : *fieldTaint) {
-                        newPointsToObj->targetObject->taintAllFieldsWithTag(tf);
+                    if (fieldTaint) {
+                        for (TaintFlag *tf : *fieldTaint) {
+                            newPointsToObj->targetObject->taintAllFieldsWithTag(tf);
+                        }
                     }
                 }else if (srcPointeeTy && srcPointeeTy->isStructTy() && dstPointeeTy && dstPointeeTy->isStructTy() &&
                           currTgtObjType == srcPointeeTy && newPointsToObj->dstfieldId == 0){
@@ -813,7 +815,7 @@ void AliasAnalysisVisitor::visitCastInst(CastInst &I) {
     }
 }
 
-//hz: make a copy for the src AliasObject of a different type. 
+//hz: make a copy for the src AliasObject of a different type.
 AliasObject* AliasAnalysisVisitor::x_type_obj_copy(AliasObject *srcObj, Type *dstType) {
     if (!srcObj || !dstType){
         return nullptr;
@@ -1222,7 +1224,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
         return resPointsTo;
     }
 
-    //Starting from "dstfieldId" in the target object (struct) as specified in "pto", if we step bitWidth*index bits, which field will we point to then? 
+    //Starting from "dstfieldId" in the target object (struct) as specified in "pto", if we step bitWidth*index bits, which field will we point to then?
     //The passed-in "pto" will be updated to point to the resulted object and field. (e.g. we may end up reaching a field in an embed obj in the host obj).
     //NOTE: we assume the "pto" has been verified to be a struct pointer.
     void AliasAnalysisVisitor::bit2Field(GEPOperator *I, PointerPointsTo *pto, unsigned bitWidth, long index) {
@@ -1235,7 +1237,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
             return;
         }
         AliasObject *targetObj = pto->targetObject;
-        long dstfield = pto->dstfieldId; 
+        long dstfield = pto->dstfieldId;
         Type *targetObjTy = targetObj->targetType;
 #ifdef DEBUG_GET_ELEMENT_PTR
         dbgs() << "AliasAnalysisVisitor::bit2Field(): host obj: " << InstructionUtils::getTypeStr(targetObjTy) << " | " << dstfield << " obj ID: " << (const void*)targetObj << "\n";
@@ -1590,7 +1592,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
             //hz: get field-sensitive point-to information for this GEP operator and record it in the global status.
             targetValue = visitGetElementPtrOperator(&I,gep);
         }
-        Value *targetValue_pre_strip = targetValue; 
+        Value *targetValue_pre_strip = targetValue;
         // handle pointer casts
         if(!hasPointsToObjects(targetValue)) {
             targetValue = targetValue->stripPointerCasts();

@@ -16,7 +16,6 @@ namespace DRCHECKER {
 //#define DEBUG_CAST_INSTR
 //#define DEBUG
 //#define DEBUG_BIN_INSTR
-//#define DEBUG_TMP
 #define ENFORCE_TAINT_PATH
 //#define DEBUG_ENFORCE_TAINT_PATH
 
