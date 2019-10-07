@@ -97,13 +97,15 @@ namespace DRCHECKER {
                 //(1) change the object type to the "expObjTy",
                 //(2) setup the taint information properly.
 #ifdef DEBUG_CHANGE_HEAPLOCATIONTYPE
-                dbgs() << "AliasObject::fetchPointsToObjects: isHeapLocation: " << (obj->targetObject && obj->targetObject->isHeapLocation()) << " dstField: " << obj->dstfieldId;
-                dbgs() << " expObjTy: " << InstructionUtils::getTypeStr(expObjTy) << "\n";
+                //dbgs() << "AliasObject::fetchPointsToObjects: isHeapLocation: " << (obj->targetObject && obj->targetObject->isHeapLocation()) << " dstField: " << obj->dstfieldId;
+                //dbgs() << " expObjTy: " << InstructionUtils::getTypeStr(expObjTy) << "\n";
 #endif
                 if (obj->dstfieldId == 0 && obj->targetObject && obj->targetObject->isHeapLocation() && 
                     expObjTy && expObjTy->isStructTy() && obj->targetObject->targetType != expObjTy) 
                 {
 #ifdef DEBUG_CHANGE_HEAPLOCATIONTYPE
+                    dbgs() << "AliasObject::fetchPointsToObjects: isHeapLocation: " << (obj->targetObject && obj->targetObject->isHeapLocation()) << " dstField: " << obj->dstfieldId;
+                    dbgs() << " expObjTy: " << InstructionUtils::getTypeStr(expObjTy) << "\n";
                     dbgs() << "AliasObject::fetchPointsToObjects: Change type of the HeapLocation.\n";
 #endif
                     //Change type.
@@ -151,13 +153,30 @@ namespace DRCHECKER {
         }else {
             return;
         }
-        //NOTE: "pointsTo" should only store point-to information for the pointer fields.
-        //So if "hasObjects" is false, we need to first ensure that the field is a pointer before creating new objects.
-        if (!ety->isPointerTy()) {
+        //There will be several cases here:
+        //(1) The dst element is a pointer, then we can try to create a dummy obj for it since there are no related records in "pointsTo";
+        //(2) The dst element is an embedded struct, if this is the case we need to recursively extract the first field of it until we get a non-emb-struct field, then we can decide the type of dummy obj to create.
+        //(3) No type information for the dst element is available, return directly.
+        Type *e_pointto_ty = nullptr;
+        if (!ety) {
+            //TODO: What can we do here?
+#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
+            dbgs() << "Cannot decide the type of the dst element!\n";
+            fetchPointsToObjects_log(srcfieldId, dstObjects, targetInstr, create_arg_obj);
+#endif
+            return;
+        }else if (ety->isPointerTy()) {
+            e_pointto_ty = ety->getPointerElementType();
+        }else if (ety->isStructTy()) {
+            //Ok the dst element is an embedded struct.
+        }else {
+            //TODO: Can we handle any other dst element types?
             return;
         }
-        Type *e_pointto_ty = ety->getPointerElementType();
-        if (e_pointto_ty->isFunctionTy()) {
+        //Create the dummy obj according to the dst element type.
+        if (!e_pointto_ty) {
+            return;
+        }else if (e_pointto_ty->isFunctionTy()) {
             //This is a function pointer w/o point-to function, which can cause trobule later in resolving indirect function call.
             //We can try to do some smart resolving here by looking at the same-typed global constant objects.
 #ifdef SMART_FUNC_PTR_RESOLVE

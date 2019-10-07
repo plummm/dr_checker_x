@@ -19,76 +19,18 @@ namespace DRCHECKER {
 //#define MAX_ALIAS_OBJ 50
 //hz: Enable creating new outside objects on the fly when the pointer points to nothing.
 #define CREATE_DUMMY_OBJ_IF_NULL
-#define DEBUG_CREATE_DUMMY_OBJ_IF_NULL
 #define DEBUG_UPDATE_POINTSTO
 //#define DEBUG_TMP
 
     //hz: A helper method to create and (taint) a new OutsideObject.
     OutsideObject* AliasAnalysisVisitor::createOutsideObj(Value *p, bool taint) {
-#ifdef DEBUG_CREATE_DUMMY_OBJ_IF_NULL
-        errs() << "AliasAnalysisVisitor::createOutsideObj(): ";
-        if(p){
-            errs() << InstructionUtils::getValueStr(p) << "  |  " << p->getName().str() + " : " << InstructionUtils::getTypeStr(p->getType());
-        }
-        errs() << "\n";
-#endif
-        //First do some sanity checks, we need to make sure that "p" is a structure pointer.
-        if (!(p && p->getType()->isPointerTy() && p->getType()->getPointerElementType()->isStructTy())) {
-#ifdef DEBUG_CREATE_DUMMY_OBJ_IF_NULL
-            errs() << "It's not a struct pointer! Cannot create an outside object!\n";
-#endif
-            return nullptr;
-        }
-        //Don't create OutsideObject for null ptr.
-        if (p->getName().str().empty() && !dyn_cast<Instruction>(p)){
-#ifdef DEBUG_CREATE_DUMMY_OBJ_IF_NULL
-            errs() << "Null value name! Cannot create an outside object!\n";
-#endif
-            return nullptr;
-        }
-#ifdef DEBUG_CREATE_DUMMY_OBJ_IF_NULL
-        errs() << "Try to create new outside object.\n";
-#endif
-        //Create a new outside object.
-        //OutsideObject *newObj = new OutsideObject(p, p->getType()->getContainedType(0));
-        OutsideObject *newObj = new OutsideObject(p, p->getType()->getPointerElementType());
-#ifdef DEBUG_CREATE_DUMMY_OBJ_IF_NULL
-        errs() << "New obj created: " << (const void*)newObj << "\n";
-#endif
-        //All outside objects are generated automatically.
-        newObj->auto_generated = true;
-        //Set up point-to records inside the AliasObject.
-        PointerPointsTo *newPointsTo = new PointerPointsTo();
-        newPointsTo->targetPointer = p;
-        newPointsTo->fieldId = 0;
-        newPointsTo->dstfieldId = 0;
-        newPointsTo->targetObject = newObj;
-        newObj->pointersPointsTo.insert(newObj->pointersPointsTo.end(),newPointsTo);
-        //Set up point-to records in the global state.
         std::map<Value *, std::set<PointerPointsTo*>*> *currPointsTo = this->currState.getPointsToInfo(this->currFuncCallSites);
-        std::set<PointerPointsTo *> *newPointsToSet = new std::set<PointerPointsTo *>();
-        newPointsToSet->insert(newPointsToSet->end(), newPointsTo);
-        (*currPointsTo)[p] = newPointsToSet;
+        std::set<TaintFlag*> *existingTaints = nullptr;
         //Need to taint it?
         if (taint) {
-            //Is the pointer "p" tainted itself?
-            //
-            std::set<TaintFlag*> *existingTaints = TaintUtils::getTaintInfo(this->currState,this->currFuncCallSites,p);
-            if (existingTaints && !existingTaints->empty()) {
-                for (TaintFlag *currTaint : *existingTaints) {
-                    newObj->taintAllFieldsWithTag(currTaint);
-                }
-            }else {
-                //The original pointer is not tainted, treat it as a global state.
-                TaintFlag *currFlag = new TaintFlag(p, true);
-                newObj->taintAllFieldsWithTag(currFlag);
-            }
-            newObj->is_taint_src = true;
-#ifdef DEBUG_CREATE_DUMMY_OBJ_IF_NULL
-            dbgs() << "AliasAnalysisVisitor::createOutsideObj(): set |is_taint_src| for the outside obj.\n";
-#endif
+            existingTaints = TaintUtils::getTaintInfo(this->currState,this->currFuncCallSites,p);
         }
-        return newObj;
+        return DRCHECKER::createOutsideObj(p, currPointsTo, taint, existingTaints);
     }
 
     std::set<PointerPointsTo*>* AliasAnalysisVisitor::getPointsToObjects(Value *srcPointer) {
@@ -348,74 +290,8 @@ namespace DRCHECKER {
     }
 
     AliasObject *AliasAnalysisVisitor::createEmbObj(AliasObject *hostObj, long host_dstFieldId, Value *v) {
-#ifdef DEBUG_GET_ELEMENT_PTR
-        dbgs() << "AliasAnalysisVisitor::createEmbObj()\n";
-#endif
-        AliasObject *newObj = nullptr;
-        if (!hostObj) {
-            return nullptr;
-        }
-        Type *fieldTy = nullptr;
-        Type *fieldArrElemTy = nullptr;
-        if (hostObj->targetType && hostObj->targetType->isStructTy() && host_dstFieldId >= 0 && host_dstFieldId < hostObj->targetType->getStructNumElements()) {
-            fieldTy = hostObj->targetType->getStructElementType(host_dstFieldId);
-            if (fieldTy->isArrayTy()){
-                fieldArrElemTy = fieldTy->getArrayElementType();
-            }
-        }
-        Type *expectedPointeeTy = nullptr;
-        if (v && v->getType() && v->getType()->isPointerTy()) {
-            expectedPointeeTy = v->getType()->getPointerElementType();
-        }
-#ifdef DEBUG_GET_ELEMENT_PTR
-        dbgs() << "AliasAnalysisVisitor::createEmbObj(): hostObj: " << (const void*)(hostObj) << " host_dstFieldId: " << host_dstFieldId << "\n";
-        dbgs() << "fieldTy: " << InstructionUtils::getTypeStr(fieldTy) << "\n";
-        dbgs() << "expectedPointeeTy: " << InstructionUtils::getTypeStr(expectedPointeeTy) << "\n";
-#endif
-        if ( (!fieldTy || !InstructionUtils::same_types(fieldTy,expectedPointeeTy)) &&
-             (!fieldArrElemTy || !InstructionUtils::same_types(fieldArrElemTy,expectedPointeeTy))
-        ){
-#ifdef DEBUG_GET_ELEMENT_PTR
-            dbgs() << "AliasAnalysisVisitor::createEmbObj(): fieldTy/fieldArrElemTy and expectedPointeeTy are different...\n";
-#endif
-            return nullptr;
-        }
-        if (hostObj->embObjs.find(host_dstFieldId) != hostObj->embObjs.end()){
-#ifdef DEBUG_GET_ELEMENT_PTR
-            dbgs() << "AliasAnalysisVisitor::createEmbObj(): find the previosuly created embed object!\n";
-#endif
-            //We have created that embedded object previously.
-            newObj = hostObj->embObjs[host_dstFieldId];
-        }
-        if (!newObj || !InstructionUtils::same_types(newObj->targetType,fieldTy)){
-#ifdef DEBUG_GET_ELEMENT_PTR
-            dbgs() << "AliasAnalysisVisitor::createEmbObj(): try to create a new embed object because ";
-            if (!newObj) {
-                dbgs() << "there is no emb obj in cache...\n";
-            }else{
-                dbgs() << "the emb obj in cache has a different type than expected: " << InstructionUtils::getTypeStr(newObj->targetType) << "\n";
-            }
-#endif
-            //Need to create a new AliasObject for the embedded struct.
-            newObj = this->createOutsideObj(v,false);
-            //Properly taint it.
-            if(newObj){
-                newObj->is_taint_src = hostObj->is_taint_src;
-                //This new TargetObject should also be tainted according to the host object taint flags.
-                std::set<TaintFlag*> *src_taintFlags = hostObj->getFieldTaintInfo(host_dstFieldId);
-                if(src_taintFlags){
-                    for(TaintFlag *currTaintFlag:*src_taintFlags){
-                        newObj->taintAllFieldsWithTag(currTaintFlag);
-                    }
-                }
-                //TODO: all contents taint flag.
-                //Record it in the "embObjs".
-                hostObj->embObjs[host_dstFieldId] = newObj;
-                newObj->parent = hostObj;
-                newObj->parent_field = host_dstFieldId;
-            }
-        }
-        return newObj;
+        std::map<Value *, std::set<PointerPointsTo*>*> *currPointsTo = this->currState.getPointsToInfo(this->currFuncCallSites);
+        return DRCHECKER::createEmbObj(hostObj, host_dstFieldId, v, currPointsTo);
     }
 
     std::set<PointerPointsTo*>* AliasAnalysisVisitor::makePointsToCopy(Instruction *propInstruction, Value *srcPointer,
@@ -924,11 +800,13 @@ void AliasAnalysisVisitor::visitPHINode(PHINode &I) {
         allVals.insert(allVals.end(), I.getIncomingValue(i));
     }
 #ifdef CREATE_DUMMY_OBJ_IF_NULL
+    /*
     for (Value *v : allVals) {
         if (!InstructionUtils::isScalar(v) && !hasPointsToObjects(v)) {
             this->createOutsideObj(v,true);
         }
     }
+    */
 #endif
 
     std::set<PointerPointsTo*>* finalPointsToInfo = mergePointsTo(allVals, &I);
@@ -1188,7 +1066,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
             IntegerType *int_ty = dyn_cast<IntegerType>(basePointeeTy);
             unsigned width = int_ty->getBitWidth();
 #ifdef DEBUG_GET_ELEMENT_PTR
-            dbgs() << "AliasAnalysisVisitor::processGEPFirstDimension(): basePointeeTy is i" << width <<"*\n";
+            dbgs() << "AliasAnalysisVisitor::processGEPFirstDimension(): basePointeeTy is i" << width <<"\n";
 #endif
             for (PointerPointsTo *currPto : *srcPointsTo) {
                 if (!currPto || !currPto->targetObject) {

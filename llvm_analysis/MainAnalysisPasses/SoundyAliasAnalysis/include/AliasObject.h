@@ -30,6 +30,8 @@ using namespace llvm;
 #define DEBUG_CHANGE_HEAPLOCATIONTYPE
 #define DEBUG_UPDATE_FIELD_POINT
 #define DEBUG_UPDATE_FIELD_TAINT
+#define DEBUG_CREATE_DUMMY_OBJ_IF_NULL
+#define DEBUG_CREATE_EMB_OBJ
 
 namespace DRCHECKER {
 //#define DEBUG_FUNCTION_ARG_OBJ_CREATION
@@ -1207,6 +1209,148 @@ namespace DRCHECKER {
         }//TODO: HeapAllocation
         return v;
         */
+    }
+
+    //hz: A helper method to create and (taint) a new OutsideObject.
+    //The arg "currPointsTo" is the current global point-to state.
+    static OutsideObject* createOutsideObj(Value *p, std::map<Value*, std::set<PointerPointsTo*>*> *currPointsTo, bool taint, std::set<TaintFlag*> *existingTaints) {
+#ifdef DEBUG_CREATE_DUMMY_OBJ_IF_NULL
+        dbgs() << "createOutsideObj(): ";
+        if(p){
+            dbgs() << InstructionUtils::getValueStr(p) << "  |  " << p->getName().str() + " : " << InstructionUtils::getTypeStr(p->getType());
+        }
+        dbgs() << "\n";
+#endif
+        //First do some sanity checks, we need to make sure that "p" is a structure pointer.
+        if (!(p && p->getType()->isPointerTy() && p->getType()->getPointerElementType()->isStructTy())) {
+#ifdef DEBUG_CREATE_DUMMY_OBJ_IF_NULL
+            dbgs() << "createOutsideObj(): It's not a struct pointer! Cannot create an outside object!\n";
+#endif
+            return nullptr;
+        }
+        //Don't create OutsideObject for null ptr.
+        if (p->getName().str().empty() && !dyn_cast<Instruction>(p)){
+#ifdef DEBUG_CREATE_DUMMY_OBJ_IF_NULL
+            dbgs() << "createOutsideObj(): Null value name! Cannot create an outside object!\n";
+#endif
+            return nullptr;
+        }
+#ifdef DEBUG_CREATE_DUMMY_OBJ_IF_NULL
+        dbgs() << "createOutsideObj(): Try to create new outside object.\n";
+#endif
+        //Create a new outside object.
+        //OutsideObject *newObj = new OutsideObject(p, p->getType()->getContainedType(0));
+        OutsideObject *newObj = new OutsideObject(p, p->getType()->getPointerElementType());
+#ifdef DEBUG_CREATE_DUMMY_OBJ_IF_NULL
+        dbgs() << "createOutsideObj(): New obj created: " << (const void*)newObj << "\n";
+#endif
+        //All outside objects are generated automatically.
+        newObj->auto_generated = true;
+        //Set up point-to records inside the AliasObject.
+        PointerPointsTo *newPointsTo = new PointerPointsTo();
+        newPointsTo->targetPointer = p;
+        newPointsTo->fieldId = 0;
+        newPointsTo->dstfieldId = 0;
+        newPointsTo->targetObject = newObj;
+        newObj->pointersPointsTo.insert(newObj->pointersPointsTo.end(),newPointsTo);
+        //Set up point-to records in the global state.
+        if (currPointsTo) {
+            std::set<PointerPointsTo *> *newPointsToSet = new std::set<PointerPointsTo *>();
+            newPointsToSet->insert(newPointsToSet->end(), newPointsTo);
+            (*currPointsTo)[p] = newPointsToSet;
+        }
+        //Need taint?
+        if (taint) {
+            if (existingTaints && !existingTaints->empty()) {
+                for (TaintFlag *currTaint : *existingTaints) {
+                    newObj->taintAllFieldsWithTag(currTaint);
+                }
+            }else {
+                //The original pointer is not tainted, treat it as a global state.
+                TaintFlag *currFlag = new TaintFlag(p, true);
+                newObj->taintAllFieldsWithTag(currFlag);
+            }
+            newObj->is_taint_src = true;
+#ifdef DEBUG_CREATE_DUMMY_OBJ_IF_NULL
+            dbgs() << "createOutsideObj(): set |is_taint_src| for the outside obj.\n";
+#endif
+        }
+        return newObj;
+    }
+
+    //hz: A helper method to create and (taint) an embedded struct obj in the host obj.
+    //The arg "currPointsTo" is the current global point-to state.
+    static AliasObject *createEmbObj(AliasObject *hostObj, long host_dstFieldId, Value *v, std::map<Value*, std::set<PointerPointsTo*>*> *currPointsTo) {
+#ifdef DEBUG_CREATE_EMB_OBJ
+        dbgs() << "Start createEmbObj()\n";
+#endif
+        AliasObject *newObj = nullptr;
+        if (!hostObj) {
+            return nullptr;
+        }
+        Type *fieldTy = nullptr;
+        Type *fieldArrElemTy = nullptr;
+        if (hostObj->targetType && hostObj->targetType->isStructTy() && host_dstFieldId >= 0 && host_dstFieldId < hostObj->targetType->getStructNumElements()) {
+            fieldTy = hostObj->targetType->getStructElementType(host_dstFieldId);
+            if (fieldTy->isArrayTy()){
+                fieldArrElemTy = fieldTy->getArrayElementType();
+            }
+        }
+        Type *expectedPointeeTy = nullptr;
+        if (v && v->getType() && v->getType()->isPointerTy()) {
+            expectedPointeeTy = v->getType()->getPointerElementType();
+        }
+#ifdef DEBUG_CREATE_EMB_OBJ
+        dbgs() << "createEmbObj(): hostObj: " << (const void*)(hostObj) << " host_dstFieldId: " << host_dstFieldId << "\n";
+        dbgs() << "fieldTy: " << InstructionUtils::getTypeStr(fieldTy) << "\n";
+        dbgs() << "expectedPointeeTy: " << InstructionUtils::getTypeStr(expectedPointeeTy) << "\n";
+#endif
+        if ( (!fieldTy || !InstructionUtils::same_types(fieldTy,expectedPointeeTy)) &&
+             (!fieldArrElemTy || !InstructionUtils::same_types(fieldArrElemTy,expectedPointeeTy))
+        ){
+#ifdef DEBUG_CREATE_EMB_OBJ
+            dbgs() << "createEmbObj(): fieldTy/fieldArrElemTy and expectedPointeeTy are different...\n";
+#endif
+            return nullptr;
+        }
+        if (hostObj->embObjs.find(host_dstFieldId) != hostObj->embObjs.end()){
+#ifdef DEBUG_CREATE_EMB_OBJ
+            dbgs() << "createEmbObj(): find the previosuly created embed object!\n";
+#endif
+            //We have created that embedded object previously.
+            newObj = hostObj->embObjs[host_dstFieldId];
+        }
+        if (!newObj || !InstructionUtils::same_types(newObj->targetType,fieldTy)){
+#ifdef DEBUG_CREATE_EMB_OBJ
+            dbgs() << "createEmbObj(): try to create a new embed object because ";
+            if (!newObj) {
+                dbgs() << "there is no emb obj in cache...\n";
+            }else{
+                dbgs() << "the emb obj in cache has a different type than expected: " << InstructionUtils::getTypeStr(newObj->targetType) << "\n";
+            }
+#endif
+            //
+            //
+            //Need to create a new AliasObject for the embedded struct.
+            newObj = DRCHECKER::createOutsideObj(v, currPointsTo, false, nullptr);
+            //Properly taint it.
+            if(newObj){
+                newObj->is_taint_src = hostObj->is_taint_src;
+                //This new TargetObject should also be tainted according to the host object taint flags.
+                std::set<TaintFlag*> *src_taintFlags = hostObj->getFieldTaintInfo(host_dstFieldId);
+                if(src_taintFlags){
+                    for(TaintFlag *currTaintFlag:*src_taintFlags){
+                        newObj->taintAllFieldsWithTag(currTaintFlag);
+                    }
+                }
+                //TODO: all contents taint flag.
+                //Record it in the "embObjs".
+                hostObj->embObjs[host_dstFieldId] = newObj;
+                newObj->parent = hostObj;
+                newObj->parent_field = host_dstFieldId;
+            }
+        }
+        return newObj;
     }
 
 }
