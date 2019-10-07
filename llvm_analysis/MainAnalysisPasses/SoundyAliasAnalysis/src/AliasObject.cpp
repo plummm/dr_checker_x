@@ -129,6 +129,7 @@ namespace DRCHECKER {
             return;
         }
         //Below we try to create a dummy object.
+        //Get the type of the field for which we want to get the pointee.
         Type *ety = nullptr;
         if (!this->targetType) {
             return;
@@ -153,11 +154,6 @@ namespace DRCHECKER {
         }else {
             return;
         }
-        //There will be several cases here:
-        //(1) The dst element is a pointer, then we can try to create a dummy obj for it since there are no related records in "pointsTo";
-        //(2) The dst element is an embedded struct/array, if this is the case we need to recursively extract the first field of it until we get a non-emb-struct field, then we can decide the type of dummy obj to create.
-        //(3) No type information for the dst element is available, return directly.
-        Type *e_pointto_ty = nullptr;
         if (!ety) {
             //TODO: What can we do here?
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
@@ -166,12 +162,27 @@ namespace DRCHECKER {
 #endif
             return;
         }
+        //Get the pointee type of the dst field.
+        //There will be several cases here:
+        //(1) The dst element is a pointer, then we can try to create a dummy obj for it since there are no related records in "pointsTo";
+        //(2) The dst element is an embedded struct/array, if this is the case we need to recursively extract the first field of it until we get a non-emb-struct field, then we can decide the type of dummy obj to create.
+        //(3) No type information for the dst element is available, return directly.
+        Type *e_pointto_ty = nullptr;
         AliasObject *hostObj = this;
         long fid = srcfieldId;
         while (!ety->isPointerTy()) {
+#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
+            dbgs() << "fetchPointsToObjects(): dst field " << fid << " is not a pointer: " << InstructionUtils::getTypeStr(ety) << "\n"; 
+#endif
             if (ety->isStructTy() || ety->isArrayTy()) {
+#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
+                dbgs() << "fetchPointsToObjects(): Try to create an emb obj for the dst field.\n"; 
+#endif
                 AliasObject *newObj = DRCHECKER::createEmbObj(hostObj, fid);
                 if (!newObj) {
+#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
+                    dbgs() << "!!! fetchPointsToObjects(): Failed to create the emb obj.\n"; 
+#endif
                     break;
                 }
                 hostObj = newObj;
