@@ -155,7 +155,7 @@ namespace DRCHECKER {
         }
         //There will be several cases here:
         //(1) The dst element is a pointer, then we can try to create a dummy obj for it since there are no related records in "pointsTo";
-        //(2) The dst element is an embedded struct, if this is the case we need to recursively extract the first field of it until we get a non-emb-struct field, then we can decide the type of dummy obj to create.
+        //(2) The dst element is an embedded struct/array, if this is the case we need to recursively extract the first field of it until we get a non-emb-struct field, then we can decide the type of dummy obj to create.
         //(3) No type information for the dst element is available, return directly.
         Type *e_pointto_ty = nullptr;
         if (!ety) {
@@ -165,46 +165,65 @@ namespace DRCHECKER {
             fetchPointsToObjects_log(srcfieldId, dstObjects, targetInstr, create_arg_obj);
 #endif
             return;
-        }else if (ety->isPointerTy()) {
+        }
+        AliasObject *hostObj = this;
+        long fid = srcfieldId;
+        while (!ety->isPointerTy()) {
+            if (ety->isStructTy() || ety->isArrayTy()) {
+                AliasObject *newObj = DRCHECKER::createEmbObj(hostObj, fid);
+                if (!newObj) {
+                    break;
+                }
+                hostObj = newObj;
+                fid = 0;
+                if (ety->isStructTy()) {
+                    ety = ety->getStructElementType(0);
+                }else if (ety->isArrayTy()) {
+                    ety = ety->getArrayElementType();
+                }
+            }else {
+                //TODO: Can we handle any other dst element types?
+                return;
+            }
+        }
+        if (ety->isPointerTy()) {
             e_pointto_ty = ety->getPointerElementType();
-        }else if (ety->isStructTy()) {
-            //Ok the dst element is an embedded struct.
         }else {
-            //TODO: Can we handle any other dst element types?
             return;
         }
+        //TODO: replace the below "this->" w/ possibly newly created emb obj.
         //Create the dummy obj according to the dst element type.
-        if (!e_pointto_ty) {
+        if (!e_pointto_ty || !hostObj) {
             return;
         }else if (e_pointto_ty->isFunctionTy()) {
             //This is a function pointer w/o point-to function, which can cause trobule later in resolving indirect function call.
             //We can try to do some smart resolving here by looking at the same-typed global constant objects.
 #ifdef SMART_FUNC_PTR_RESOLVE
             std::vector<Function*> candidateFuncs;
-            this->getPossibleMemberFunctions(targetInstr, dyn_cast<FunctionType>(e_pointto_ty), this->targetType, srcfieldId, candidateFuncs);
+            hostObj->getPossibleMemberFunctions(targetInstr, dyn_cast<FunctionType>(e_pointto_ty), hostObj->targetType, fid, candidateFuncs);
             for (Function *func : candidateFuncs) {
                 GlobalObject *newObj = new GlobalObject(func);
 
                 //Update pointsFrom info in the newly created obj.
-                this->addToPointsFrom(newObj);
+                hostObj->addToPointsFrom(newObj);
 
                 //Update points-to
                 std::set<PointerPointsTo*> dstPointsTo;
                 PointerPointsTo *newPointsToObj = new PointerPointsTo();
                 newPointsToObj->propogatingInstruction = targetInstr;
                 newPointsToObj->targetObject = newObj;
-                newPointsToObj->fieldId = srcfieldId;
+                newPointsToObj->fieldId = fid;
                 newPointsToObj->dstfieldId = 0;
                 //TODO: newPointsToObj->targetPointer may not need be set since "pointsTo" will only contain "ObjectPointsTo" type that doesn't have targetPointer.
                 dstPointsTo.insert(newPointsToObj);
-                this->updateFieldPointsTo(srcfieldId,&dstPointsTo,targetInstr);
+                hostObj->updateFieldPointsTo(fid,&dstPointsTo,targetInstr);
 
                 dstObjects.insert(dstObjects.end(), std::make_pair(0, newObj));
             }
 #endif
         }else if (e_pointto_ty->isStructTy()) {
             // if there are no struct objects that this pointer field points to, generate a dummy object.
-            if(create_arg_obj || this->isFunctionArg() || this->isOutsideObject()) {
+            if(create_arg_obj || hostObj->isFunctionArg() || hostObj->isOutsideObject()) {
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
                 dbgs() << "Creating a new dummy AliasObject...\n";
 #endif
@@ -214,24 +233,24 @@ namespace DRCHECKER {
 #endif
                 newObj->auto_generated = true;
                 // get the taint for the field and add that taint to the newly created object
-                this->taintSubObj(newObj,srcfieldId,targetInstr);
+                hostObj->taintSubObj(newObj,fid,targetInstr);
 
                 //Update the pointsFrom info in the newly created obj.
-                this->addToPointsFrom(newObj);
+                hostObj->addToPointsFrom(newObj);
 
                 //Update points-to
                 std::set<PointerPointsTo*> dstPointsTo;
                 PointerPointsTo *newPointsToObj = new PointerPointsTo();
                 newPointsToObj->propogatingInstruction = targetInstr;
                 newPointsToObj->targetObject = newObj;
-                newPointsToObj->fieldId = srcfieldId;
+                newPointsToObj->fieldId = fid;
                 // this is the field of the newly created object to which
                 // new points to points to
                 newPointsToObj->dstfieldId = 0;
                 //TODO: newPointsToObj->targetPointer may not need be set since "pointsTo" will only contain "ObjectPointsTo" type that doesn't have targetPointer.
                 dstPointsTo.insert(newPointsToObj);
-                //NOTE: if we reach here, then there must be no point-to records for this "srcfieldId" yet, so we can directly use updateFieldPointsTo to do a strong update.
-                this->updateFieldPointsTo(srcfieldId,&dstPointsTo,targetInstr);
+                //NOTE: if we reach here, then there must be no point-to records for this "fid" yet, so we can directly use updateFieldPointsTo to do a strong update.
+                hostObj->updateFieldPointsTo(fid,&dstPointsTo,targetInstr);
 
                 dstObjects.insert(dstObjects.end(), std::make_pair(0, newObj));
             }
