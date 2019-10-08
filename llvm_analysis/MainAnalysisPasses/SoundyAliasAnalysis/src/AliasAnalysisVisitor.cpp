@@ -986,7 +986,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
         }
     }
 
-    //Analyze the 1st dimension of the GEP and return a point-to set of the 1st dimension.
+    //Analyze the 1st dimension of the GEP (the arg "I") and return a point-to set of the 1st dimension.
     //NOTE: we assume that "srcPointer" has already been processed regarding inlined GEP operator and strip by the caller.
     std::set<PointerPointsTo*> *AliasAnalysisVisitor::processGEPFirstDimension(Instruction *propInst, GEPOperator *I, Value *srcPointer) {
         //First try to get the point-to of the srcPointer..
@@ -1032,7 +1032,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
 #ifdef DEBUG_GET_ELEMENT_PTR
             dbgs() << "AliasAnalysisVisitor::processGEPFirstDimension(): Null orgPointer..return\n";
 #endif
-            return srcPointsTo;
+            return nullptr;
         }
         Type *basePointerTy = orgPointer->getType();
         Type *basePointeeTy = nullptr;
@@ -1045,7 +1045,15 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
 #ifdef DEBUG_GET_ELEMENT_PTR
             dbgs() << "AliasAnalysisVisitor::processGEPFirstDimension(): Non-constant 0st index!\n";
 #endif
-            return srcPointsTo;
+            //The logic here is that if the base pointer is of an integer pointer type, that means it will possibly do some pointer
+            //arithmetics w/ a variable offset, in which case we don't know anything about the result pointee, so we just return nullptr.
+            //If it's not an integer pointer, then possibly it's a struct pointer and the first variable index intends to retrieve a
+            //struct element from an array, so we just return the original point-to (i.e. collapse the whole array to one element).
+            if (basePointeeTy && dyn_cast<IntegerType>(basePointeeTy)) {
+                return nullptr;
+            }else {
+                return srcPointsTo;
+            }
         }
         long index = CI->getSExtValue();
 #ifdef DEBUG_GET_ELEMENT_PTR
@@ -1084,12 +1092,13 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
                 newPto->targetPointer = I;
                 newPto->targetObject = currPto->targetObject;
                 newPto->dstfieldId = currPto->dstfieldId;
-                resPointsTo->insert(newPto);
                 //Now we will process the special cases where the integer pointer points to a struct...
 #ifdef DEBUG_GET_ELEMENT_PTR
                 dbgs() << "AliasAnalysisVisitor::processGEPFirstDimension(): invoke bit2Field()...\n";
 #endif
-                this->bit2Field(I,newPto,width,index);
+                if(!this->bit2Field(I,newPto,width,index)) {
+                    resPointsTo->insert(newPto);
+                }
             }
         } else {
             return srcPointsTo;
@@ -1105,14 +1114,18 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
     //Starting from "dstfieldId" in the target object (struct) as specified in "pto", if we step bitWidth*index bits, which field will we point to then?
     //The passed-in "pto" will be updated to point to the resulted object and field. (e.g. we may end up reaching a field in an embed obj in the host obj).
     //NOTE: we assume the "pto" has been verified to be a struct pointer.
-    void AliasAnalysisVisitor::bit2Field(GEPOperator *I, PointerPointsTo *pto, unsigned bitWidth, long index) {
+    int AliasAnalysisVisitor::bit2Field(GEPOperator *I, PointerPointsTo *pto, unsigned bitWidth, long index) {
+        if (index == 0) {
+            return 0;
+        }
         static unsigned long suff = 0;
         DataLayout *dl = this->currState.targetDataLayout;
         if (!dl || !pto) {
 #ifdef DEBUG_GET_ELEMENT_PTR
             dbgs() << "AliasAnalysisVisitor::bit2Field(): !dl || !pto\n";
 #endif
-            return;
+            //We'll lose the point-to in this case.
+            return -1;
         }
         AliasObject *targetObj = pto->targetObject;
         long dstfield = pto->dstfieldId;
@@ -1121,7 +1134,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
         dbgs() << "AliasAnalysisVisitor::bit2Field(): host obj: " << InstructionUtils::getTypeStr(targetObjTy) << " | " << dstfield << " obj ID: " << (const void*)targetObj << "\n";
 #endif
         if (!targetObjTy || !targetObjTy->isStructTy()) {
-            return;
+            return -1;
         }
         StructType *stTy = dyn_cast<StructType>(targetObjTy);
         unsigned ne = stTy->getNumElements();
@@ -1129,7 +1142,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
 #ifdef DEBUG_GET_ELEMENT_PTR
             dbgs() << "AliasAnalysisVisitor::bit2Field(): dstfield out-of-bound.\n";
 #endif
-            return;
+            return -1;
         }
         //NOTE: StructLayout describes the offset/size of each field in a struct, including the possible padding.
         const StructLayout *stLayout = dl->getStructLayout(stTy);
@@ -1137,17 +1150,18 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
 #ifdef DEBUG_GET_ELEMENT_PTR
             dbgs() << "AliasAnalysisVisitor::bit2Field(): !stLayout\n";
 #endif
-            return;
+            return -1;
         }
         //NOTE: both "dstOffset" and "bits" can be divided by 8, "bits" can be negative.
         long dstOffset = stLayout->getElementOffsetInBits(dstfield);
         long bits = index * (long)bitWidth;
         long resOffset = dstOffset + bits;
+        //TODO: container_of(), try to infer the container struct.
         if (resOffset < 0 || resOffset >= stLayout->getSizeInBits()) {
 #ifdef DEBUG_GET_ELEMENT_PTR
             dbgs() << "AliasAnalysisVisitor::bit2Field(): resOffset (in bits) out-of-bound.\n";
 #endif
-            return;
+            return -1;
         }
         unsigned resIndex = stLayout->getElementContainingOffset(resOffset/8);
         pto->dstfieldId = resIndex;
@@ -1158,7 +1172,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
 #endif
         if (!delta) {
             //An exact match, just update the "pto" to the target field (already done) and return.
-            return;
+            return 0;
         } else if (delta > 0) {
             //Ok, we have possibly stepped into an embedded object (struct or array/vector).
             //If it's an embedded struct, we need to recursively retrieve/create it and then position the "pto".
@@ -1167,73 +1181,43 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
             dbgs() << "AliasAnalysisVisitor::bit2Field(): ety: " << InstructionUtils::getTypeStr(ety) << "\n";
 #endif
             if (!ety) {
-                return;
+                return -1;
             }
-            if (ety->isStructTy() && I) {
-                //First get/create the embedded struct..
-                //To invoke createEmbObj() we need a Value that is a pointer to the emb struct, to obtain this pointer, we can:
-                //Method 0:
-                //(1) First create a cast instruction that convert integer *srcPointer in the "I" to stTy*.
-                //(2) Then create a GEP inst that obtains the pointer to the emb obj.
-                //Method 1 (in use):
-                //Directly create a cast inst to convert srcPointer to ety*.
-                Value *orgPointer = I->getPointerOperand();
-                ConstantInt *CI = dyn_cast<ConstantInt>(I->getOperand(1));
-                if (!orgPointer || !CI) {
-#ifdef DEBUG_GET_ELEMENT_PTR
-                    dbgs() << "AliasAnalysisVisitor::bit2Field(): !orgPointer || !CI\n";
-#endif
-                    return;
-                }
-                //BitCastInst *castInst = new BitCastInst(orgPointer, PointerType::get(stTy, orgPointer->getType()->getPointerAddressSpace()));
-                BitCastInst *castInst = new BitCastInst(orgPointer, PointerType::get(ety, orgPointer->getType()->getPointerAddressSpace()), "tmp_cast_" + std::to_string(suff++));
-                if (!castInst) {
-                    return;
-                }
-#ifdef DEBUG_GET_ELEMENT_PTR
-                dbgs() << "BitCastInst: " << InstructionUtils::getValueStr(castInst) << " | ty: " << InstructionUtils::getTypeStr(castInst->getType()) << "\n";
-#endif
-                /*
-                //NOTE: we should give a name to the newly created GEP so that it can pass the sanity check in createOutsideObj().
-                std::vector<Value*> indices;
-                //0st dimension - keep it to 0.
-                indices.push_back(ConstantInt::get(CI->getType(),0));
-                //1st dimension - set it to the index of the emb struct.
-                indices.push_back(ConstantInt::get(CI->getType(),resIndex));
-                ArrayRef<Value*> IdxList(indices);
-                GetElementPtrInst *gepInst = GetElementPtrInst::Create(stTy, castInst, IdxList, "tmp_gep_" + std::to_string(suff++));
-                if (!gepInst) {
-                    return;
-                }
-#ifdef DEBUG_GET_ELEMENT_PTR
-                dbgs() << "GEPInst: " << InstructionUtils::getValueStr(gepInst) << " | ty: " << InstructionUtils::getTypeStr(gepInst->getType()) << "\n";
-#endif
-                */
-                AliasObject *newObj = this->createEmbObj(targetObj, resIndex, castInst);
+            if (ety->isStructTy()) {
+                AliasObject *newObj = DRCHECKER::createEmbObj(targetObj, resIndex);
                 if (!newObj) {
                     //TODO: what to do now...
-                    pto->dstfieldId = 0;
 #ifdef DEBUG_GET_ELEMENT_PTR
                     dbgs() << "AliasAnalysisVisitor::bit2Field(): fail to get/create the embedded struct!\n";
 #endif
-                    //delete(gepInst);
-                    delete(castInst);
-                    return;
+                    return -1;
                 }
                 //Recursively update the "pto".
                 pto->targetObject = newObj;
                 pto->dstfieldId = 0;
-                //TODO: we *might* need to create a different "popInst" here w/ its pointer operand pointing to the embedded struct,
+                //TODO: we *might* need to create a different "propInst" here w/ its pointer operand pointing to the embedded struct,
                 //but since our current logic will force convert the pointer operand to the target struct type * at first, it should be ok.
-                this->bit2Field(I, pto, 8, delta/8);
-            } else {
-                //TODO: need to do anything for array/vector?
+                return this->bit2Field(I, pto, 8, delta/8);
+            }else if(ety->isArrayTy()) {
+                //Here the "delta" should index for one element in the array, while we will simply collapse the array to one element.
+                AliasObject *newObj = DRCHECKER::createEmbObj(targetObj, resIndex);
+                if (!newObj) {
+                    //This should be because the array element is not struct.
+                    return -1;
+                }else {
+                    //TODO: the "delta" may not exactly offset to the start of an element...
+                    pto->targetObject = newObj;
+                    pto->dstfieldId = 0;
+                }
+            }else {
+                //TODO: need to do anything for other possible types?
+                return -1;
             }
         } else {
             //This should be impossible...
             assert(false && "AliasAnalysisVisitor::bit2Field(): delta < 0");
         }
-        return;
+        return 0;
     }
 
     //NOTE: this function wraps the logic of the original Dr.Checker to process GEP w/ only one index/dimension.
