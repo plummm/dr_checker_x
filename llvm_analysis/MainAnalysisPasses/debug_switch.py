@@ -14,6 +14,7 @@ rl = [
     ('SoundyAliasAnalysis/include/AliasObject.h','#define DEBUG_UPDATE_FIELD_POINT','//#define DEBUG_UPDATE_FIELD_POINT'),
     ('SoundyAliasAnalysis/include/AliasObject.h','#define DEBUG_UPDATE_FIELD_TAINT','//#define DEBUG_UPDATE_FIELD_TAINT'),
     ('SoundyAliasAnalysis/include/AliasObject.h','#define DEBUG_CREATE_EMB_OBJ','//#define DEBUG_CREATE_EMB_OBJ'),
+    ('SoundyAliasAnalysis/include/AliasObject.h','#define DEBUG_CREATE_HOST_OBJ','//#define DEBUG_CREATE_HOST_OBJ'),
 ]
 
 #Turn on/off the debug switch defined in the src files.

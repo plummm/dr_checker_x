@@ -1118,7 +1118,6 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
         if (index == 0) {
             return 0;
         }
-        static unsigned long suff = 0;
         DataLayout *dl = this->currState.targetDataLayout;
         if (!dl || !pto) {
 #ifdef DEBUG_GET_ELEMENT_PTR
@@ -1127,48 +1126,75 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
             //We'll lose the point-to in this case.
             return -1;
         }
-        AliasObject *targetObj = pto->targetObject;
-        long dstfield = pto->dstfieldId;
-        Type *targetObjTy = targetObj->targetType;
+        const StructLayout *stLayout = nullptr;
+        StructType *stTy = nullptr;
+        long resOffset = 0;
+        while(true) {
+            AliasObject *targetObj = pto->targetObject;
+            long dstfield = pto->dstfieldId;
+            Type *targetObjTy = targetObj->targetType;
 #ifdef DEBUG_GET_ELEMENT_PTR
-        dbgs() << "AliasAnalysisVisitor::bit2Field(): host obj: " << InstructionUtils::getTypeStr(targetObjTy) << " | " << dstfield << " obj ID: " << (const void*)targetObj << "\n";
+            dbgs() << "AliasAnalysisVisitor::bit2Field(): host obj: " << InstructionUtils::getTypeStr(targetObjTy) << " | " << dstfield << " obj ID: " << (const void*)targetObj << "\n";
 #endif
-        if (!targetObjTy || !targetObjTy->isStructTy()) {
-            return -1;
-        }
-        StructType *stTy = dyn_cast<StructType>(targetObjTy);
-        unsigned ne = stTy->getNumElements();
-        if (dstfield < 0 || dstfield >= ne) {
+            if (!targetObjTy || !targetObjTy->isStructTy()) {
+                return -1;
+            }
+            stTy = dyn_cast<StructType>(targetObjTy);
+            unsigned ne = stTy->getNumElements();
+            if (dstfield < 0 || dstfield >= ne) {
 #ifdef DEBUG_GET_ELEMENT_PTR
-            dbgs() << "AliasAnalysisVisitor::bit2Field(): dstfield out-of-bound.\n";
+                dbgs() << "AliasAnalysisVisitor::bit2Field(): dstfield out-of-bound.\n";
 #endif
-            return -1;
-        }
-        //NOTE: StructLayout describes the offset/size of each field in a struct, including the possible padding.
-        const StructLayout *stLayout = dl->getStructLayout(stTy);
-        if (!stLayout) {
+                return -1;
+            }
+            //NOTE: StructLayout describes the offset/size of each field in a struct, including the possible padding.
+            stLayout = dl->getStructLayout(stTy);
+            if (!stLayout) {
 #ifdef DEBUG_GET_ELEMENT_PTR
-            dbgs() << "AliasAnalysisVisitor::bit2Field(): !stLayout\n";
+                dbgs() << "AliasAnalysisVisitor::bit2Field(): !stLayout\n";
 #endif
-            return -1;
-        }
-        //NOTE: both "dstOffset" and "bits" can be divided by 8, "bits" can be negative.
-        long dstOffset = stLayout->getElementOffsetInBits(dstfield);
-        long bits = index * (long)bitWidth;
-        long resOffset = dstOffset + bits;
-        //TODO: container_of(), try to infer the container struct.
-        if (resOffset < 0 || resOffset >= stLayout->getSizeInBits()) {
+                return -1;
+            }
+            //NOTE: both "dstOffset" and "bits" can be divided by 8, "bits" can be negative.
+            long dstOffset = stLayout->getElementOffsetInBits(dstfield);
+            long bits = index * (long)bitWidth;
+            resOffset = dstOffset + bits;
 #ifdef DEBUG_GET_ELEMENT_PTR
-            dbgs() << "AliasAnalysisVisitor::bit2Field(): resOffset (in bits) out-of-bound.\n";
+            dbgs() << "AliasAnalysisVisitor::bit2Field(): dstOffset: " << dstOffset << " bits: " << bits << " resOffset: " << resOffset << "\n";
 #endif
-            return -1;
+            if (resOffset < 0 || resOffset >= stLayout->getSizeInBits()) {
+                //This is possibly the case of "container_of()" where one tries to access the host object from within the embedded object,
+                //what we should do here is try to figure out what's the host object and adjust the point-to accordingly.
+#ifdef DEBUG_GET_ELEMENT_PTR
+                dbgs() << "AliasAnalysisVisitor::bit2Field(): resOffset (in bits) out-of-bound, possibly the container_of() case, trying to figure out the host object...\n";
+#endif
+                PointerPointsTo *host_pto = getOrCreateHostObj(targetObj);
+                if (!host_pto || !host_pto->targetObject) {
+#ifdef DEBUG_GET_ELEMENT_PTR
+                    dbgs() << "AliasAnalysisVisitor::bit2Field(): Fail to getOrCreateHostObj().\n";
+#endif
+                    return -1;
+                }
+                pto->targetObject = host_pto->targetObject;
+                if (resOffset < 0) {
+                    pto->dstfieldId = host_pto->dstfieldId;
+                    bitWidth = 1;
+                    index = resOffset;
+                }else {
+                    pto->dstfieldId = host_pto->dstfieldId + 1;
+                    bitWidth = 1;
+                    index = resOffset - stLayout->getSizeInBits();
+                }
+            }else {
+                break;
+            }
         }
+        //
         unsigned resIndex = stLayout->getElementContainingOffset(resOffset/8);
         pto->dstfieldId = resIndex;
-
         long delta = resOffset - (long)(stLayout->getElementOffsetInBits(resIndex));
 #ifdef DEBUG_GET_ELEMENT_PTR
-        dbgs() << "AliasAnalysisVisitor::bit2Field(): dstOffset: " << dstOffset << " bits: " << bits << " resOffset: " << resOffset << " resIndex: " << resIndex << " delta: " << delta << "\n";
+        dbgs() << "AliasAnalysisVisitor::bit2Field(): resIndex: " << resIndex << " delta: " << delta << "\n";
 #endif
         if (!delta) {
             //An exact match, just update the "pto" to the target field (already done) and return.
@@ -1184,7 +1210,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
                 return -1;
             }
             if (ety->isStructTy()) {
-                AliasObject *newObj = DRCHECKER::createEmbObj(targetObj, resIndex);
+                AliasObject *newObj = DRCHECKER::createEmbObj(pto->targetObject, resIndex);
                 if (!newObj) {
                     //TODO: what to do now...
 #ifdef DEBUG_GET_ELEMENT_PTR
@@ -1197,10 +1223,10 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
                 pto->dstfieldId = 0;
                 //TODO: we *might* need to create a different "propInst" here w/ its pointer operand pointing to the embedded struct,
                 //but since our current logic will force convert the pointer operand to the target struct type * at first, it should be ok.
-                return this->bit2Field(I, pto, 8, delta/8);
+                return this->bit2Field(I, pto, 1, delta);
             }else if(ety->isArrayTy()) {
                 //Here the "delta" should index for one element in the array, while we will simply collapse the array to one element.
-                AliasObject *newObj = DRCHECKER::createEmbObj(targetObj, resIndex);
+                AliasObject *newObj = DRCHECKER::createEmbObj(pto->targetObject, resIndex);
                 if (!newObj) {
                     //This should be because the array element is not struct.
                     return -1;

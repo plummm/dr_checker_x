@@ -32,6 +32,7 @@ using namespace llvm;
 #define DEBUG_UPDATE_FIELD_TAINT
 #define DEBUG_CREATE_DUMMY_OBJ_IF_NULL
 #define DEBUG_CREATE_EMB_OBJ
+#define DEBUG_CREATE_HOST_OBJ
 
 namespace DRCHECKER {
 //#define DEBUG_FUNCTION_ARG_OBJ_CREATION
@@ -1440,6 +1441,85 @@ namespace DRCHECKER {
             }
         }
         return newObj;
+    }
+
+    static AliasObject *createHostObj(AliasObject *targetObj, Type *hostTy, long field) {
+        if (!targetObj || !hostTy || !hostTy->isStructTy()) {
+#ifdef DEBUG_CREATE_HOST_OBJ
+            dbgs() << "createHostObj(): !targetObj || !hostTy || !hostTy->isStructTy()\n";
+#endif
+            return nullptr;
+        }
+        if (field < 0 || field >= hostTy->getStructNumElements() || !InstructionUtils::same_types(hostTy->getStructElementType(field),targetObj->targetType)) {
+#ifdef DEBUG_CREATE_HOST_OBJ
+            dbgs() << "createHostObj(): field OOB or field type doesn't match\n";
+#endif
+            return nullptr;
+        }
+#ifdef DEBUG_CREATE_HOST_OBJ
+        dbgs() << "createHostObj(): targetObj ty: " << InstructionUtils::getTypeStr(targetObj->targetType) << "\n";
+        dbgs() << "createHostObj(): hostObj ty: " << InstructionUtils::getTypeStr(hostTy) << " | " << field << "\n";
+#endif
+        AliasObject *hobj = nullptr;
+        if (targetObj->all_contents_taint_flag) {
+            std::set<TaintFlag*> *existingTaints = new std::set<TaintFlag*>();
+            existingTaints->insert(targetObj->all_contents_taint_flag);
+            hobj = DRCHECKER::createOutsideObj(hostTy, true, existingTaints);
+        }else{
+            hobj = DRCHECKER::createOutsideObj(hostTy, false, nullptr);
+        }
+        if (!hobj) {
+#ifdef DEBUG_CREATE_HOST_OBJ
+            dbgs() << "createHostObj(): fail to create the host obj!\n";
+#endif
+            return nullptr;
+        }
+        //Setup embed relationship.
+        hobj->embObjs[field] = targetObj;
+        targetObj->parent = hobj;
+        targetObj->parent_field = field;
+        return hobj;
+    }
+
+    //hz: this method is mainly designed for the very common "container_of()" usage in the kernel,
+    //we try to infer the host obj (i.e. the container) of the arg "obj" and either get (if it's already embedded in a known host obj)
+    //or create its host object.
+    //return: return a "PointerPointsTo" that indicates both the host object and the fieldId within it that the "obj" sits.
+    //NOTE: we only return the closest parent object we can find.
+    static PointerPointsTo *getOrCreateHostObj(AliasObject *obj) {
+        if (!obj) {
+            return nullptr;
+        }
+        PointerPointsTo *pto = new PointerPointsTo();
+        if (obj->parent) {
+            pto->targetObject = obj->parent;
+            pto->dstfieldId = obj->parent_field;
+            return pto;
+        }else if (!obj->pointsFrom.empty()) {
+            //It's not embedded in any known object, but we can still do some inferences here, consider a very common case:
+            //the kernel linked list mechanism will embed a "list_head" struct into every host object which needs to be linked,
+            //we may have "list_head" A embedded in host A and "list_head" B pointed from "list_head" A, though we don't have
+            //any records regarding B's host object, we can still infer its host object type (same as host A) and create a dummy
+            //object.
+            for (AliasObject *prev : obj->pointsFrom) {
+                if (!prev) {
+                    continue;
+                }
+                //TODO: currently we only consider one layer's points-from, maybe we need more..
+                if (InstructionUtils::same_types(prev->targetType,obj->targetType)) {
+                    if (prev->parent && prev->parent->targetType) {
+                        AliasObject *hobj = DRCHECKER::createHostObj(obj,prev->parent->targetType,prev->parent_field);
+                        if (!hobj) {
+                            continue;
+                        }
+                        pto->targetObject = hobj;
+                        pto->dstfieldId = prev->parent_field;
+                        return pto;
+                    }
+                }
+            }
+        }
+        return nullptr;
     }
 
 }
