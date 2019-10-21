@@ -1096,7 +1096,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
 #ifdef DEBUG_GET_ELEMENT_PTR
                 dbgs() << "AliasAnalysisVisitor::processGEPFirstDimension(): invoke bit2Field()...\n";
 #endif
-                if(!this->bit2Field(I,newPto,width,index)) {
+                if(!this->bit2Field(propInst,I,newPto,width,index)) {
                     resPointsTo->insert(newPto);
                 }
             }
@@ -1114,7 +1114,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
     //Starting from "dstfieldId" in the target object (struct) as specified in "pto", if we step bitWidth*index bits, which field will we point to then?
     //The passed-in "pto" will be updated to point to the resulted object and field. (e.g. we may end up reaching a field in an embed obj in the host obj).
     //NOTE: we assume the "pto" has been verified to be a struct pointer.
-    int AliasAnalysisVisitor::bit2Field(GEPOperator *I, PointerPointsTo *pto, unsigned bitWidth, long index) {
+    int AliasAnalysisVisitor::bit2Field(Instruction *propInst, GEPOperator *I, PointerPointsTo *pto, unsigned bitWidth, long index) {
         if (index == 0) {
             return 0;
         }
@@ -1168,7 +1168,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
 #ifdef DEBUG_GET_ELEMENT_PTR
                 dbgs() << "AliasAnalysisVisitor::bit2Field(): resOffset (in bits) out-of-bound, possibly the container_of() case, trying to figure out the host object...\n";
 #endif
-                PointerPointsTo *host_pto = getOrCreateHostObj(targetObj);
+                PointerPointsTo *host_pto = getOrCreateHostObj(dl,targetObj,propInst,I,resOffset+dstOffset);
                 if (!host_pto || !host_pto->targetObject) {
 #ifdef DEBUG_GET_ELEMENT_PTR
                     dbgs() << "AliasAnalysisVisitor::bit2Field(): Fail to getOrCreateHostObj().\n";
@@ -1223,7 +1223,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
                 pto->dstfieldId = 0;
                 //TODO: we *might* need to create a different "propInst" here w/ its pointer operand pointing to the embedded struct,
                 //but since our current logic will force convert the pointer operand to the target struct type * at first, it should be ok.
-                return this->bit2Field(I, pto, 1, delta);
+                return this->bit2Field(propInst, I, pto, 1, delta);
             }else if(ety->isArrayTy()) {
                 //Here the "delta" should index for one element in the array, while we will simply collapse the array to one element.
                 AliasObject *newObj = DRCHECKER::createEmbObj(pto->targetObject, resIndex);

@@ -22,6 +22,36 @@
 using namespace llvm;
 
 namespace DRCHECKER {
+    
+    class FieldDesc {
+        public:
+        int bitoff = 0;
+        //host_tys and fid: from innermost to outermost.
+        std::vector<Type*> tys, host_tys;
+        std::vector<unsigned> fid;
+
+        FieldDesc() {
+            this->bitoff = 0;
+            return;
+        }
+
+        FieldDesc(FieldDesc *fd) {
+            if (!fd)
+                return;
+            this->bitoff = fd->bitoff;
+            this->tys = fd->tys;
+            this->host_tys = fd->host_tys;
+            this->fid = fd->fid;
+        }
+    };
+
+    class CandStructInf {
+        public:
+        std::vector<FieldDesc*> *fds;
+        std::vector<int> ind;
+        int score = 0;
+    };
+
     class InstructionUtils {
         public:
         /***
@@ -130,6 +160,11 @@ namespace DRCHECKER {
         static Instruction *isAsanReportBB(BasicBlock *bb);
 
         static bool isPotentialAsanInst(Instruction *inst);
+
+        static std::vector<FieldDesc*> *getCompTyDesc(DataLayout *dl, CompositeType *ty);
+
+        static bool isTyUsedByFunc(Type *ty, Function *func);
     };
+
 }
 #endif //PROJECT_INSTRUCTIONUTILS_H

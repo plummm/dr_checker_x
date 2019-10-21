@@ -1481,26 +1481,215 @@ namespace DRCHECKER {
         return hobj;
     }
 
+    static int matchFieldsInDesc(Type *ty0, Type *ty1, int bitoff, std::vector<FieldDesc*> *fds, std::vector<unsigned> *res) {
+        if (!ty0 || !ty1 || !fds || !res) {
+            return 0;
+        }
+        int found = 0;
+        for (int i = 0; i < fds->size(); ++i) {
+            FieldDesc *fd = (*fds)[i];
+            if (!fd) 
+                continue;
+            bool ty0_match = false;
+            for (Type *t : fd->tys) {
+                if (InstructionUtils::same_types(t,ty0)) {
+                    ty0_match = true;
+                    break;
+                }
+            }
+            if (!ty0_match)
+                continue;
+            int dstoff = fd->bitoff + bitoff;
+            int step = (bitoff > 0 ? 1 : -1);
+            for (int j = i; j >= 0 && j < fds->size(); j+=step) {
+                if ((*fds)[j]->bitoff == dstoff) {
+                    res->push_back(i);
+                    res->push_back(j);
+                    found = 1;
+                    break;
+                }
+                if ((step > 0) != ((*fds)[j]->bitoff < dstoff)) {
+                    break;
+                }
+            }
+        }
+        return found;
+    }
+
+    static void sortCandStruct(std::vector<CandStructInf*> *cands, Instruction *I) {
+        if (!cands || !cands->size()) {
+            return;
+        }
+        Function *func = nullptr;
+        if (I) {
+            func = I->getFunction();
+        }
+        for (CandStructInf *c : *cands) {
+            std::vector<FieldDesc*> *fds = c->fds;
+            FieldDesc *fd0 = (*fds)[c->ind[0]];
+            FieldDesc *fd1 = (*fds)[c->ind[1]];
+            if (!fd0->host_tys.size()) {
+                dbgs() << "!!! sortCandStruct(): No host type inf!\n";
+                continue;
+            }
+            Type *hty = fd0->host_tys[fd0->host_tys.size()-1];
+            //If the host type is referred in the target function, then we will have a high confidence.
+            if (InstructionUtils::isTyUsedByFunc(hty,func)) {
+                c->score += 1000;
+            }
+            //TODO: if the type name is similar to the function name, then we will give it a high score.
+            //
+            //Observation: it's likely that the #field of ty1 is 0 when "bitoff" is negative. 
+            if (c->ind[1] == 0) {
+                c->score += 500;
+            }
+            //TODO: consider the size of the candidate struct?
+        }
+        std::sort(cands->begin(),cands->end(),[](CandStructInf *c0, CandStructInf *c1){
+            return (c0->score - c1->score > 0);
+        });
+        return;
+    }
+
+    //Given 2 field types and their distance (in bits), return a list of candidate struct types.
+    static FieldDesc *getStructTysFromFieldDistance(DataLayout *dl, Type *ty0, Type *ty1, int bitoff, Instruction *I) {
+        if (!I || !ty0 || !ty1) {
+            return nullptr;
+        }
+        Function *func = I->getFunction();
+        Module *mod = I->getModule();
+        if (!mod || !dl) {
+            return nullptr;
+        }
+#ifdef DEBUG_CREATE_HOST_OBJ
+        dbgs() << "getStructTysFromFieldDistance(): Trying to identify a struct that can match the distanced fields.\n";
+#endif
+        std::vector<StructType*> tys = mod->getIdentifiedStructTypes();
+        std::vector<CandStructInf*> cands;
+        for (StructType *t : tys) {
+            std::vector<FieldDesc*> *tydesc = InstructionUtils::getCompTyDesc(dl,t);
+            if (!tydesc) {
+                continue;
+            }
+            //Ok, try to match to given fields w/ a specified distance.
+            std::vector<unsigned> res;
+            if (!matchFieldsInDesc(ty0,ty1,bitoff,tydesc,&res)) {
+                continue;
+            }
+#ifdef DEBUG_CREATE_HOST_OBJ
+            dbgs() << "getStructTysFromFieldDistance(): got a match: " << InstructionUtils::getTypeStr(t) << "\n"; 
+#endif
+            //Ok get a match, record it.
+            for (int i = 0; i < res.size(); i += 2) {
+#ifdef DEBUG_CREATE_HOST_OBJ
+                for (int j = 0; j < 2; ++j) {
+                    dbgs() << "fid " << j << ": ";
+                    for(unsigned id : (*tydesc)[res[i+j]]->fid) {
+                        dbgs() << id << " ";
+                    }
+                }
+                dbgs() << "\n";
+#endif
+                CandStructInf *inf = new CandStructInf();
+                inf->fds = tydesc;
+                inf->ind.push_back(res[i]);
+                inf->ind.push_back(res[i+1]);
+                cands.push_back(inf);
+            }
+        }
+        //We need to select a best candidate to return...
+        sortCandStruct(&cands,I);
+        //Return the hisghest ranked candidate.
+        FieldDesc *rfd = nullptr;
+        if (cands.size() > 0) {
+            rfd = (*(cands[0]->fds))[cands[0]->ind[0]];
+        }
+        for (CandStructInf *c : cands) {
+            free(c);
+        }
+        return rfd;
+    }
+
     //hz: this method is mainly designed for the very common "container_of()" usage in the kernel,
     //we try to infer the host obj (i.e. the container) of the arg "obj" and either get (if it's already embedded in a known host obj)
     //or create its host object.
+    //Arg: "bitoff" is the bit distance between "obj" and the other field (pointed to by the result of the "I") in the host object.
     //return: return a "PointerPointsTo" that indicates both the host object and the fieldId within it that the "obj" sits.
-    //NOTE: we only return the closest parent object we can find.
-    static PointerPointsTo *getOrCreateHostObj(AliasObject *obj) {
+    //NOTE: we only return the closest parent object we can find, the recursive creation of multi-layer objects is handled by the caller.
+    static PointerPointsTo *getOrCreateHostObj(DataLayout *dl, AliasObject *obj, Instruction *propInst, GEPOperator *I, int bitoff) {
         if (!obj) {
             return nullptr;
         }
+#ifdef DEBUG_CREATE_HOST_OBJ
+        dbgs() << "getOrCreateHostObj(): element obj: " << InstructionUtils::getTypeStr(obj->targetType) << " bitoff: " << bitoff << "\n";
+#endif
         PointerPointsTo *pto = new PointerPointsTo();
+        //Is this an embedded object in a known host object?
         if (obj->parent) {
+#ifdef DEBUG_CREATE_HOST_OBJ
+            dbgs() << "getOrCreateHostObj(): There exists parent object from the record.\n";
+#endif
             pto->targetObject = obj->parent;
             pto->dstfieldId = obj->parent_field;
             return pto;
-        }else if (!obj->pointsFrom.empty()) {
-            //It's not embedded in any known object, but we can still do some inferences here, consider a very common case:
-            //the kernel linked list mechanism will embed a "list_head" struct into every host object which needs to be linked,
-            //we may have "list_head" A embedded in host A and "list_head" B pointed from "list_head" A, though we don't have
-            //any records regarding B's host object, we can still infer its host object type (same as host A) and create a dummy
-            //object.
+        }
+        //A typical and common scenario in which we need to call "getOrCreateHostObj()" is that in a "GEP i8 *ptr, index" IR the "ptr" points to
+        //a certain object but is converted to i8*. then the "index" calculates a pointer pointing outside this object...
+        //To find the host obj, what we want to do is to iterate over all struct types in the current module, then find the correct type(s)
+        //that has properly distanced field types that matches both the base "ptr" and the pointer type produced by the "GEP" (we need to
+        //figure out the true pointer type from the subsequent cast IRs).
+        if (I && I->getNumOperands() == 2) {
+            Type *ty0 = obj->targetType;
+            if (!ty0) {
+                return nullptr;
+            }
+            //Ok, get the type of the pointer generated by the "GEP".
+            Type *ty1 = nullptr;
+            for (User *u : I->users()) {
+                CastInst *cinst = dyn_cast<CastInst>(u);
+                if (!u) {
+                    continue;
+                }
+                Type *dty = cinst->getDestTy();
+                if (!dty || !dty->isPointerTy()) {
+                    continue;
+                }
+                ty1 = dty->getPointerElementType();
+                if (ty1->isStructTy() || ty1->isPointerTy()) {
+                    break;
+                }
+            }
+#ifdef DEBUG_CREATE_HOST_OBJ
+            dbgs() << "getOrCreateHostObj(): ty1: " << InstructionUtils::getTypeStr(ty1) << "\n";
+#endif
+            if (ty1) {
+                FieldDesc *fd = getStructTysFromFieldDistance(dl, ty0, ty1, bitoff, propInst);
+                if (fd && fd->host_tys.size() > 0 && fd->host_tys.size() == fd->fid.size()) {
+                    //Try to create the host obj.
+                    Type *hty = fd->host_tys[0];
+                    unsigned fid = fd->fid[0];
+                    AliasObject *hobj = DRCHECKER::createHostObj(obj,hty,fid);
+                    if (hobj) {
+                        pto->targetObject = hobj;
+                        pto->dstfieldId = fid;
+                        return pto;
+                    }else {
+#ifdef DEBUG_CREATE_HOST_OBJ
+                        dbgs() << "getOrCreateHostObj(): Failed to create the host object!\n";
+#endif
+                    }
+                }else {
+                    dbgs() << "!!! getOrCreateHostObj(): cannot get a candidate host struct! null fd: " << (fd ? "False" : "True") << "\n";
+                }
+            }
+        }
+        /*
+        //It's not embedded in any known object, but we can still do some inferences here, consider a very common case:
+        //the kernel linked list mechanism will embed a "list_head" struct into every host object which needs to be linked,
+        //we may have "list_head" A embedded in host A and "list_head" B pointed from "list_head" A, though we don't have
+        //any records regarding B's host object, we can still infer its host object type (same as host A) and create a dummy
+        //object.
+        if (!obj->pointsFrom.empty()) {
             for (AliasObject *prev : obj->pointsFrom) {
                 if (!prev) {
                     continue;
@@ -1519,6 +1708,7 @@ namespace DRCHECKER {
                 }
             }
         }
+        */
         return nullptr;
     }
 

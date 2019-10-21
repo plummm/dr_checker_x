@@ -826,4 +826,128 @@ namespace DRCHECKER {
         return true;
     }
 
+    //We want to analyze a struct type, figuring out all possible fields types at each available offset in bits,
+    //this includes the internal fields in (nested) embedded structs which is not supported by original llvm API.
+    std::vector<FieldDesc*> *InstructionUtils::getCompTyDesc(DataLayout *dl, CompositeType *ty) {
+        static std::map<CompositeType*,std::vector<FieldDesc*>> descs;
+        if (!ty) {
+            return nullptr;
+        }
+        if (descs.find(ty) != descs.end()) {
+            return &descs[ty];
+        }
+        std::vector<FieldDesc*> resDesc;
+        if (dyn_cast<SequentialType>(ty)) {
+            SequentialType *seqTy = dyn_cast<SequentialType>(ty);
+            Type *aty = seqTy->getElementType();
+            if (!aty) {
+                return nullptr;
+            }
+            std::vector<FieldDesc*> edesc, *pdesc = nullptr;
+            //The element is of a primitive type.
+            if (!dyn_cast<CompositeType>(aty)) {
+                FieldDesc *fd = new FieldDesc();
+                fd->tys.push_back(aty);
+                fd->bitoff = 0;
+                edesc.push_back(fd);
+                pdesc = &edesc;
+            }else {
+                pdesc = InstructionUtils::getCompTyDesc(dl,dyn_cast<CompositeType>(aty));
+            }
+            if (!pdesc) {
+                return nullptr;
+            }
+            unsigned step = dl->getTypeSizeInBits(aty);
+            for (unsigned i = 0; i < seqTy->getNumElements(); ++i) {
+                for (unsigned j = 0; j < pdesc->size(); ++j) {
+                    FieldDesc *fd = new FieldDesc((*pdesc)[j]);
+                    if (!i && !j) {
+                        fd->tys.push_back(seqTy);
+                    }
+                    fd->host_tys.push_back(seqTy);
+                    fd->fid.push_back(i);
+                    fd->bitoff += (step*i);
+                    resDesc.push_back(fd);
+                }
+            }
+        }else if (dyn_cast<StructType>(ty)) {
+            StructType *stTy = dyn_cast<StructType>(ty);
+            if (!dl) {
+                return nullptr;
+            }
+            const StructLayout *stLayout = dl->getStructLayout(stTy);
+            if (!stLayout) {
+                return nullptr;
+            }
+            for (unsigned i = 0; i < stTy->getNumElements(); ++i) {
+                Type *ety = stTy->getElementType(i);
+                if (!ety) {
+                    continue;
+                }
+                unsigned boff = stLayout->getElementOffsetInBits(i); 
+                if (!dyn_cast<CompositeType>(ety)) {
+                    FieldDesc *fd = new FieldDesc();
+                    if (!i) {
+                        fd->tys.push_back(stTy);
+                    }
+                    fd->tys.push_back(ety);
+                    fd->host_tys.push_back(stTy);
+                    fd->fid.push_back(i);
+                    fd->bitoff = boff;
+                    resDesc.push_back(fd);
+                    continue;
+                }
+                //Ok the element is an embedded composite type.
+                std::vector<FieldDesc*> *pdesc = InstructionUtils::getCompTyDesc(dl,dyn_cast<CompositeType>(ety));
+                if (pdesc) {
+                    for (unsigned j = 0; j < pdesc->size(); ++j) {
+                        FieldDesc *fd = new FieldDesc((*pdesc)[j]);
+                        if (!i && !j) {
+                            fd->tys.push_back(stTy);
+                        }
+                        fd->host_tys.push_back(stTy);
+                        fd->fid.push_back(i);
+                        fd->bitoff += boff;
+                        resDesc.push_back(fd);
+                    }
+                }else {
+                    return nullptr;
+                }
+            }
+        }else {
+            dbgs() << "Cannot recognize the CompositeType: " << InstructionUtils::getTypeStr(ty) << "\n";
+            assert(false);
+        }
+        if (resDesc.size() > 0) {
+            descs[ty] = resDesc;
+            return &descs[ty];
+        }
+        return nullptr;
+    }
+
+    bool InstructionUtils::isTyUsedByFunc(Type *ty, Function *func) {
+        if (!ty || !func) {
+            return false;
+        }
+        for (Value& v : func->args()) {
+            if (InstructionUtils::same_types(v.getType(),ty)) {
+                return true;
+            }
+        }
+        for (BasicBlock& bb : *func) {
+            for (Instruction& ins : bb) {
+                if (InstructionUtils::same_types(ins.getType(),ty)) {
+                    return true;
+                }
+                for (unsigned i = 0; i < ins.getNumOperands(); ++i) {
+                    Value *v = ins.getOperand(i);
+                    if (InstructionUtils::same_types(v->getType(),ty)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
 }

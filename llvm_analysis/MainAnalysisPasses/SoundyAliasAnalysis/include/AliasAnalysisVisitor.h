@@ -204,7 +204,7 @@ namespace DRCHECKER {
         //Process the 1st index of the GEP, return the resulted points-to.
         std::set<PointerPointsTo*> *processGEPFirstDimension(Instruction *propInst, GEPOperator *I, Value *srcPointer);
 
-        int bit2Field(GEPOperator *I, PointerPointsTo *pto, unsigned bitWidth, long index);
+        int bit2Field(Instruction *propInst, GEPOperator *I, PointerPointsTo *pto, unsigned bitWidth, long index);
     };
 
 }
