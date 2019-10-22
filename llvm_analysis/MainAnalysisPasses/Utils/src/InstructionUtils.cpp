@@ -13,6 +13,7 @@ using namespace llvm;
 namespace DRCHECKER {
 
 #define DEBUG_IS_ASAN_INST
+//#define DEBUG_GET_TY_DESC
 
     bool InstructionUtils::isPointerInstruction(Instruction *I) {
         bool retVal = false;
@@ -830,10 +831,16 @@ namespace DRCHECKER {
     //this includes the internal fields in (nested) embedded structs which is not supported by original llvm API.
     std::vector<FieldDesc*> *InstructionUtils::getCompTyDesc(DataLayout *dl, CompositeType *ty) {
         static std::map<CompositeType*,std::vector<FieldDesc*>> descs;
+#ifdef DEBUG_GET_TY_DESC
+        dbgs() << "getCompTyDesc(): type: " << InstructionUtils::getTypeStr(ty) << "\n";
+#endif
         if (!ty) {
             return nullptr;
         }
         if (descs.find(ty) != descs.end()) {
+#ifdef DEBUG_GET_TY_DESC
+            dbgs() << "getCompTyDesc(): The type desc is in the cache!\n";
+#endif
             return &descs[ty];
         }
         std::vector<FieldDesc*> resDesc;
@@ -872,7 +879,7 @@ namespace DRCHECKER {
             }
         }else if (dyn_cast<StructType>(ty)) {
             StructType *stTy = dyn_cast<StructType>(ty);
-            if (!dl) {
+            if (stTy->isOpaque() || !dl) {
                 return nullptr;
             }
             const StructLayout *stLayout = dl->getStructLayout(stTy);
@@ -919,6 +926,12 @@ namespace DRCHECKER {
             assert(false);
         }
         if (resDesc.size() > 0) {
+#ifdef DEBUG_GET_TY_DESC
+            dbgs() << ">> The type desc for: " << InstructionUtils::getTypeStr(ty) << "\n";
+            for (FieldDesc *fd : resDesc) {
+                fd->print(dbgs());
+            }
+#endif
             descs[ty] = resDesc;
             return &descs[ty];
         }
@@ -948,6 +961,22 @@ namespace DRCHECKER {
             }
         }
         return false;
+    }
+
+    void FieldDesc::print(raw_ostream &OS) {
+        OS << "+" << this->bitoff << ": ";
+        for (Type *ty : this->tys) {
+            OS << InstructionUtils::getTypeStr(ty) << " ||| ";
+        }
+        OS << "\nhost: ";
+        if (this->host_tys.size() > 0 && this->host_tys.size() == this->fid.size()) {
+            for (int i = this->fid.size()-1; i >= 0; --i) {
+                OS << InstructionUtils::getTypeStr(this->host_tys[i]) << " | " << this->fid[i] << " --> ";
+            }
+        }else {
+            OS << "#host_tys: " << this->host_tys.size() << " #fid: " << this->fid.size();
+        }
+        OS << "\n";
     }
 
 }

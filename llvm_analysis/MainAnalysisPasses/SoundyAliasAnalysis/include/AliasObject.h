@@ -1450,16 +1450,16 @@ namespace DRCHECKER {
 #endif
             return nullptr;
         }
+#ifdef DEBUG_CREATE_HOST_OBJ
+        dbgs() << "createHostObj(): targetObj ty: " << InstructionUtils::getTypeStr(targetObj->targetType) << "\n";
+        dbgs() << "createHostObj(): hostObj ty: " << InstructionUtils::getTypeStr(hostTy) << " | " << field << "\n";
+#endif
         if (field < 0 || field >= hostTy->getStructNumElements() || !InstructionUtils::same_types(hostTy->getStructElementType(field),targetObj->targetType)) {
 #ifdef DEBUG_CREATE_HOST_OBJ
             dbgs() << "createHostObj(): field OOB or field type doesn't match\n";
 #endif
             return nullptr;
         }
-#ifdef DEBUG_CREATE_HOST_OBJ
-        dbgs() << "createHostObj(): targetObj ty: " << InstructionUtils::getTypeStr(targetObj->targetType) << "\n";
-        dbgs() << "createHostObj(): hostObj ty: " << InstructionUtils::getTypeStr(hostTy) << " | " << field << "\n";
-#endif
         AliasObject *hobj = nullptr;
         if (targetObj->all_contents_taint_flag) {
             std::set<TaintFlag*> *existingTaints = new std::set<TaintFlag*>();
@@ -1503,10 +1503,19 @@ namespace DRCHECKER {
             int step = (bitoff > 0 ? 1 : -1);
             for (int j = i; j >= 0 && j < fds->size(); j+=step) {
                 if ((*fds)[j]->bitoff == dstoff) {
-                    res->push_back(i);
-                    res->push_back(j);
-                    found = 1;
-                    break;
+                    bool ty1_match = false;
+                    for (Type *t : (*fds)[j]->tys) {
+                        if (InstructionUtils::same_types(t,ty1)) {
+                            ty1_match = true;
+                            break;
+                        }
+                    }
+                    if (ty1_match) {
+                        res->push_back(i);
+                        res->push_back(j);
+                        found = 1;
+                        break;
+                    }
                 }
                 if ((step > 0) != ((*fds)[j]->bitoff < dstoff)) {
                     break;
@@ -1578,6 +1587,9 @@ namespace DRCHECKER {
             }
 #ifdef DEBUG_CREATE_HOST_OBJ
             dbgs() << "getStructTysFromFieldDistance(): got a match: " << InstructionUtils::getTypeStr(t) << "\n"; 
+            for (FieldDesc *fd : *tydesc) {
+                fd->print(dbgs());
+            }
 #endif
             //Ok get a match, record it.
             for (int i = 0; i < res.size(); i += 2) {
@@ -1647,7 +1659,7 @@ namespace DRCHECKER {
             Type *ty1 = nullptr;
             for (User *u : I->users()) {
                 CastInst *cinst = dyn_cast<CastInst>(u);
-                if (!u) {
+                if (!cinst) {
                     continue;
                 }
                 Type *dty = cinst->getDestTy();
@@ -1666,8 +1678,28 @@ namespace DRCHECKER {
                 FieldDesc *fd = getStructTysFromFieldDistance(dl, ty0, ty1, bitoff, propInst);
                 if (fd && fd->host_tys.size() > 0 && fd->host_tys.size() == fd->fid.size()) {
                     //Try to create the host obj.
-                    Type *hty = fd->host_tys[0];
-                    unsigned fid = fd->fid[0];
+                    Type *hty = nullptr;
+                    unsigned fid = 0;
+                    if (dyn_cast<CompositeType>(ty0)) {
+                        int i;
+                        for (i = 0; i < fd->fid.size() - 1; ++i) {
+                            if (InstructionUtils::same_types(fd->host_tys[i],ty0)) {
+                                break;
+                            }
+                        }
+                        if (i < fd->fid.size() - 1) {
+                            hty = fd->host_tys[i+1];
+                            fid = fd->fid[i+1];
+                        }else {
+#ifdef DEBUG_CREATE_HOST_OBJ
+                            dbgs() << "getOrCreateHostObj(): Failed: if (i < fd->fid.size() - 1), there should be sth wrong w/ the type desc.\n";
+#endif
+                            return nullptr;
+                        }
+                    }else {
+                        hty = fd->host_tys[0];
+                        fid = fd->fid[0];
+                    }
                     AliasObject *hobj = DRCHECKER::createHostObj(obj,hty,fid);
                     if (hobj) {
                         pto->targetObject = hobj;

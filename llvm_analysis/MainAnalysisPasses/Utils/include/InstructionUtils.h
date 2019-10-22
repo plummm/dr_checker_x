@@ -43,6 +43,8 @@ namespace DRCHECKER {
             this->host_tys = fd->host_tys;
             this->fid = fd->fid;
         }
+
+        void print(raw_ostream &OS);
     };
 
     class CandStructInf {
