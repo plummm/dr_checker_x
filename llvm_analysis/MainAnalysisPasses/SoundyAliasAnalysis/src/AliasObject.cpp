@@ -27,11 +27,11 @@ namespace DRCHECKER {
     void AliasObject::taintSubObj(AliasObject *newObj, long srcfieldId, Instruction *targetInstr) {
         std::set<TaintFlag*> *fieldTaint = getFieldTaintInfo(srcfieldId);
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-        dbgs() << "AliasObject::taintSubObj(): Trying to get taint for field:" << srcfieldId << " for object: " << (const void*)this << "\n";
+        dbgs() << "AliasObject::taintSubObj(): Trying to get taint for field:" << srcfieldId << " of host object: " << (const void*)this << "\n";
 #endif
         if(fieldTaint != nullptr) {
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-            dbgs() << "AliasObject::taintSubObj(): Adding taint for field:" << srcfieldId << " for object: " << (const void*)newObj << "\n";
+            dbgs() << "AliasObject::taintSubObj(): Adding taint of field:" << srcfieldId << " to sub object: " << (const void*)newObj << "\n";
 #endif
             for(auto existingTaint:*fieldTaint) {
                 TaintFlag *newTaint = new TaintFlag(existingTaint,targetInstr,targetInstr);

@@ -749,7 +749,10 @@ namespace DRCHECKER {
         //hz: taint all fields and attach a different taint tag for each field in the TaintFlag.
         bool taintAllFieldsWithTag(TaintFlag *targetTaintFlag) {
             Value *v = this->getValue();
-            if (v == nullptr){
+            if (v == nullptr && this->targetType == nullptr){
+#ifdef DEBUG_UPDATE_FIELD_TAINT
+                dbgs() << "taintAllFieldsWithTag(): Neither Value nor Type information available for obj: " << (const void*)this << "\n";
+#endif
                 return false;
             }
             assert(targetTaintFlag);
@@ -759,23 +762,32 @@ namespace DRCHECKER {
                 if (existingTag && !existingTag->is_global) {
                     is_global = false;
                 }
-                std::set<std::pair<long, AliasObject*>> targetObjects;
-                targetObjects.insert(std::make_pair(0,this));
                 this->all_contents_tainted = true;
                 //"0" represents that we are not referring to a certain field.
-                TaintTag *all_taint_tag = new TaintTag(0,v,is_global,(void*)this);
+                TaintTag *all_taint_tag = nullptr;
+                if (v) {
+                    all_taint_tag = new TaintTag(0,v,is_global,(void*)this);
+                }else {
+                    all_taint_tag = new TaintTag(0,this->targetType,is_global,(void*)this);
+                }
                 this->all_contents_taint_flag = new TaintFlag(targetTaintFlag,all_taint_tag);
                 this->all_contents_taint_flag->is_inherent = true;
                 std::set<long> allAvailableFields = getAllAvailableFields();
 
                 // add the taint to all available fields.
+#ifdef DEBUG_UPDATE_FIELD_TAINT
+                dbgs() << "taintAllFieldsWithTag(): Updating field taint for obj: " << (const void*)this << "\n";
+#endif
                 for (auto fieldId:allAvailableFields) {
 #ifdef DEBUG_UPDATE_FIELD_TAINT
-                    dbgs() << "Adding taint to field:" << fieldId << "\n";
+                    dbgs() << "taintAllFieldsWithTag(): Adding taint to field:" << fieldId << "\n";
 #endif
-                    targetObjects.clear();
-                    targetObjects.insert(std::make_pair(fieldId,this));
-                    TaintTag *tag = new TaintTag(fieldId,v,is_global,(void*)this);
+                    TaintTag *tag = nullptr;
+                    if (v) {
+                        tag = new TaintTag(fieldId,v,is_global,(void*)this);
+                    }else {
+                        tag = new TaintTag(fieldId,this->targetType,is_global,(void*)this);
+                    }
                     TaintFlag *newFlag = new TaintFlag(targetTaintFlag,tag);
                     newFlag->is_inherent = true;
                     addFieldTaintFlag(fieldId, newFlag);
@@ -1337,7 +1349,7 @@ namespace DRCHECKER {
         }
         if (!newObj || (!InstructionUtils::same_types(newObj->targetType,fieldTy) && !InstructionUtils::same_types(newObj->targetType,fieldArrElemTy)) ){
 #ifdef DEBUG_CREATE_EMB_OBJ
-            dbgs() << "createEmbObj(): try to create a new embed object because ";
+            dbgs() << "no-ptr createEmbObj(): try to create a new embed object because ";
             if (!newObj) {
                 dbgs() << "there is no emb obj in cache...\n";
             }else{
@@ -1352,10 +1364,16 @@ namespace DRCHECKER {
             }
             //Properly taint it.
             if(newObj){
+#ifdef DEBUG_CREATE_EMB_OBJ
+                dbgs() << "no-ptr createEmbObj(): the embedded obj created: " << (const void*)newObj << " | set is_taint_src to: " << hostObj->is_taint_src << "\n"; 
+#endif
                 newObj->is_taint_src = hostObj->is_taint_src;
                 //This new TargetObject should also be tainted according to the host object taint flags.
                 std::set<TaintFlag*> *src_taintFlags = hostObj->getFieldTaintInfo(host_dstFieldId);
                 if(src_taintFlags){
+#ifdef DEBUG_CREATE_EMB_OBJ
+                    dbgs() << "no-ptr createEmbObj(): try to taint the emb obj, #TaintFlag: " << src_taintFlags->size() << "\n";
+#endif
                     for(TaintFlag *currTaintFlag:*src_taintFlags){
                         newObj->taintAllFieldsWithTag(currTaintFlag);
                     }
@@ -1365,6 +1383,10 @@ namespace DRCHECKER {
                 hostObj->embObjs[host_dstFieldId] = newObj;
                 newObj->parent = hostObj;
                 newObj->parent_field = host_dstFieldId;
+            }else {
+#ifdef DEBUG_CREATE_EMB_OBJ
+                dbgs() << "no-ptr createEmbObj(): Failed to create the outside object!\n";
+#endif
             }
         }
         return newObj;
@@ -1609,6 +1631,9 @@ namespace DRCHECKER {
                 cands.push_back(inf);
             }
         }
+#ifdef DEBUG_CREATE_HOST_OBJ
+        dbgs() << "getStructTysFromFieldDistance(): #cands: " << cands.size() << "\n";
+#endif
         //We need to select a best candidate to return...
         sortCandStruct(&cands,I);
         //Return the hisghest ranked candidate.

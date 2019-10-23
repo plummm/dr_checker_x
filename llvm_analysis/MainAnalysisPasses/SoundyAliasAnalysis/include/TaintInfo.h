@@ -43,6 +43,15 @@ namespace DRCHECKER {
             this -> priv = p;
         }
 
+        //In case we don't have an actual llvm "Value" pointing to the object, we can just provide the obj type.
+        TaintTag(long fieldId, Type *ty, bool is_global = true, void *p = nullptr) {
+            this -> fieldId = fieldId;
+            this -> v = nullptr;
+            this -> type = ty;
+            this -> is_global = is_global;
+            this -> priv = p;
+        }
+
         TaintTag(TaintTag *srcTag) {
             this -> fieldId = srcTag -> fieldId;
             this -> v = srcTag -> v;
@@ -82,14 +91,16 @@ namespace DRCHECKER {
         }
 
         std::string getTypeStr() {
-            Type *ty = this->getTy();
-            if (!ty) {
-                return "unknown";
+            if (!this->type) {
+                this->type = this->getTy();
             }
+            return InstructionUtils::getTypeStr(this->type);
+            /*
             std::string str;
             llvm::raw_string_ostream ss(str);
-            ty->print(ss);
+            this->type->print(ss);
             return ss.str();
+            */
         }
 
         Type *getTy() {
@@ -117,7 +128,8 @@ namespace DRCHECKER {
             return this->fieldId == dstTag->fieldId &&
                    this->v == dstTag->v &&
                    this->type == dstTag->type &&
-                   this->is_global == dstTag->is_global;
+                   this->is_global == dstTag->is_global &&
+                   this->priv == dstTag->priv;
         }
 
         /*
@@ -175,9 +187,9 @@ namespace DRCHECKER {
         }
 
         void dumpInfo(raw_ostream &OS) {
-            OS << "Taint Tag: " << static_cast<const void *>(this) << "\n";
+            OS << "Taint Tag: " << (const void *)this << "\n";
             OS << "Type: " << InstructionUtils::getTypeStr(this->type) << " | " << this->fieldId << " is_global: " << this->is_global << "\n";
-            OS << "Value: " << InstructionUtils::getValueStr(this->v) << "\n";
+            OS << "Obj: " << (const void*)this->priv << " Value: " << InstructionUtils::getValueStr(this->v) << "\n";
         }
 
         void printModInsts(raw_ostream &OS, std::map<BasicBlock*,std::set<uint64_t>> *switchMap) {
