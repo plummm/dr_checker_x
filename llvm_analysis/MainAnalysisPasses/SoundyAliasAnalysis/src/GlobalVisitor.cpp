@@ -16,6 +16,9 @@ namespace DRCHECKER {
 #define SMART_FUNCTION_PTR_RESOLVING
 #define DEBUG_BB_VISIT
 #define FUNC_BLACKLIST
+#define HARD_LOOP_LIMIT
+#define MAX_LOOP_CNT 3
+#define SKIP_ASAN_INST
 
     // Basic visitor functions.
     // call the corresponding function in the child callbacks.
@@ -324,7 +327,17 @@ namespace DRCHECKER {
         for(VisitorCallback *currCallback:allCallbacks) {
             currCallback->visit(BB);
         }
+#ifdef SKIP_ASAN_INST
+        for (Instruction &inst : *BB) {
+            if (InstructionUtils::isAsanInst(&inst)) {
+                dbgs() << "GlobalVisitor::visit(): Skip ASAN inst: " << InstructionUtils::getValueStr(&inst) << "\n";
+                continue;
+            }
+            _super->visit(inst);
+        }
+#else
         _super->visit(BB->begin(), BB->end());
+#endif
     }
 
     void GlobalVisitor::analyze() {
@@ -346,6 +359,11 @@ namespace DRCHECKER {
 
             } else {
                 unsigned long opt_num_to_analyze = BBTraversalHelper::getNumTimesToAnalyze(currSCC);
+#ifdef HARD_LOOP_LIMIT
+                if (MAX_LOOP_CNT < opt_num_to_analyze) {
+                    opt_num_to_analyze = MAX_LOOP_CNT;
+                }
+#endif
 #ifdef DEBUG_GLOBAL_ANALYSIS
                 dbgs() << "Analyzing Loop BBS for:" << opt_num_to_analyze <<" number of times\n";
 #endif

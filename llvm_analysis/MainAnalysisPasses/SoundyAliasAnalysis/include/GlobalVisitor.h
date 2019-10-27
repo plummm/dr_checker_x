@@ -13,6 +13,7 @@
 #include "llvm/IR/CFG.h"
 #include "ModuleState.h"
 #include "VisitorCallback.h"
+#include "../../Utils/include/InstructionUtils.h"
 
 using namespace llvm;
 

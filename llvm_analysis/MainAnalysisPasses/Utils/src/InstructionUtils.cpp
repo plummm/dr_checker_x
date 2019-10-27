@@ -648,7 +648,7 @@ namespace DRCHECKER {
     }
 
     //To decide whether a Instruction is generated and inserted by ASAN.
-    //NOTE: I simply use a pattern I found from the ASAN instrumented code here, may need to update later.  
+    //NOTE: I simply use a pattern I found from the ASAN instrumented code here, may need to be updated later.  
     //Pattern 0, E.g.:
     /***********************************************************************
     73:                                               ; preds = %63, %72
