@@ -249,6 +249,9 @@ namespace DRCHECKER {
                 //Update the pointsFrom info in the newly created obj.
                 hostObj->addToPointsFrom(newObj);
 
+                //Handle some special cases like mutual point-to in linked list node "list_head".
+                hostObj->handleSpecialFieldPointTo(newObj,fid,targetInstr);
+
                 //Update points-to
                 std::set<PointerPointsTo*> dstPointsTo;
                 PointerPointsTo *newPointsToObj = new PointerPointsTo();

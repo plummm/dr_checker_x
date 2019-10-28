@@ -33,6 +33,7 @@ using namespace llvm;
 #define DEBUG_CREATE_DUMMY_OBJ_IF_NULL
 #define DEBUG_CREATE_EMB_OBJ
 #define DEBUG_CREATE_HOST_OBJ
+#define DEBUG_SPECIAL_FIELD_POINTTO
 
 namespace DRCHECKER {
 //#define DEBUG_FUNCTION_ARG_OBJ_CREATION
@@ -837,7 +838,40 @@ namespace DRCHECKER {
 
         //TaintInfo helpers end
 
-
+        //We just created a new pointee object for a certain field in this host object, at this point
+        //we may still need to handle some special cases, e.g.
+        //(0) This host object A is a "list_head" (i.e. a kernel linked list node) and we created a new "list_head" B pointed to by
+        //the A->next, in this case we also need to set B->prev to A.
+        //(1) TODO: handle more special cases.
+        int handleSpecialFieldPointTo(AliasObject *pobj, long fid, Instruction *targetInstr) {
+            if (!pobj) {
+                return 0;
+            }
+            Type *ht = this->targetType;
+            Type *pt = pobj->targetType;
+            if (!ht || !pt || !ht->isStructTy() || !pt->isStructTy() || !InstructionUtils::same_types(ht,pt)) {
+                return 0;
+            }
+            //Is it of the type "list_head"?
+            std::string ty_name = ht->getStructName().str();
+            if (ty_name.find("list_head") == 0 && fid >= 0 && fid <= 1) {
+#ifdef DEBUG_SPECIAL_FIELD_POINTTO
+                dbgs() << "AliasObject::handleSpecialFieldPointTo(): Handle the list_head case: set the prev and next properly..\n";
+                dbgs() << "AliasObject::handleSpecialFieldPointTo(): hobj: " << (const void*)this << " pobj: " << (const void*)pobj << " fid: " << fid << "\n";
+#endif
+                std::set<PointerPointsTo*> dstPointsTo;
+                PointerPointsTo *newPointsToObj = new PointerPointsTo();
+                newPointsToObj->propogatingInstruction = targetInstr;
+                newPointsToObj->targetObject = this;
+                newPointsToObj->fieldId = 1-fid;
+                newPointsToObj->dstfieldId = 0;
+                dstPointsTo.insert(newPointsToObj);
+                pobj->updateFieldPointsTo(1-fid,&dstPointsTo,targetInstr);
+                pobj->addToPointsFrom(this);
+                return 1;
+            }
+            return 0;
+        }
 
         virtual AliasObject* makeCopy() {
             return new AliasObject(this);
