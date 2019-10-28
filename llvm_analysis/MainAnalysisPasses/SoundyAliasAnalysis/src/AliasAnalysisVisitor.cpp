@@ -1535,7 +1535,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
                 if (newPointsToInfo->size() == 1) {
                     //TargetPointer only has one point-to record.
 #ifdef DEBUG_STORE_INSTR
-                    dbgs() << "There is only 1 point-to record for the TargetPointer, *might* need a strong update.\n";
+                    dbgs() << "There is only 1 point-to record for the TargetPointer, *might* (still need to see #fieldPointsTo) need a strong update.\n";
 #endif
                     PointerPointsTo *dstPointsToObject = *(newPointsToInfo->begin());
                     // we have a pointer which points to only one object.

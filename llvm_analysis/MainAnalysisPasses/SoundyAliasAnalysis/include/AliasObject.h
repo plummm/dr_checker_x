@@ -941,40 +941,7 @@ namespace DRCHECKER {
         }
 
 
-        void updateFieldPointsTo(long srcfieldId, std::set<PointerPointsTo*>* dstPointsTo, Instruction *propogatingInstr) {
-            /***
-             * Add all objects in the provided pointsTo set to be pointed by the provided srcFieldID
-             */
-#ifdef DEBUG_UPDATE_FIELD_POINT
-            dbgs() << "updateFieldPointsTo() for: " << InstructionUtils::getTypeStr(this->targetType) << " | " << srcfieldId;
-            dbgs() << " Host Obj ID: " << (const void*)this << "\n";
-#endif
-            if(dstPointsTo != nullptr) {
-                std::set<AliasObject*> currObjects;
-                // first get all objects that could be pointed by srcfieldId of the current object.
-                getAllObjectsPointedByField(srcfieldId, currObjects);
-                //Add all objects that are in the provided set by changing the field id.
-                for (PointerPointsTo *currPointsTo: *dstPointsTo) {
-                    // insert points to information only, if it is not present.
-                    if(currObjects.find(currPointsTo->targetObject) == currObjects.end()) {
-                        ObjectPointsTo *newPointsTo = currPointsTo->makeCopy();
-                        newPointsTo->fieldId = srcfieldId;
-                        newPointsTo->propogatingInstruction = propogatingInstr;
-#ifdef DEBUG_UPDATE_FIELD_POINT
-                        dbgs() << "updateFieldPointsTo(), add point-to: ";
-                        newPointsTo->print(dbgs());
-#endif
-                        this->pointsTo.push_back(newPointsTo);
-                        //hz: don't forget the "pointsFrom", it is a double link list...
-                        //TODO
-                        //this->addToPointsFrom(newPointsTo->targetObject);
-                    }
-                }
-            }
-
-        }
-
-
+        void updateFieldPointsTo(long srcfieldId, std::set<PointerPointsTo*>* dstPointsTo, Instruction *propogatingInstr);
 
     protected:
         void printPointsTo(llvm::raw_ostream& os) const {
