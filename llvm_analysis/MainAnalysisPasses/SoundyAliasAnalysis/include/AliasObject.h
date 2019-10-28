@@ -850,11 +850,17 @@ namespace DRCHECKER {
             Type *ht = this->targetType;
             Type *pt = pobj->targetType;
             if (!ht || !pt || !ht->isStructTy() || !pt->isStructTy() || !InstructionUtils::same_types(ht,pt)) {
+#ifdef DEBUG_SPECIAL_FIELD_POINTTO
+                dbgs() << "AliasObject::handleSpecialFieldPointTo(): ht and pt are not the same struct pointer.\n";
+#endif
                 return 0;
             }
             //Is it of the type "list_head"?
             std::string ty_name = ht->getStructName().str();
-            if (ty_name.find("list_head") == 0 && fid >= 0 && fid <= 1) {
+#ifdef DEBUG_SPECIAL_FIELD_POINTTO
+            dbgs() << "AliasObject::handleSpecialFieldPointTo(): type name: " << ty_name << "\n";
+#endif
+            if (ty_name.find("struct.list_head") == 0 && fid >= 0 && fid <= 1) {
 #ifdef DEBUG_SPECIAL_FIELD_POINTTO
                 dbgs() << "AliasObject::handleSpecialFieldPointTo(): Handle the list_head case: set the prev and next properly..\n";
                 dbgs() << "AliasObject::handleSpecialFieldPointTo(): hobj: " << (const void*)this << " pobj: " << (const void*)pobj << " fid: " << fid << "\n";
