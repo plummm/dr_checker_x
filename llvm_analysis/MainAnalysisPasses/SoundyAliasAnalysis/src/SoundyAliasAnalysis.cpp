@@ -65,6 +65,7 @@ namespace DRCHECKER {
                                               cl::desc("Function which is to be considered as entry point "
                                                                "into the driver"),
                                               cl::value_desc("full name of the function"), cl::init(""));
+
     static cl::opt<std::string> functionType("functionType",
                                               cl::desc("Function Type. \n Linux kernel has different "
                                                                "types of entry points from user space.\n"
@@ -83,6 +84,16 @@ namespace DRCHECKER {
                                               cl::desc("Path to the output file, where all the warnings w.r.t instructions should be stored."),
                                               cl::value_desc("Path of the output file."), cl::init(""));
 
+    static cl::opt<std::string> entryConfig("entryConfig",
+                                              cl::desc("Config file that specifies all entry functions to be analyzed and the related information like type and user arg"),
+                                              cl::value_desc("The path of the config file"), cl::init(""));
+
+    typedef struct FuncInf {
+        std::string name;
+        Function *func;
+        std::string ty;
+        std::vector<int> user_args;
+    } FuncInf;
 
     struct SAAPass: public ModulePass {
     public:
@@ -100,10 +111,101 @@ namespace DRCHECKER {
             delete(currFuncChecker);
         }
 
+        static std::vector<FuncInf*> targetFuncs;
 
+		//Copied from online source...
+        std::vector<std::string> split(const std::string& str, const std::string& delim) {
+    		std::vector<std::string> tokens;
+    		size_t prev = 0, pos = 0;
+    		do{
+        		pos = str.find(delim, prev);
+        		if (pos == std::string::npos) pos = str.length();
+        		std::string token = str.substr(prev, pos-prev);
+        		if (!token.empty()) tokens.push_back(token);
+        		prev = pos + delim.length();
+    		}while (pos < str.length() && prev < str.length());
+    		return tokens;
+		}
 
+        Function *getFuncByName(Module &m, std::string &name) {
+            for (Function &f : m) {
+                if (f.hasName() && f.getName().str() == name) {
+                    return &f;
+                }
+            }
+            return nullptr;
+        }
+
+        void getTargetFunctions(Module &m) {
+            if (checkFunctionName.size() > 0) {
+                //Method 0: specify a single entry function.
+                FuncInf *fi = new FuncInf();
+                fi->name = checkFunctionName;
+                fi->func = getFuncByName(m,checkFunctionName);
+                //The user arg number might be encoded in the type string if it's MY_IOCTL.
+                if (functionType.find(MY_IOCTL) == 0) {
+                    fi->ty = MY_IOCTL; 
+                    //Get the encoded user arg information.
+                    std::vector<std::string> tks = split(functionType,"_");
+                    if (tks.size() > 2) {
+                        for (int i = 2; i < tks.size(); ++i) {
+                            //NOTE: Exceptions may occur if the invalid arg is passed-in.
+                            int idx = std::stoi(tks[i]);
+                            fi->user_args.push_back(idx);
+                        }
+                    }
+                }else {
+                    fi->ty = functionType;
+                }
+                targetFuncs.push_back(fi);
+            }else if (entryConfig.size() > 0) {
+                //Method 1: specify one or multiple functions in a config file, together w/ related information like type.
+                //Line format:
+                //<func_name> <type> <user_arg_no e.g. 1_3_6>
+                std::ifstream ifile;
+                ifile.open(entryConfig);
+                std::string l;
+                while (std::getline(ifile, l)) {
+                    std::vector<std::string> tks = split(l," ");
+                    if (tks.size() < 2) {
+                        dbgs() << "Invalid line in the entry config file: " << l << "\n";
+                        continue;
+                    }
+                    FuncInf *fi = new FuncInf();
+                    fi->name = tks[0];
+                    fi->func = getFuncByName(m,tks[0]);
+                    fi->ty = tks[1];
+                    if (tks.size() > 2) {
+                        //Get the user arg indices.
+                        std::vector<std::string> utks = split(tks[2],"_");
+                        for (std::string &s : utks) {
+                            int idx = std::stoi(s);
+                            fi->user_args.push_back(idx);
+                        }
+                    }
+                    targetFuncs.push_back(fi);
+                }
+                ifile.close();
+            }else {
+                //No entry functions specified.
+                dbgs() << "getTargetFunctions(): No entry functions specified!\n";
+                return;
+            }
+            //debug output
+            dbgs() << "getTargetFunctions: Functions to analyze:\n";
+            for (FuncInf *fi : targetFuncs) {
+                dbgs() << "FUNC: " << fi->name << " PTR: " << (const void*)fi->func << " TYPE: " << fi->ty << " USER_ARGS:";
+                for (int i : fi->user_args) {
+                    dbgs() << " " << i;
+                }
+                dbgs() << "\n";
+            }
+            return;
+        }
+
+        //For any global variable that is used by our specified function(s), find all ".init" functions that also use the same GV.
         void getAllInterestingInitFunctions(Module &m, std::string currFuncName,
-                                            std::set<Function*> interestingInitFuncs) {
+                                            std::set<Function*> &interestingInitFuncs) {
             /***
              * Get all init functions that should be analyzed to analyze provided init function.
              */
@@ -170,16 +272,22 @@ namespace DRCHECKER {
 
             // Setup aliases for global variables.
             setupGlobals(m);
+            //hz: taint all global objects, field-sensitive.
+            addGlobalTaintSource(currState);
 
-            dbgs() << "Provided Function Type:" << functionType << ", Function Name:" << checkFunctionName << "\n";
+            //Get the target functions to be analyzed.
+            getTargetFunctions(m);
+
             auto t_start = std::chrono::system_clock::now();
             dbgs() << "Anlysis starts at: ";
             this->printCurTime();
             // Call init functions.
             if(!skipInit) {
                 std::set<Function*> toAnalyzeInitFunctions;
-                getAllInterestingInitFunctions(m, checkFunctionName, toAnalyzeInitFunctions);
-                dbgs() << "Analyzing:" << toAnalyzeInitFunctions.size() << " init functions\n";
+                for (FuncInf *fi : targetFuncs) {
+                    getAllInterestingInitFunctions(m, fi->name, toAnalyzeInitFunctions);
+                }
+                dbgs() << "Analyzing: " << toAnalyzeInitFunctions.size() << " init functions\n";
                 for(auto currInitFunc:toAnalyzeInitFunctions) {
                     dbgs() << "Analyzing init function:" << currInitFunc->getName() << "\n";
                     std::vector<std::vector<BasicBlock *> *> *traversalOrder =
@@ -198,148 +306,152 @@ namespace DRCHECKER {
                 }
             }
 
-            for(Module::iterator mi = m.begin(), ei = m.end(); mi != ei; mi++) {
-                Function &currFunction = *mi;
-
-                if(!currFunction.isDeclaration()) {
-                    std::vector<std::vector<BasicBlock *> *> *traversalOrder = BBTraversalHelper::getSCCTraversalOrder(currFunction);
-#ifdef DEBUG_TRAVERSAL_ORDER
-                    if(currFunction.getName().str() == "n_tty_receive_char_special") {
-                        std::cout << "Got Traversal order For:" << currFunction.getName().str() << "\n";
-                        for (auto m1:*traversalOrder) {
-                            std::cout << "SCC START:" << m1->size() << ":\n";
-                            for (auto m2:*m1) {
-                                std::cout << InstructionUtils::getBBStrID(m2) << " -> ";
-                            }
-                            std::cout << "SCC END\n";
-                        }
-                    }
+            auto t_prev = std::chrono::system_clock::now();
+            auto t_next = t_prev;
+            for (FuncInf *fi : targetFuncs) {
+                if (!fi || !fi->func || fi->func->isDeclaration()) {
+                    dbgs() << "!!! runOnModule(): (!fi || !fi->func || fi->func->isDeclaration())\n";
                     continue;
+                }
+                Function &currFunction = *(fi->func);
+
+                std::vector<std::vector<BasicBlock *> *> *traversalOrder = BBTraversalHelper::getSCCTraversalOrder(currFunction);
+#ifdef DEBUG_TRAVERSAL_ORDER
+                if(currFunction.getName().str() == "n_tty_receive_char_special") {
+                    std::cout << "Got Traversal order For:" << currFunction.getName().str() << "\n";
+                    for (auto m1:*traversalOrder) {
+                        std::cout << "SCC START:" << m1->size() << ":\n";
+                        for (auto m2:*m1) {
+                            std::cout << InstructionUtils::getBBStrID(m2) << " -> ";
+                        }
+                        std::cout << "SCC END\n";
+                    }
+                }
+                continue;
 #endif
 
 #ifdef DEBUG_SCC_GRAPH
-                    std::string Filename = "cfg_dot_files/cfg." + currFunction.getName().str() + ".dot";
-                    errs() << "Writing '" << Filename << "'...";
+                std::string Filename = "cfg_dot_files/cfg." + currFunction.getName().str() + ".dot";
+                errs() << "Writing '" << Filename << "'...";
 
-                    std::error_code ErrorInfo;
-                    raw_fd_ostream File(Filename, ErrorInfo, sys::fs::F_Text);
+                std::error_code ErrorInfo;
+                raw_fd_ostream File(Filename, ErrorInfo, sys::fs::F_Text);
 
-                    if (ErrorInfo.value() == 0)
-                        WriteGraph(File, (const Function*)&currFunction);
-                    else
-                        errs() << "  error opening file for writing!";
-                    errs() << "\n";
+                if (ErrorInfo.value() == 0)
+                    WriteGraph(File, (const Function*)&currFunction);
+                else
+                    errs() << "  error opening file for writing!";
+                errs() << "\n";
 #endif
 
-                    if(currFunction.getName().str() == checkFunctionName) {
-                        // first instruction of the IOCTL function.
-                        callSites.push_back(currFunction.getEntryBlock().getFirstNonPHIOrDbg());
-                        // set up user function args.
-                        setupFunctionArgs(&currFunction, currState, &callSites);
-                        //hz: taint all global objects, field-sensitive.
-                        addGlobalTaintSource(currState);
+                // first instruction of the entry function.
+                callSites.push_back(currFunction.getEntryBlock().getFirstNonPHIOrDbg());
+                // set up user function args.
+                setupFunctionArgs(fi, currState, &callSites);
 
-                        std::vector<VisitorCallback *> allCallBacks;
+                std::vector<VisitorCallback *> allCallBacks;
 
-                        // add pre analysis bug detectors/
-                        // these are the detectors, that need to be run before all the analysis passes.
-                        //BugDetectorDriver::addPreAnalysisBugDetectors(currState, &currFunction, &callSites,
-                        //                                              &allCallBacks, targetChecker);
+                // add pre analysis bug detectors/
+                // these are the detectors, that need to be run before all the analysis passes.
+                //BugDetectorDriver::addPreAnalysisBugDetectors(currState, &currFunction, &callSites,
+                //                                              &allCallBacks, targetChecker);
 
-                        // first add all analysis visitors.
-                        addAllVisitorAnalysis(currState, &currFunction, &callSites, &allCallBacks);
+                // first add all analysis visitors.
+                addAllVisitorAnalysis(currState, &currFunction, &callSites, &allCallBacks);
 
-                        // next, add all bug detector analysis visitors, which need to be run post analysis passed.
-                        //BugDetectorDriver::addPostAnalysisBugDetectors(currState, &currFunction, &callSites,
-                        //                                               &allCallBacks, targetChecker);
+                // next, add all bug detector analysis visitors, which need to be run post analysis passed.
+                //BugDetectorDriver::addPostAnalysisBugDetectors(currState, &currFunction, &callSites,
+                //                                               &allCallBacks, targetChecker);
 
-                        // create global visitor and run it.
-                        GlobalVisitor *vis = new GlobalVisitor(currState, &currFunction, &callSites, traversalOrder, allCallBacks);
+                // create global visitor and run it.
+                GlobalVisitor *vis = new GlobalVisitor(currState, &currFunction, &callSites, traversalOrder, allCallBacks);
 
-                        //vis->analyze();
+                //SAAVisitor *vis = new SAAVisitor(currState, &currFunction, &callSites, traversalOrder);
+                dbgs() << "Starting Analyzing function:" << fi->name << "\n";
+                vis->analyze();
 
-                        //SAAVisitor *vis = new SAAVisitor(currState, &currFunction, &callSites, traversalOrder);
-                        dbgs() << "Starting Analyzing function:" << currFunction.getName() << "\n";
-                        vis->analyze();
+                //Record the timestamp.
+                t_next = std::chrono::system_clock::now();
+                std::chrono::duration<double> elapsed_seconds = t_next - t_prev;
+                dbgs() << "Anlysis of " << fi->name << " done in : " << elapsed_seconds.count() << "s\n";
+                t_prev = t_next;
 
-                        auto t_now = std::chrono::system_clock::now();
-                        std::chrono::duration<double> elapsed_seconds = t_now - t_start;
-                        dbgs() << "Anlysis done in : " << elapsed_seconds.count() << "s\n";
-
-                        dbgs() << "Now start to serialize the taint information...\n";
-                        currState.serializeTaintInfo("taint_info_" + checkFunctionName + "_serialize");
-
-                        auto t_end0 = std::chrono::system_clock::now();
-                        elapsed_seconds = t_end0 - t_now;
-                        dbgs() << "Taint info serialized in : " << elapsed_seconds.count() << "s\n";
-                        
-                        dbgs() << "Now start to dump the taint information...\n";
-                        std::error_code EC;
-                        llvm::raw_fd_ostream o_taint("taint_info_" + checkFunctionName, EC);
-                        //Set a 5MB buffer to improve file I/O performance.
-                        o_taint.SetBufferSize(5*1024*1024);
-                        currState.dumpTaintInfo(o_taint);
-                        o_taint.close();
-
-                        //Write the taint info first to a in-mem string, then save it to the file, might be faster.
-                        /*
-                        std::string str_taint_inf;
-                        llvm::raw_string_ostream o_taint(str_taint_inf);
-                        currState.dumpTaintInfo(o_taint);
-                        std::ofstream outfile;
-                        outfile.open("taint_info_" + checkFunctionName);
-                        outfile << o_taint.str();
-                        outfile.close();
-                        */
-
-                        auto t_end1 = std::chrono::system_clock::now();
-                        elapsed_seconds = t_end1 - t_end0;
-                        dbgs() << "Taint info dumped in : " << elapsed_seconds.count() << "s\n";
-
-                        /*
-                        if(outputFile == "") {
-                            // No file provided, write to dbgs()
-                            dbgs() << "[+] Writing JSON output :\n";
-                            dbgs() << "[+] JSON START:\n\n";
-                            BugDetectorDriver::printAllWarnings(currState, dbgs());
-                            BugDetectorDriver::printWarningsByInstr(currState, dbgs());
-                            dbgs() << "\n\n[+] JSON END\n";
-                        } else {
-                            std::error_code res_code;
-                            dbgs() << "[+] Writing output to:" << outputFile << "\n";
-                            llvm::raw_fd_ostream op_stream(outputFile, res_code, llvm::sys::fs::F_Text);
-                            BugDetectorDriver::printAllWarnings(currState, op_stream);
-                            op_stream.close();
-
-                            dbgs() << "[+] Return message from file write:" << res_code.message() << "\n";
-
-                            std::string instrWarningsFile;
-                            std::string originalFile = instrWarnings;
-                            if(!originalFile.empty()) {
-                                instrWarningsFile = originalFile;
-                            } else {
-                                instrWarningsFile = outputFile;
-                                instrWarningsFile.append(".instr_warngs.json");
-                            }
-
-                            dbgs() << "[+] Writing Instr output to:" << instrWarningsFile << "\n";
-                            llvm::raw_fd_ostream instr_op_stream(instrWarningsFile, res_code, llvm::sys::fs::F_Text);
-                            BugDetectorDriver::printWarningsByInstr(currState, instr_op_stream);
-                            instr_op_stream.close();
-
-                            dbgs() << "[+] Return message from file write:" << res_code.message() << "\n";
-                        }
-                        */
-
-                        //clean up
-                        dbgs() << "Clean up GlobalVisitor at: ";
-                        this->printCurTime();
-                        delete(vis);
-
-                        //((AliasAnalysisVisitor *)aliasVisitorCallback)->printAliasAnalysisResults(dbgs());
-                    }
-                }
+                //clean up
+                dbgs() << "Clean up GlobalVisitor at: ";
+                this->printCurTime();
+                delete(vis);
             }
+            //Print the results and debug info.
+            auto t_now = std::chrono::system_clock::now();
+            std::chrono::duration<double> elapsed_seconds = t_now - t_start;
+            dbgs() << "All anlysis done in : " << elapsed_seconds.count() << "s\n";
+
+            dbgs() << "Now start to serialize the taint information...\n";
+            currState.serializeTaintInfo("taint_info_" + checkFunctionName + "_serialize");
+
+            auto t_end0 = std::chrono::system_clock::now();
+            elapsed_seconds = t_end0 - t_now;
+            dbgs() << "Taint info serialized in : " << elapsed_seconds.count() << "s\n";
+                        
+            dbgs() << "Now start to dump the taint information...\n";
+            std::error_code EC;
+            llvm::raw_fd_ostream o_taint("taint_info_" + checkFunctionName, EC);
+            //Set a 5MB buffer to improve file I/O performance.
+            o_taint.SetBufferSize(5*1024*1024);
+            currState.dumpTaintInfo(o_taint);
+            o_taint.close();
+
+            //Write the taint info first to a in-mem string, then save it to the file, might be faster.
+            /*
+            std::string str_taint_inf;
+            llvm::raw_string_ostream o_taint(str_taint_inf);
+            currState.dumpTaintInfo(o_taint);
+            std::ofstream outfile;
+            outfile.open("taint_info_" + checkFunctionName);
+            outfile << o_taint.str();
+            outfile.close();
+            */
+
+            auto t_end1 = std::chrono::system_clock::now();
+            elapsed_seconds = t_end1 - t_end0;
+            dbgs() << "Taint info dumped in : " << elapsed_seconds.count() << "s\n";
+
+            /*
+            if(outputFile == "") {
+                // No file provided, write to dbgs()
+                dbgs() << "[+] Writing JSON output :\n";
+                dbgs() << "[+] JSON START:\n\n";
+                BugDetectorDriver::printAllWarnings(currState, dbgs());
+                BugDetectorDriver::printWarningsByInstr(currState, dbgs());
+                dbgs() << "\n\n[+] JSON END\n";
+            } else {
+                std::error_code res_code;
+                dbgs() << "[+] Writing output to:" << outputFile << "\n";
+                llvm::raw_fd_ostream op_stream(outputFile, res_code, llvm::sys::fs::F_Text);
+                BugDetectorDriver::printAllWarnings(currState, op_stream);
+                op_stream.close();
+
+                dbgs() << "[+] Return message from file write:" << res_code.message() << "\n";
+
+                std::string instrWarningsFile;
+                std::string originalFile = instrWarnings;
+                if(!originalFile.empty()) {
+                    instrWarningsFile = originalFile;
+                } else {
+                    instrWarningsFile = outputFile;
+                    instrWarningsFile.append(".instr_warngs.json");
+                }
+
+                dbgs() << "[+] Writing Instr output to:" << instrWarningsFile << "\n";
+                llvm::raw_fd_ostream instr_op_stream(instrWarningsFile, res_code, llvm::sys::fs::F_Text);
+                BugDetectorDriver::printWarningsByInstr(currState, instr_op_stream);
+                instr_op_stream.close();
+
+                dbgs() << "[+] Return message from file write:" << res_code.message() << "\n";
+            }
+            */
+
+            //((AliasAnalysisVisitor *)aliasVisitorCallback)->printAliasAnalysisResults(dbgs());
             // explicitly delete references to global variables.
             dbgs() << "Clean up global state at: ";
             this->printCurTime();
@@ -479,21 +591,11 @@ namespace DRCHECKER {
 
         }
 
-		//Copied from online source...
-        std::vector<std::string> split(const std::string& str, const std::string& delim) {
-    		std::vector<std::string> tokens;
-    		size_t prev = 0, pos = 0;
-    		do{
-        		pos = str.find(delim, prev);
-        		if (pos == std::string::npos) pos = str.length();
-        		std::string token = str.substr(prev, pos-prev);
-        		if (!token.empty()) tokens.push_back(token);
-        		prev = pos + delim.length();
-    		}while (pos < str.length() && prev < str.length());
-    		return tokens;
-		}
-
-        void setupFunctionArgs(Function *targetFunction, GlobalState &targetState, std::vector<Instruction *> *callSites) {
+        void setupFunctionArgs(FuncInf *fi, GlobalState &targetState, std::vector<Instruction *> *callSites) {
+            if (!fi || !fi->func) {
+                dbgs() << "!!! setupFunctionArgs(): (!fi || !fi->func)\n";
+                return;
+            }
             /***
              * Set up the function args for the main entry function(s).
              */
@@ -506,9 +608,9 @@ namespace DRCHECKER {
             // arguments which are pointer args
             std::set<unsigned long> pointerArgs;
             bool is_handled = false;
-            if(functionType == IOCTL_HDR) {
+            if(fi->ty == IOCTL_HDR) {
                 // last argument is the user pointer.
-                taintedArgs.insert(targetFunction->arg_size() - 1);
+                taintedArgs.insert(fi->func->arg_size() - 1);
                 // first argument is the file pointer
                 pointerArgs.insert(0);
                 is_handled = true;
@@ -516,68 +618,64 @@ namespace DRCHECKER {
             //hz: We want to set all global variables as taint source,
             //for ioctl() in driver code, the FILE pointer should also
             //be regarded as a global variable.
-            if(functionType.find(MY_IOCTL) == 0) {
-                //Extract the user arg indices if any.
-                std::vector<std::string> tks = split(functionType,"_");
-                if (tks.size() > 2) {
-                    for (int i = 2; i < tks.size(); ++i) {
-                        //NOTE: Here may occur exception if the invalid arg is passed-in.
-                        int idx = std::stoi(tks[i]);
-                        dbgs() << "Set " << idx << "th arg of " << targetFunction->getName().str() << " as user arg (taint source)...\n";
-                        taintedArgs.insert(idx);
+            if(fi->ty == MY_IOCTL) {
+                //Any user arg indices?
+                if (fi->user_args.size() > 0) {
+                    for (int i : fi->user_args) {
+                        taintedArgs.insert(i);
                     }
                 }else {
                     //by default the last argument is the user pointer.
-                    taintedArgs.insert(targetFunction->arg_size() - 1);
+                    taintedArgs.insert(fi->func->arg_size() - 1);
                 }
                 is_handled = true;
             }
-            if(functionType == READ_HDR || functionType == WRITE_HDR) {
+            if(fi->ty == READ_HDR || fi->ty == WRITE_HDR) {
                 taintedArgs.insert(1);
                 taintedArgs.insert(2);
                 pointerArgs.insert(0);
                 pointerArgs.insert(3);
                 is_handled = true;
             }
-            if(functionType == V4L2_IOCTL_FUNC) {
-                taintedArgData.insert(targetFunction->arg_size() - 1);
-                for(unsigned long i=0;i<targetFunction->arg_size(); i++) {
+            if(fi->ty == V4L2_IOCTL_FUNC) {
+                taintedArgData.insert(fi->func->arg_size() - 1);
+                for(unsigned long i=0;i<fi->func->arg_size(); i++) {
                     pointerArgs.insert(i);
                 }
                 is_handled = true;
             }
-            if(functionType == DEVATTR_SHOW) {
-                for(unsigned long i=0;i<targetFunction->arg_size(); i++) {
+            if(fi->ty == DEVATTR_SHOW) {
+                for(unsigned long i=0;i<fi->func->arg_size(); i++) {
                     pointerArgs.insert(i);
                 }
                 is_handled = true;
             }
-            if(functionType == DEVATTR_STORE) {
-                if(targetFunction->arg_size() == 3) {
+            if(fi->ty == DEVATTR_STORE) {
+                if(fi->func->arg_size() == 3) {
                     // this is driver attribute
                     taintedArgData.insert(1);
                 } else {
                     // this is device attribute
                     taintedArgData.insert(2);
                 }
-                for (unsigned long i = 0; i < targetFunction->arg_size() - 1; i++) {
+                for (unsigned long i = 0; i < fi->func->arg_size() - 1; i++) {
                     pointerArgs.insert(i);
                 }
                 is_handled = true;
             }
-            if(functionType == NETDEV_IOCTL) {
+            if(fi->ty == NETDEV_IOCTL) {
                 taintedArgData.insert(1);
-                for(unsigned long i=0;i<targetFunction->arg_size()-1; i++) {
+                for(unsigned long i=0;i<fi->func->arg_size()-1; i++) {
                     pointerArgs.insert(i);
                 }
                 is_handled = true;
             }
             //hz: the function doesn't have arguments. This is created for test purposes.
-            if(functionType == NULL_ARG) {
+            if(fi->ty == NULL_ARG) {
                 is_handled = true;
             }
             if(!is_handled) {
-                dbgs() << "Invalid Function Type:" << functionType << "\n";
+                dbgs() << "Invalid Function Type:" << fi->ty << "\n";
                 dbgs() << "Errorring out\n";
             }
             assert(is_handled);
@@ -585,7 +683,7 @@ namespace DRCHECKER {
 
             std::map<Value *, std::set<PointerPointsTo*>*> *currPointsTo = targetState.getPointsToInfo(callSites);
             unsigned long arg_no=0;
-            for(Function::arg_iterator arg_begin = targetFunction->arg_begin(), arg_end = targetFunction->arg_end(); arg_begin != arg_end; arg_begin++) {
+            for(Function::arg_iterator arg_begin = fi->func->arg_begin(), arg_end = fi->func->arg_end(); arg_begin != arg_end; arg_begin++) {
                 Value *currArgVal = &(*arg_begin);
                 if(taintedArgs.find(arg_no) != taintedArgs.end()) {
                     //hz: Add a taint tag indicating that the taint is from user-provided arg, instead of global states.
@@ -593,13 +691,13 @@ namespace DRCHECKER {
                     TaintTag *currTag = new TaintTag(0,currArgVal,false);
                     TaintFlag *currFlag = new TaintFlag(currArgVal, true);
                     currFlag->setTag(currTag);
-                    currFlag->instructionTrace.push_back(targetFunction->getEntryBlock().getFirstNonPHIOrDbg());
+                    currFlag->instructionTrace.push_back(fi->func->getEntryBlock().getFirstNonPHIOrDbg());
                     std::set<TaintFlag*> *currTaintInfo = new std::set<TaintFlag*>();
                     currTaintInfo->insert(currFlag);
                     TaintUtils::updateTaintInfo(targetState, callSites, currArgVal, currTaintInfo);
                 }
                 if(pointerArgs.find(arg_no) != pointerArgs.end()) {
-                    AliasObject *obj = new FunctionArgument(currArgVal, currArgVal->getType(), targetFunction,
+                    AliasObject *obj = new FunctionArgument(currArgVal, currArgVal->getType(), fi->func,
                                                             callSites);
                     PointerPointsTo *newPointsTo = new PointerPointsTo();
                     newPointsTo->targetPointer = currArgVal;
@@ -608,7 +706,7 @@ namespace DRCHECKER {
                     newPointsTo->targetObject = obj;
                     if(taintedArgData.find(arg_no) != taintedArgData.end()) {
                         TaintFlag *currFlag = new TaintFlag(currArgVal, true);
-                        currFlag->instructionTrace.push_back(targetFunction->getEntryBlock().getFirstNonPHIOrDbg());
+                        currFlag->instructionTrace.push_back(fi->func->getEntryBlock().getFirstNonPHIOrDbg());
                         obj->taintAllFields(currFlag);
                     }
                     std::set<PointerPointsTo *> *newPointsToSet = new std::set<PointerPointsTo *>();
