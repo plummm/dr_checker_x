@@ -34,12 +34,12 @@ using namespace llvm;
 #define DEBUG_CREATE_EMB_OBJ
 #define DEBUG_CREATE_HOST_OBJ
 #define DEBUG_SPECIAL_FIELD_POINTTO
+#define DEBUG_SHARED_OBJ_CACHE
 
 namespace DRCHECKER {
 //#define DEBUG_FUNCTION_ARG_OBJ_CREATION
 
     class AliasObject;
-
 
     /***
      * Handles general points to relation.
@@ -1773,6 +1773,48 @@ namespace DRCHECKER {
             }
         }
         */
+        return nullptr;
+    }
+
+    //hz: when analyzing multiple entry functions, they may share some objects:
+    //(0) explicit global objects, we don't need to take special care of these objects since they are pre-created before all analysis and will naturally shared.
+    //(1) the outside objects created by us on the fly (e.g. the file->private in the driver), multiple entry functions in driver (e.g. .ioctl and .read/.write)
+    //can shared the same outside objects, so we design this obj cache to record all the top-level outside objects created when analyzing each entry function,
+    //when we need to create a same type outside object later in a different entry function, we will then directly retrieve it from this cache.
+    static std::map<Type*,std::map<Function*,std::set<OutsideObject*>>> sharedObjCache;
+
+    static Function *currEntryFunc = nullptr;
+
+    static int addToSharedObjCache(OutsideObject *obj) {
+        if (!obj || !DRCHECKER::currEntryFunc ||!obj->targetType) {
+            return 0;
+        }
+        DRCHECKER::sharedObjCache[obj->targetType][DRCHECKER::currEntryFunc].insert(obj);
+        return 1;
+    }
+
+    static OutsideObject *getSharedObjFromCache(Type *ty) {
+        if (!ty || !DRCHECKER::currEntryFunc) {
+            return nullptr;
+        }
+        if (DRCHECKER::sharedObjCache.find(ty) == DRCHECKER::sharedObjCache.end()) {
+            return nullptr;
+        }
+        for (auto &e : DRCHECKER::sharedObjCache[ty]) {
+            if (e.first != DRCHECKER::currEntryFunc) {
+                for (OutsideObject *o : e.second) {
+#ifdef DEBUG_SHARED_OBJ_CACHE
+                    dbgs() << "addToSharedObjCache(): Ty: " << InstructionUtils::getTypeStr(ty) << " currEntryFunc: " << DRCHECKER::currEntryFunc->getName().str() << " srcEntryFunc: " << e.first->getName().str();
+                    dbgs() << " obj ID: " << (const void*)o << "\n";
+#endif
+                    return o;
+                }
+            }else {
+                //This means there is already a same-typed object created previously when analyzing current entry function.
+                //TODO: should we re-use this previous obj or create a new one?
+                break;
+            }
+        }
         return nullptr;
     }
 

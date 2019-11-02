@@ -255,7 +255,6 @@ namespace DRCHECKER {
 
         bool runOnModule(Module &m) override {
 
-            std::vector<Instruction *> callSites;
             FunctionChecker* targetChecker = new KernelFunctionChecker();
             // create data layout for the current module
             DataLayout *currDataLayout = new DataLayout(&m);
@@ -288,19 +287,24 @@ namespace DRCHECKER {
                     getAllInterestingInitFunctions(m, fi->name, toAnalyzeInitFunctions);
                 }
                 dbgs() << "Analyzing: " << toAnalyzeInitFunctions.size() << " init functions\n";
-                for(auto currInitFunc:toAnalyzeInitFunctions) {
+                for(auto currInitFunc : toAnalyzeInitFunctions) {
                     dbgs() << "Analyzing init function:" << currInitFunc->getName() << "\n";
                     std::vector<std::vector<BasicBlock *> *> *traversalOrder =
                             BBTraversalHelper::getSCCTraversalOrder(*currInitFunc);
 
+                    std::vector<Instruction*> *pcallSites = new std::vector<Instruction*>();
+                    pcallSites->push_back(currInitFunc->getEntryBlock().getFirstNonPHIOrDbg());
+
                     VisitorCallback *aliasVisitorCallback = new AliasAnalysisVisitor(currState, currInitFunc,
-                                                                                     &callSites);
+                                                                                     pcallSites);
 
                     std::vector<VisitorCallback *> allCallBacks;
                     allCallBacks.insert(allCallBacks.end(), aliasVisitorCallback);
 
-                    GlobalVisitor *vis = new GlobalVisitor(currState, currInitFunc, &callSites, traversalOrder,
+                    GlobalVisitor *vis = new GlobalVisitor(currState, currInitFunc, pcallSites, traversalOrder,
                                                            allCallBacks);
+
+                    DRCHECKER::currEntryFunc = currInitFunc;
 
                     vis->analyze();
                 }
@@ -345,29 +349,31 @@ namespace DRCHECKER {
 #endif
 
                 // first instruction of the entry function.
-                callSites.push_back(currFunction.getEntryBlock().getFirstNonPHIOrDbg());
+                std::vector<Instruction*> *pcallSites = new std::vector<Instruction*>();
+                pcallSites->push_back(currFunction.getEntryBlock().getFirstNonPHIOrDbg());
                 // set up user function args.
-                setupFunctionArgs(fi, currState, &callSites);
+                setupFunctionArgs(fi, currState, pcallSites);
 
                 std::vector<VisitorCallback *> allCallBacks;
 
                 // add pre analysis bug detectors/
                 // these are the detectors, that need to be run before all the analysis passes.
-                //BugDetectorDriver::addPreAnalysisBugDetectors(currState, &currFunction, &callSites,
+                //BugDetectorDriver::addPreAnalysisBugDetectors(currState, &currFunction, pcallSites,
                 //                                              &allCallBacks, targetChecker);
 
                 // first add all analysis visitors.
-                addAllVisitorAnalysis(currState, &currFunction, &callSites, &allCallBacks);
+                addAllVisitorAnalysis(currState, &currFunction, pcallSites, &allCallBacks);
 
                 // next, add all bug detector analysis visitors, which need to be run post analysis passed.
-                //BugDetectorDriver::addPostAnalysisBugDetectors(currState, &currFunction, &callSites,
+                //BugDetectorDriver::addPostAnalysisBugDetectors(currState, &currFunction, pcallSites,
                 //                                               &allCallBacks, targetChecker);
 
                 // create global visitor and run it.
-                GlobalVisitor *vis = new GlobalVisitor(currState, &currFunction, &callSites, traversalOrder, allCallBacks);
+                GlobalVisitor *vis = new GlobalVisitor(currState, &currFunction, pcallSites, traversalOrder, allCallBacks);
 
-                //SAAVisitor *vis = new SAAVisitor(currState, &currFunction, &callSites, traversalOrder);
+                //SAAVisitor *vis = new SAAVisitor(currState, &currFunction, pcallSites, traversalOrder);
                 dbgs() << "Starting Analyzing function:" << fi->name << "\n";
+                DRCHECKER::currEntryFunc = &currFunction;
                 vis->analyze();
 
                 //Record the timestamp.
