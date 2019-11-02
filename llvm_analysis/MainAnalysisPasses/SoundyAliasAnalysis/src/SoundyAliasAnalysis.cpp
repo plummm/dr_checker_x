@@ -95,6 +95,8 @@ namespace DRCHECKER {
         std::vector<int> user_args;
     } FuncInf;
 
+    static std::vector<FuncInf*> targetFuncs;
+
     struct SAAPass: public ModulePass {
     public:
         static char ID;
@@ -110,8 +112,6 @@ namespace DRCHECKER {
         ~SAAPass() {
             delete(currFuncChecker);
         }
-
-        static std::vector<FuncInf*> targetFuncs;
 
 		//Copied from online source...
         std::vector<std::string> split(const std::string& str, const std::string& delim) {
