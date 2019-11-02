@@ -1781,6 +1781,7 @@ namespace DRCHECKER {
     //(1) the outside objects created by us on the fly (e.g. the file->private in the driver), multiple entry functions in driver (e.g. .ioctl and .read/.write)
     //can shared the same outside objects, so we design this obj cache to record all the top-level outside objects created when analyzing each entry function,
     //when we need to create a same type outside object later in a different entry function, we will then directly retrieve it from this cache.
+    //TODO: what about the kmalloc'ed objects whose types are later changed to a struct...
     static std::map<Type*,std::map<Function*,std::set<OutsideObject*>>> sharedObjCache;
 
     static Function *currEntryFunc = nullptr;
