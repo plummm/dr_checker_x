@@ -388,12 +388,13 @@ namespace DRCHECKER {
                 delete(vis);
             }
             //Print the results and debug info.
+            std::string rid = (checkFunctionName.size() > 0 ? checkFunctionName : entryConfig);
             auto t_now = std::chrono::system_clock::now();
             std::chrono::duration<double> elapsed_seconds = t_now - t_start;
             dbgs() << "All anlysis done in : " << elapsed_seconds.count() << "s\n";
 
             dbgs() << "Now start to serialize the taint information...\n";
-            currState.serializeTaintInfo("taint_info_" + checkFunctionName + "_serialize");
+            currState.serializeTaintInfo("taint_info_" + rid + "_serialize");
 
             auto t_end0 = std::chrono::system_clock::now();
             elapsed_seconds = t_end0 - t_now;
@@ -401,7 +402,7 @@ namespace DRCHECKER {
                         
             dbgs() << "Now start to dump the taint information...\n";
             std::error_code EC;
-            llvm::raw_fd_ostream o_taint("taint_info_" + checkFunctionName, EC);
+            llvm::raw_fd_ostream o_taint("taint_info_" + rid, EC);
             //Set a 5MB buffer to improve file I/O performance.
             o_taint.SetBufferSize(5*1024*1024);
             currState.dumpTaintInfo(o_taint);
