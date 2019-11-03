@@ -1255,6 +1255,26 @@ namespace DRCHECKER {
         return newObj;
     }
 
+    static int updatePointsToRecord(Value *p, std::map<Value*,std::set<PointerPointsTo*>*> *currPointsTo, AliasObject *newObj, long fid = 0, long dfid = 0) {
+        if (!newObj || !p) {
+            return 0;
+        }
+        PointerPointsTo *newPointsTo = new PointerPointsTo();
+        newPointsTo->targetPointer = p;
+        newPointsTo->fieldId = fid;
+        newPointsTo->dstfieldId = dfid;
+        newPointsTo->targetObject = newObj;
+        newObj->pointersPointsTo.insert(newObj->pointersPointsTo.end(),newPointsTo);
+        //Set up point-to records in the global state.
+        if (currPointsTo) {
+            std::set<PointerPointsTo *> *newPointsToSet = new std::set<PointerPointsTo *>();
+            newPointsToSet->insert(newPointsToSet->end(), newPointsTo);
+            (*currPointsTo)[p] = newPointsToSet;
+            return 1;
+        }
+        return 0;
+    }
+
     //hz: A helper method to create and (taint) a new OutsideObject according to a given pointer value (possibly an IR).
     //The arg "currPointsTo" is the current global point-to state.
     static OutsideObject* createOutsideObj(Value *p, std::map<Value*,std::set<PointerPointsTo*>*> *currPointsTo, bool taint, std::set<TaintFlag*> *existingTaints) {
@@ -1291,18 +1311,7 @@ namespace DRCHECKER {
         //All outside objects are generated automatically.
         newObj->auto_generated = true;
         //Set up point-to records inside the AliasObject.
-        PointerPointsTo *newPointsTo = new PointerPointsTo();
-        newPointsTo->targetPointer = p;
-        newPointsTo->fieldId = 0;
-        newPointsTo->dstfieldId = 0;
-        newPointsTo->targetObject = newObj;
-        newObj->pointersPointsTo.insert(newObj->pointersPointsTo.end(),newPointsTo);
-        //Set up point-to records in the global state.
-        if (currPointsTo) {
-            std::set<PointerPointsTo *> *newPointsToSet = new std::set<PointerPointsTo *>();
-            newPointsToSet->insert(newPointsToSet->end(), newPointsTo);
-            (*currPointsTo)[p] = newPointsToSet;
-        }
+        updatePointsToRecord(p,currPointsTo,newObj);
         //Need taint?
         if (taint) {
             if (existingTaints && !existingTaints->empty()) {

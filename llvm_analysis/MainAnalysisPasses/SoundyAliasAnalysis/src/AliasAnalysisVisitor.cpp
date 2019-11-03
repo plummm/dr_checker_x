@@ -24,6 +24,7 @@ namespace DRCHECKER {
 
     //hz: A helper method to create and (taint) a new OutsideObject.
     OutsideObject* AliasAnalysisVisitor::createOutsideObj(Value *p, bool taint) {
+        std::map<Value *, std::set<PointerPointsTo*>*> *currPointsTo = this->currState.getPointsToInfo(this->currFuncCallSites);
         //Can we get a same-typed object from the global cache (generated when analyzing another entry function)?
         //NOTE: there are multiple places in the code that create a new OutsideObject, but we onlyd do this multi-entry cache mechanism here,
         //because other places create the object that is related to another object (emb/host/field point-to), while we only need to cache the
@@ -31,10 +32,11 @@ namespace DRCHECKER {
         if (p && p->getType() && p->getType()->isPointerTy() && p->getType()->getPointerElementType()->isStructTy()) {
             OutsideObject *obj = DRCHECKER::getSharedObjFromCache(p->getType()->getPointerElementType());
             if (obj) {
+                //We need to bind the shared object w/ current inst.
+                DRCHECKER::updatePointsToRecord(p,currPointsTo,obj);
                 return obj;
             }
         }
-        std::map<Value *, std::set<PointerPointsTo*>*> *currPointsTo = this->currState.getPointsToInfo(this->currFuncCallSites);
         std::set<TaintFlag*> *existingTaints = nullptr;
         //Need to taint it?
         if (taint) {
