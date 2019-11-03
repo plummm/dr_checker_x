@@ -4,6 +4,10 @@ using namespace llvm;
 
 namespace DRCHECKER {
 
+    std::map<Type*,std::map<Function*,std::set<OutsideObject*>>> sharedObjCache;
+
+    Function *currEntryFunc = nullptr;
+
     void AliasObject::fetchPointsToObjects_log(long srcfieldId, std::set<std::pair<long, AliasObject*>> &dstObjects,
             Instruction *targetInstr, bool create_arg_obj) {
         dbgs() << "\n*********fetchPointsToObjects**********\n";
@@ -232,13 +236,22 @@ namespace DRCHECKER {
                 dstObjects.insert(dstObjects.end(), std::make_pair(0, newObj));
             }
 #endif
-        }else if (e_pointto_ty->isStructTy()) {
+        }else if (e_pointto_ty->isStructTy() || e_pointto_ty->isVoidTy()) {
             // if there are no struct objects that this pointer field points to, generate a dummy object.
+            //NOTE: we handle a special case here, sometimes the field type in the struct can be "void*", but it can be converted to "struct*" in the load,
+            //if this is the case, we will create the dummy object based on the real converted type and still make this "void*" field point to the new obj. 
+            Type *real_ty = e_pointto_ty->isStructTy() ? e_pointto_ty : expObjTy;
+#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
+            dbgs() << "fetchPointsToObjects(): the field pointee type is: " << InstructionUtils::getTypeStr(e_pointto_ty) << " real pointee type: " << InstructionUtils::getTypeStr(real_ty) << "\n";
+#endif
+            if (!real_ty || !real_ty->isStructTy()) {
+                return;
+            }
             if(create_arg_obj || hostObj->isFunctionArg() || hostObj->isOutsideObject()) {
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
                 dbgs() << "Creating a new dummy AliasObject...\n";
 #endif
-                OutsideObject *newObj = new OutsideObject(targetInstr,e_pointto_ty);
+                OutsideObject *newObj = new OutsideObject(targetInstr,real_ty);
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
                 dbgs() << "New obj Id: " << (const void*)newObj << "\n";
 #endif

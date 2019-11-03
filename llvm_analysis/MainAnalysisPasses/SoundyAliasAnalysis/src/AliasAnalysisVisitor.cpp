@@ -41,7 +41,9 @@ namespace DRCHECKER {
             existingTaints = TaintUtils::getTaintInfo(this->currState,this->currFuncCallSites,p);
         }
         OutsideObject *robj = DRCHECKER::createOutsideObj(p, currPointsTo, taint, existingTaints);
-        DRCHECKER::addToSharedObjCache(robj);
+        if (robj) {
+            DRCHECKER::addToSharedObjCache(robj);
+        }
         return robj;
     }
 

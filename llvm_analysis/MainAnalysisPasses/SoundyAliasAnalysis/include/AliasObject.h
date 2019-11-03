@@ -1782,12 +1782,18 @@ namespace DRCHECKER {
     //can shared the same outside objects, so we design this obj cache to record all the top-level outside objects created when analyzing each entry function,
     //when we need to create a same type outside object later in a different entry function, we will then directly retrieve it from this cache.
     //TODO: what about the kmalloc'ed objects whose types are later changed to a struct...
-    static std::map<Type*,std::map<Function*,std::set<OutsideObject*>>> sharedObjCache;
+    extern std::map<Type*,std::map<Function*,std::set<OutsideObject*>>> sharedObjCache;
 
-    static Function *currEntryFunc = nullptr;
+    extern Function *currEntryFunc;
 
     static int addToSharedObjCache(OutsideObject *obj) {
+#ifdef DEBUG_SHARED_OBJ_CACHE
+        dbgs() << "addToSharedObjCache(): for the obj: " << (const void*)obj << " currEntryFunc: " << DRCHECKER::currEntryFunc->getName().str() << "\n";
+#endif
         if (!obj || !DRCHECKER::currEntryFunc ||!obj->targetType) {
+#ifdef DEBUG_SHARED_OBJ_CACHE
+            dbgs() << "addToSharedObjCache(): for the obj: (!obj || !DRCHECKER::currEntryFunc ||!obj->targetType)\n";
+#endif
             return 0;
         }
         DRCHECKER::sharedObjCache[obj->targetType][DRCHECKER::currEntryFunc].insert(obj);
@@ -1795,17 +1801,26 @@ namespace DRCHECKER {
     }
 
     static OutsideObject *getSharedObjFromCache(Type *ty) {
+#ifdef DEBUG_SHARED_OBJ_CACHE
+        dbgs() << "getSharedObjFromCache(): Type: " << InstructionUtils::getTypeStr(ty) << " currEntryFunc: " << DRCHECKER::currEntryFunc->getName().str() << "\n";
+#endif
         if (!ty || !DRCHECKER::currEntryFunc) {
+#ifdef DEBUG_SHARED_OBJ_CACHE
+            dbgs() << "getSharedObjFromCache(): (!ty || !DRCHECKER::currEntryFunc)\n";
+#endif
             return nullptr;
         }
         if (DRCHECKER::sharedObjCache.find(ty) == DRCHECKER::sharedObjCache.end()) {
+#ifdef DEBUG_SHARED_OBJ_CACHE
+            dbgs() << "getSharedObjFromCache(): No same-typed objs found in the cache.\n";
+#endif
             return nullptr;
         }
         for (auto &e : DRCHECKER::sharedObjCache[ty]) {
             if (e.first != DRCHECKER::currEntryFunc) {
                 for (OutsideObject *o : e.second) {
 #ifdef DEBUG_SHARED_OBJ_CACHE
-                    dbgs() << "addToSharedObjCache(): Ty: " << InstructionUtils::getTypeStr(ty) << " currEntryFunc: " << DRCHECKER::currEntryFunc->getName().str() << " srcEntryFunc: " << e.first->getName().str();
+                    dbgs() << "getSharedObjFromCache(): Ty: " << InstructionUtils::getTypeStr(ty) << " currEntryFunc: " << DRCHECKER::currEntryFunc->getName().str() << " srcEntryFunc: " << e.first->getName().str();
                     dbgs() << " obj ID: " << (const void*)o << "\n";
 #endif
                     return o;
@@ -1813,6 +1828,9 @@ namespace DRCHECKER {
             }else {
                 //This means there is already a same-typed object created previously when analyzing current entry function.
                 //TODO: should we re-use this previous obj or create a new one?
+#ifdef DEBUG_SHARED_OBJ_CACHE
+                dbgs() << "getSharedObjFromCache(): Found a previously created obj by the current entry func.\n";
+#endif
                 break;
             }
         }
