@@ -1332,45 +1332,31 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
     void AliasAnalysisVisitor::visitLoadInst(LoadInst &I) {
 
 #ifdef DEBUG_LOAD_INSTR
-        errs() << "Alias Analysis, in visitLoadInst() for instr: ";
-        I.print(errs());
-        errs() << "\n";
+        errs() << "AliasAnalysisVisitor::visitLoadInst(): " << InstructionUtils::getValueStr(&I) << "\n";
 #endif
         Value* srcPointer = I.getPointerOperand();
         GEPOperator *gep = dyn_cast<GEPOperator>(I.getPointerOperand());
         if(gep && gep->getNumOperands() > 0 && gep->getPointerOperand() && !dyn_cast<GetElementPtrInst>(I.getPointerOperand())) {
 #ifdef DEBUG_LOAD_INSTR
-            errs() << "There is a GEP operator: ";
-            gep->print(errs());
-            errs() << "\n";
+            errs() << "AliasAnalysisVisitor::visitLoadInst(): There is a GEP operator: " << InstructionUtils::getValueStr(gep) << "\n";
 #endif
             //srcPointer = gep->getPointerOperand();
             //hz: to get the field sensitive point-to information and record it for the GEP operator value.
             srcPointer = visitGetElementPtrOperator(&I,gep);
         } else {
             if(!hasPointsToObjects(srcPointer)) {
-#ifdef DEBUG_LOAD_INSTR
-                errs() << "No point-to info, try to strip the pointer casts -0.\n";
-#endif
                 srcPointer = srcPointer->stripPointerCasts();
 #ifdef DEBUG_LOAD_INSTR
-                errs() << "After strip, the pointer is: ";
-                srcPointer->print(errs());
-                errs() << "\n";
+                errs() << "AliasAnalysisVisitor::visitLoadInst(): No point-to info, after stripping the pointer casts -0, srcPointer: " << InstructionUtils::getValueStr(srcPointer) << "\n";
 #endif
             }
         }
 
         // strip pointer casts. if we cannot find any points to for the srcPointer.
         if(!hasPointsToObjects(srcPointer)) {
-#ifdef DEBUG_LOAD_INSTR
-            errs() << "No point-to info, try to strip the pointer casts -1.\n";
-#endif
             srcPointer = srcPointer->stripPointerCasts();
 #ifdef DEBUG_LOAD_INSTR
-            errs() << "After strip, the pointer is: ";
-            srcPointer->print(errs());
-            errs() << "\n";
+            errs() << "AliasAnalysisVisitor::visitLoadInst(): No point-to info, after stripping the pointer casts -1, srcPointer: " << InstructionUtils::getValueStr(srcPointer) << "\n";
 #endif
         }
 
@@ -1384,9 +1370,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
 
         if(!hasPointsToObjects(srcPointer)) {
 #ifdef DEBUG_LOAD_INSTR
-            errs() << "Load instruction does not point to any object.";
-            I.print(errs());
-            errs() << "\n";
+            errs() << "AliasAnalysisVisitor::visitLoadInst(): srcPointer does not point to any object.\n";
 #endif
             return;
         }
@@ -1446,11 +1430,6 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
                 newPointsToInfo->insert(newPointsToInfo->end(), newPointsToObj);
             }
             // Just save the newly created set as points to set for this instruction.
-#ifdef DEBUG_LOAD_INSTR
-            dbgs() << "Updating points to information for Load instruction:";
-            I.print(dbgs());
-            dbgs() << "\n";
-#endif
             this->updatePointsToObjects(&I, newPointsToInfo);
         } else {
             // points to set is empty.

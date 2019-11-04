@@ -1811,7 +1811,7 @@ namespace DRCHECKER {
 
     static OutsideObject *getSharedObjFromCache(Type *ty) {
 #ifdef DEBUG_SHARED_OBJ_CACHE
-        dbgs() << "getSharedObjFromCache(): Type: " << InstructionUtils::getTypeStr(ty) << " currEntryFunc: " << DRCHECKER::currEntryFunc->getName().str() << "\n";
+        dbgs() << "getSharedObjFromCache(): At the entrance. Type: " << InstructionUtils::getTypeStr(ty) << " currEntryFunc: " << DRCHECKER::currEntryFunc->getName().str() << "\n";
 #endif
         if (!ty || !DRCHECKER::currEntryFunc) {
 #ifdef DEBUG_SHARED_OBJ_CACHE

@@ -120,8 +120,8 @@ namespace DRCHECKER {
 
         //A hacking: set up a blacklist for certain time-consuming functions..
 #ifdef FUNC_BLACKLIST
-        std::set<std::string> black_funcs{"con_write","do_con_write","io_serial_out","io_serial_in","__sanitizer_cov_trace_pc"};
-        std::set<std::string> black_funcs_inc{"asan_report","llvm.dbg"};
+        std::set<std::string> black_funcs{"con_write","do_con_write","io_serial_out","io_serial_in"};
+        std::set<std::string> black_funcs_inc{"asan_report","llvm.dbg","__sanitizer_cov_trace_pc"};
         if (black_funcs.find(currFuncName) != black_funcs.end()) {
             dbgs() << "Func in blacklist, IGNORING:" << currFuncName << "\n";
             return;
