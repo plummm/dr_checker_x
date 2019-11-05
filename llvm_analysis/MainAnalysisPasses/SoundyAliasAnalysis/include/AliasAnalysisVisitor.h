@@ -145,7 +145,7 @@ namespace DRCHECKER {
          * @return Set of new points to information.
          */
         std::set<PointerPointsTo*>* makePointsToCopy(Instruction *propInstruction, Value *srcPointer,
-                                                     std::set<PointerPointsTo*>* srcPointsTo, long fieldId=-1);
+                                                     std::set<PointerPointsTo*>* srcPointsTo, long fieldId=-1, bool is_var_fid = false);
 
         std::set<PointerPointsTo*>* makePointsToCopy_emb(Instruction *propInstruction, Value *srcPointer, Value *resPointer,
                                                      std::set<PointerPointsTo*>* srcPointsTo, long fieldId=-1);

@@ -224,11 +224,7 @@ namespace DRCHECKER {
             //We must ensure that it points to an embedded struct in another struct.
             Type *host_type = hostObj->targetType;
 #ifdef DEBUG_GET_ELEMENT_PTR
-            dbgs() << "--- ";
-            if (host_type) {
-                dbgs() << "host_type: " << InstructionUtils::getTypeStr(host_type) << " | " << dstField;
-            }
-            dbgs() << "\n";
+            dbgs() << "AliasAnalysisVisitor::makePointsToCopy_emb(): host_type: " << InstructionUtils::getTypeStr(host_type) << " | " << dstField << "\n";
 #endif
             if (!host_type || !host_type->isStructTy() || host_type->getStructNumElements() <= dstField || dstField < 0) {
                 continue;
@@ -310,8 +306,9 @@ namespace DRCHECKER {
         return DRCHECKER::createEmbObj(hostObj, host_dstFieldId, v, currPointsTo);
     }
 
+    //NOTE: "is_var_fid" indicates whether the target fieldId is a variable instead of a constant.
     std::set<PointerPointsTo*>* AliasAnalysisVisitor::makePointsToCopy(Instruction *propInstruction, Value *srcPointer,
-            std::set<PointerPointsTo*>* srcPointsTo, long fieldId) {
+            std::set<PointerPointsTo*>* srcPointsTo, long fieldId, bool is_var_fid) {
         /***
          * Makes copy of points to information from srcPointer to propInstruction
          */
@@ -322,142 +319,134 @@ namespace DRCHECKER {
 #ifdef DEBUG_GET_ELEMENT_PTR
         dbgs() << "AliasAnalysisVisitor::makePointsToCopy(): #elements in *srcPointsTo: " << srcPointsTo->size() << " \n";
 #endif
+        //"fieldId" will make no sense if "is_var_fid" is set true, we temporarily set "fieldId" to 0 here.
+        if (is_var_fid) {
+            fieldId = 0;
+        }
+        //The arg "srcPointer" actually is not related to arg "srcPointsTo", it's indeed "dstPointer" that we need to copy point-to inf for.
+        GEPOperator *gep = (srcPointer ? dyn_cast<GEPOperator>(srcPointer) : nullptr);
+        //"basePointerType" refers to the type of the pointer operand in the original GEP instruction/opearator, during whose visit we
+        //call this makePointsToCopy().
+        Type *basePointerType = (gep ? gep->getPointerOperand()->getType() : nullptr);
+        Type *basePointToType = (basePointerType ? basePointerType->getPointerElementType() : nullptr);
         for(PointerPointsTo *currPointsToObj:*srcPointsTo) {
             AliasObject *hostObj = currPointsToObj->targetObject;
             // if the target object is not visited, then add into points to info.
             if(hostObj && visitedObjects.find(hostObj) == visitedObjects.end()) {
                 PointerPointsTo *newPointsToObj = new PointerPointsTo();
                 newPointsToObj->propogatingInstruction = propInstruction;
+                long host_dstFieldId = currPointsToObj->dstfieldId;
+                //Get type information about current point-to object.
+                Type *host_type = hostObj->targetType;
+                bool is_emb = false;
+                Type *src_ety = nullptr;
+#ifdef DEBUG_GET_ELEMENT_PTR
+                dbgs() << "AliasAnalysisVisitor::makePointsToCopy(): basePointerType: " << InstructionUtils::getTypeStr(basePointerType) << "\n";
+                dbgs() << "Cur Points-to, host_type: " << InstructionUtils::getTypeStr(host_type) << " | " << host_dstFieldId << "\n";
+                dbgs() << "hostObj: " << (const void*)hostObj <<  " target field id: " << fieldId << " is_var_fid: " << is_var_fid << "\n";
+#endif
+                if (!host_type || !InstructionUtils::isIndexValid(host_type,host_dstFieldId)){
+                    //TODO: It's unlikely, but is this skip safe?
+#ifdef DEBUG_GET_ELEMENT_PTR
+                    dbgs() << "AliasAnalysisVisitor::makePointsToCopy(): null host type or invalid host_dstFieldId.\n";
+#endif
+                    goto fail_next;
+                }
+                if (host_type->isPointerTy()) {
+                    host_type = host_type->getPointerElementType();
+#ifdef DEBUG_GET_ELEMENT_PTR
+                    dbgs() << "AliasAnalysisVisitor::makePointsToCopy(): host type to its pointee type: " << InstructionUtils::getTypeStr(host_type) << "\n";
+#endif
+                }
                 //hz: 'dstField' is a complex issue, we first apply original logic to set the default "dstfieldId", then
                 //make some modifications if possible:
-                //(1) if src pointer points to a non-struct field in the src object, we can try to update "dstField" with the arg "fieldId".
-                //(2) if src points to an embedded struct field in the src object, then the arg "fieldId" indexes into the embedded struct
-                //instead of the src object... We need special handling here.
+                //(1) if src pointer points to a non-composite type field in the src object, we simply update "dstField" with the arg "fieldId". (the pointee #field should be 0 in this case...)
+                //(2) if the pointee field is of a composite type (e.g. struct or array) in the src object, then the arg "fieldId" indexes into the composite field.
+                //Original logic is too simple and error-prone...
                 //----------ORIGINAL-----------
+                newPointsToObj->fieldId = 0;
+                newPointsToObj->targetObject = hostObj;
+                newPointsToObj->targetPointer = srcPointer;
                 if(fieldId >= 0) {
                     newPointsToObj->dstfieldId = fieldId;
                 } else {
                     newPointsToObj->dstfieldId = currPointsToObj->dstfieldId;
+                    //NOTE: fieldId < 0 means that we simply want to copy the passed-in points-to information as is.
+                    //TODO: is it possible that we have a negative 1st index?
+                    goto update;
                 }
-                newPointsToObj->fieldId = 0;
-                newPointsToObj->targetObject = hostObj;
-                newPointsToObj->targetPointer = srcPointer;
                 //----------ORIGINAL-----------
                 //----------MOD----------
-                bool is_emb = false;
-                long host_dstFieldId = currPointsToObj->dstfieldId;
-                //The arg "srcPointer" actually is not related to arg "srcPointsTo", it's indeed "dstPointer" that we need to copy point-to inf for.
-                GEPOperator *gep = (srcPointer ? dyn_cast<GEPOperator>(srcPointer) : nullptr);
-                //"basePointerType" refers to the type of the pointer operand in the original GEP instruction/opearator, during whose visit we
-                //call this makePointsToCopy().
-                Type *basePointerType = (gep ? gep->getPointerOperand()->getType() : nullptr);
-                Type *basePointToType = (basePointerType ? basePointerType->getPointerElementType() : nullptr);
-                //Get type information about current point-to object.
-                Type *host_type = hostObj->targetType;
-                if (!host_type){
-                    //TODO: It's unlikely, but is this skip safe?
-                    goto fail_next;
-                }
-                if(host_type->isPointerTy()){
-                    host_type = host_type->getPointerElementType();
-                }
+                //Ok, handle two cases here: (1) target field is a composite type (2) host obj is an array.
+                if (InstructionUtils::same_types(host_type,basePointToType) && host_dstFieldId == 0) {
+                    //The current host object type matches the base pointer, no composite field.
+                    //bound check, if fails we discard this point-to, otherwise do nothing.
+                    if (!InstructionUtils::isIndexValid(host_type,fieldId)) {
 #ifdef DEBUG_GET_ELEMENT_PTR
-                dbgs() << "AliasAnalysisVisitor::makePointsToCopy(): basePointerType: " << InstructionUtils::getTypeStr(basePointerType) << "\n";
-                dbgs() << "Cur Points-to, host_type: " << InstructionUtils::getTypeStr(host_type) << " | " << host_dstFieldId << "\n";
-                dbgs() << "hostObj: " << (const void*)hostObj << "\n";
+                        dbgs() << "AliasAnalysisVisitor::makePointsToCopy(): host obj matches the base pointer, but the fieldId is invalid...\n";
 #endif
-                //hz: the following several "if" try to decide whether we will actually index into an embedded struct in the host struct.
-                //NOTE: fieldId < 0 means that we simply want to copy the points-to information w/o changing anything.
-                if (basePointToType && basePointToType->isStructTy() && host_type->isStructTy() &&
-                        host_type->getStructNumElements() > host_dstFieldId && !InstructionUtils::same_types(host_type,basePointToType) && fieldId >= 0)
-                {
-                    Type *src_fieldTy = host_type->getStructElementType(host_dstFieldId);
-                    //It's also possible that the field is an array of a certain struct, if so, we should also regard this field as
-                    //a "struct" field (i.e. the first struct in the array).
-                    Type *src_fieldTy_arrElem = nullptr;
-                    if(src_fieldTy && src_fieldTy->isArrayTy()){
-                        src_fieldTy_arrElem = src_fieldTy->getArrayElementType();
+                        goto fail_next;
+                    }
+                }else {
+                    //Ok, type mismatch, let's see whether the point-to field type in the host obj matches the base pointer.
+                    if (dyn_cast<CompositeType>(host_type)) {
+                        src_ety = dyn_cast<CompositeType>(host_type)->getTypeAtIndex(host_dstFieldId);
+                    }else {
+                        src_ety = host_type;
                     }
 #ifdef DEBUG_GET_ELEMENT_PTR
-                    dbgs() << "src_fieldTy: " << InstructionUtils::getTypeStr(src_fieldTy) << "\n";
-                    dbgs() << "src_fieldTy_arrElem: " << InstructionUtils::getTypeStr(src_fieldTy_arrElem) << "\n";
+                    dbgs() << "AliasAnalysisVisitor::makePointsToCopy(): src_ety: " << InstructionUtils::getTypeStr(src_ety) << "\n";
 #endif
-                    if( (src_fieldTy && src_fieldTy == basePointToType) ||
-                            (src_fieldTy_arrElem && src_fieldTy_arrElem == basePointToType)
-                      )
-                    {
-                        is_emb = true;
+                    if (!src_ety || !InstructionUtils::same_types(src_ety,basePointToType)) {
 #ifdef DEBUG_GET_ELEMENT_PTR
-                        dbgs() << "AliasAnalysisVisitor::makePointsToCopy(): index into an embedded struct in the host object!\n";
+                        dbgs() << "AliasAnalysisVisitor::makePointsToCopy(): src_ety doesn't match the base pointer as well.\n ";
 #endif
-                        //Ok, the src points to a struct embedded in the host object, we cannot just use
-                        //the arg "fieldId" as "dstfieldId" of the host object because it's an offset into the embedded struct.
-                        //We have two candidate methods here:
-                        //(1) Create a separate TargetObject representing this embedded struct, then make the pointer operand in original GEP point to it.
-                        //(2) Directly create an outside object for the resulted pointer of this GEP. (i.e. the parameter "srcPointer")
-                        //Method (1):
-                        AliasObject *newObj = this->createEmbObj(hostObj,host_dstFieldId,gep->getPointerOperand());
-                        if(newObj){
-                            newPointsToObj->targetObject = newObj;
-                            if(fieldId >= 0){
-                                newPointsToObj->dstfieldId = fieldId;
-                            }else{
-                                //Is this possible??
-                                newPointsToObj->dstfieldId = 0;
-                            }
-                        }else{
-                            //We cannot create the new OutsideObject, it's possibly because the target pointer doesn't point to a struct.
-                            //In this case, rather than using the original wrong logic, we'd better make it point to nothing.
+                        //TODO: Discard it or still update?
+                        goto fail_next;
+                    }
+                    if (!InstructionUtils::isIndexValid(src_ety,fieldId)) {
 #ifdef DEBUG_GET_ELEMENT_PTR
-                            errs() << "In makePointsToCopy(): cannot get or create embedded object for: " << InstructionUtils::getValueStr(gep->getPointerOperand()) << "\n";
+                        dbgs() << "AliasAnalysisVisitor::makePointsToCopy(): we need to index into the embedded field but the fieldId is invalid for it...\n ";
 #endif
-                            goto fail_next;
-                        }
-                        /*
-                        //Method (2):
-                        OutsideObject *newObj = this->createOutsideObj(srcPointer,false);
-                        if(newObj){
-                            newObj->is_taint_src = hostObj-->is_taint_src;
-                            //This new TargetObject should also be tainted according to the host object taint flags.
-                            std::set<TaintFlag*> *src_taintFlags =  hostObj->getFieldTaintInfo(host_dstFieldId);
-                            if(src_taintFlags){
-                                for(TaintFlag *currTaintFlag:*src_taintFlags){
-                                    newObj->taintAllFieldsWithTag(currTaintFlag);
-                                }
-                            }
-                            newPointsToObj->targetObject = newObj;
-                            //Since now the newObj directly represents the final resulted object of this GEP (instead of the embedded struct),
-                            //we will set the dstField to 0.
-                            newPointsToObj->dstfieldId = 0;
-                        }else{
-                            //We cannot create the new OutsideObject, it's possibly because the target pointer doesn't point to a struct.
-                            //In this case, rather than using the original wrong logic, we'd better make it point to nothing.
+                        goto fail_next;
+                    }
+                    //Great, create a new object for the composite field.
+                    is_emb = true;
 #ifdef DEBUG_GET_ELEMENT_PTR
-                            errs() << "In makePointsToCopy(): cannot create OutsideObject for: ";
-                            srcPointer->print(errs());
-                            errs() << "\n";
+                    dbgs() << "AliasAnalysisVisitor::makePointsToCopy(): index into an embedded struct/array in the host object!\n";
 #endif
-                            goto fail_next;
-                        }
-                         */
+                    //Ok, the src points to a struct/array embedded in the host object, we cannot just use
+                    //the arg "fieldId" as "dstfieldId" of the host object because it's an offset into the embedded struct/array.
+                    //We have two candidate methods here:
+                    //(1) Create a separate TargetObject representing this embedded struct, then make the pointer operand in original GEP point to it.
+                    //(2) Directly create an outside object for the resulted pointer of this GEP. (i.e. the parameter "srcPointer")
+                    //Method (1):
+                    AliasObject *newObj = this->createEmbObj(hostObj,host_dstFieldId,gep->getPointerOperand());
+                    if(newObj){
+                        newPointsToObj->targetObject = newObj;
+                        newPointsToObj->dstfieldId = fieldId;
+                    }else{
+                        //We cannot create the new OutsideObject, it's possibly because the target pointer doesn't point to a struct.
+                        //In this case, rather than using the original wrong logic, we'd better make it point to nothing.
+#ifdef DEBUG_GET_ELEMENT_PTR
+                        errs() << "AliasAnalysisVisitor::makePointsToCopy(): cannot get or create embedded object for: " << InstructionUtils::getValueStr(gep->getPointerOperand()) << "\n";
+#endif
+                        delete newObj;
+                        goto fail_next;
                     }
                 }
                 //----------MOD----------
+update:
                 if (newPointsToObj){
-                    //Insert the points-to info in two cases:
-                    //(1) It indexes into an embedded structure (that we have already properly handled)
-                    //(2) It's not an embedded structure, and the target field ID doesn't exceed the host structure's limit.
-                    if (is_emb || fieldId <= 0 || (!host_type->isStructTy()) || host_type->getStructNumElements() > fieldId){
-                        newPointsToInfo->insert(newPointsToInfo->begin(), newPointsToObj);
+                    //Insert the points-to info.
 #ifdef DEBUG_GET_ELEMENT_PTR
-                        dbgs() << "Assign points-to object: ";
-                        if(newPointsToObj->targetObject){
-                            dbgs() << InstructionUtils::getTypeStr(newPointsToObj->targetObject->targetType);
-                        }
-                        dbgs() << " | dstField: " << newPointsToObj->dstfieldId << "\n";
-
-#endif
+                    dbgs() << "Assign points-to object: ";
+                    if(newPointsToObj->targetObject){
+                        dbgs() << InstructionUtils::getTypeStr(newPointsToObj->targetObject->targetType);
                     }
+                    dbgs() << " | dstField: " << newPointsToObj->dstfieldId << "\n";
+#endif
+                    newPointsToInfo->insert(newPointsToInfo->begin(), newPointsToObj);
                 }
                 visitedObjects.insert(visitedObjects.begin(), hostObj);
                 continue;

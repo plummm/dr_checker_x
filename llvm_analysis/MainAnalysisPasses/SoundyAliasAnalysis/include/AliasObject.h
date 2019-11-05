@@ -1228,7 +1228,10 @@ namespace DRCHECKER {
 #ifdef DEBUG_CREATE_DUMMY_OBJ_IF_NULL
         dbgs() << "Type-based createOutsideObj(): " << InstructionUtils::getTypeStr(ty) << "\n";
 #endif
-        if (!ty) {
+        if (!ty || !dyn_cast<CompositeType>(ty)) {
+#ifdef DEBUG_CREATE_DUMMY_OBJ_IF_NULL
+            dbgs() << "Type-based createOutsideObj(): it's not a composite type, cannot create the outside obj!\n";
+#endif
             return nullptr;
         }
         OutsideObject *newObj = new OutsideObject(nullptr, ty);
@@ -1285,10 +1288,10 @@ namespace DRCHECKER {
         }
         dbgs() << "\n";
 #endif
-        //First do some sanity checks, we need to make sure that "p" is a structure pointer.
-        if (!(p && p->getType()->isPointerTy() && p->getType()->getPointerElementType()->isStructTy())) {
+        //First do some sanity checks, we need to make sure that "p" is a pointer of a composite type.
+        if (!(p && p->getType()->isPointerTy() && dyn_cast<CompositeType>(p->getType()->getPointerElementType()))) {
 #ifdef DEBUG_CREATE_DUMMY_OBJ_IF_NULL
-            dbgs() << "createOutsideObj(): It's not a struct pointer! Cannot create an outside object!\n";
+            dbgs() << "createOutsideObj(): It's not a pointer to the composite type! Cannot create an outside object!\n";
 #endif
             return nullptr;
         }
@@ -1332,116 +1335,46 @@ namespace DRCHECKER {
     }
 
     //hz: A helper method to create and (taint) an embedded struct obj in the host obj.
-    //Note that this method simply creates the obj w/o updating the global point-to state since we don't have a Value/Ptr associated w/ the to-be-created emb obj.
-    static AliasObject *createEmbObj(AliasObject *hostObj, long host_dstFieldId) {
-#ifdef DEBUG_CREATE_EMB_OBJ
-        dbgs() << "Start no-ptr createEmbObj()\n";
-#endif
-        AliasObject *newObj = nullptr;
-        if (!hostObj) {
-            return nullptr;
-        }
-        Type *fieldTy = nullptr;
-        Type *fieldArrElemTy = nullptr;
-        if (hostObj->targetType && hostObj->targetType->isStructTy() && host_dstFieldId >= 0 && host_dstFieldId < hostObj->targetType->getStructNumElements()) {
-            fieldTy = hostObj->targetType->getStructElementType(host_dstFieldId);
-            if (fieldTy->isArrayTy()){
-                fieldArrElemTy = fieldTy->getArrayElementType();
-            }
-        }
-#ifdef DEBUG_CREATE_EMB_OBJ
-        dbgs() << "no-ptr createEmbObj(): hostObj: " << (const void*)(hostObj) << " host_dstFieldId: " << host_dstFieldId << "\n";
-        dbgs() << "fieldTy: " << InstructionUtils::getTypeStr(fieldTy) << " fieldArrElemTy: " << InstructionUtils::getTypeStr(fieldArrElemTy) << "\n";
-#endif
-        if (!fieldTy && !fieldArrElemTy) {
-            return nullptr;
-        }
-        if (hostObj->embObjs.find(host_dstFieldId) != hostObj->embObjs.end()){
-#ifdef DEBUG_CREATE_EMB_OBJ
-            dbgs() << "no-ptr createEmbObj(): find the previosuly created embed object!\n";
-#endif
-            //We have created that embedded object previously.
-            newObj = hostObj->embObjs[host_dstFieldId];
-        }
-        if (!newObj || (!InstructionUtils::same_types(newObj->targetType,fieldTy) && !InstructionUtils::same_types(newObj->targetType,fieldArrElemTy)) ){
-#ifdef DEBUG_CREATE_EMB_OBJ
-            dbgs() << "no-ptr createEmbObj(): try to create a new embed object because ";
-            if (!newObj) {
-                dbgs() << "there is no emb obj in cache...\n";
-            }else{
-                dbgs() << "the emb obj in cache has a different type than expected: " << InstructionUtils::getTypeStr(newObj->targetType) << "\n";
-            }
-#endif
-            //Need to create a new AliasObject for the embedded struct.
-            if (fieldArrElemTy) {
-                newObj = DRCHECKER::createOutsideObj(fieldArrElemTy, false, nullptr);
-            }else {
-                newObj = DRCHECKER::createOutsideObj(fieldTy, false, nullptr);
-            }
-            //Properly taint it.
-            if(newObj){
-#ifdef DEBUG_CREATE_EMB_OBJ
-                dbgs() << "no-ptr createEmbObj(): the embedded obj created: " << (const void*)newObj << " | set is_taint_src to: " << hostObj->is_taint_src << "\n"; 
-#endif
-                newObj->is_taint_src = hostObj->is_taint_src;
-                //This new TargetObject should also be tainted according to the host object taint flags.
-                std::set<TaintFlag*> *src_taintFlags = hostObj->getFieldTaintInfo(host_dstFieldId);
-                if(src_taintFlags){
-#ifdef DEBUG_CREATE_EMB_OBJ
-                    dbgs() << "no-ptr createEmbObj(): try to taint the emb obj, #TaintFlag: " << src_taintFlags->size() << "\n";
-#endif
-                    for(TaintFlag *currTaintFlag:*src_taintFlags){
-                        newObj->taintAllFieldsWithTag(currTaintFlag);
-                    }
-                }
-                //TODO: all contents taint flag.
-                //Record it in the "embObjs".
-                hostObj->embObjs[host_dstFieldId] = newObj;
-                newObj->parent = hostObj;
-                newObj->parent_field = host_dstFieldId;
-            }else {
-#ifdef DEBUG_CREATE_EMB_OBJ
-                dbgs() << "no-ptr createEmbObj(): Failed to create the outside object!\n";
-#endif
-            }
-        }
-        return newObj;
-    }
-
-    //hz: A helper method to create and (taint) an embedded struct obj in the host obj.
     //The arg "currPointsTo" is the current global point-to state.
-    static AliasObject *createEmbObj(AliasObject *hostObj, long host_dstFieldId, Value *v, std::map<Value*, std::set<PointerPointsTo*>*> *currPointsTo) {
+    static AliasObject *createEmbObj(AliasObject *hostObj, long host_dstFieldId, Value *v = nullptr, std::map<Value*, std::set<PointerPointsTo*>*> *currPointsTo = nullptr) {
 #ifdef DEBUG_CREATE_EMB_OBJ
         dbgs() << "Start createEmbObj()\n";
 #endif
         AliasObject *newObj = nullptr;
-        if (!hostObj) {
+        if (!hostObj || !hostObj->targetType) {
+#ifdef DEBUG_CREATE_EMB_OBJ
+            dbgs() << "createEmbObj(): (!hostObj || !hostObj->targetType)\n";
+#endif
             return nullptr;
         }
-        Type *fieldTy = nullptr;
-        Type *fieldArrElemTy = nullptr;
-        if (hostObj->targetType && hostObj->targetType->isStructTy() && host_dstFieldId >= 0 && host_dstFieldId < hostObj->targetType->getStructNumElements()) {
-            fieldTy = hostObj->targetType->getStructElementType(host_dstFieldId);
-            if (fieldTy->isArrayTy()){
-                fieldArrElemTy = fieldTy->getArrayElementType();
-            }
+#ifdef DEBUG_CREATE_EMB_OBJ
+        dbgs() << "createEmbObj(): host type: " << InstructionUtils::getTypeStr(hostObj->targetType) << " | " << host_dstFieldId << "\n";
+#endif
+        if (dyn_cast<SequentialType>(hostObj->targetType)) {
+            //We collapse the array/vector to a single element.
+#ifdef DEBUG_CREATE_EMB_OBJ
+            dbgs() << "createEmbObj(): host is an array/vector, set host_dstFieldId to 0.\n";
+#endif
+            host_dstFieldId = 0;
+        }
+        Type *ety = nullptr;
+        if (dyn_cast<CompositeType>(hostObj->targetType) && InstructionUtils::isIndexValid(hostObj->targetType,host_dstFieldId)) {
+            ety = dyn_cast<CompositeType>(hostObj->targetType)->getTypeAtIndex(host_dstFieldId);
         }
         Type *expectedPointeeTy = nullptr;
         if (v && v->getType() && v->getType()->isPointerTy()) {
             expectedPointeeTy = v->getType()->getPointerElementType();
         }
 #ifdef DEBUG_CREATE_EMB_OBJ
-        dbgs() << "createEmbObj(): hostObj: " << (const void*)(hostObj) << " host_dstFieldId: " << host_dstFieldId << "\n";
-        dbgs() << "fieldTy: " << InstructionUtils::getTypeStr(fieldTy) << " fieldArrElemTy: " << InstructionUtils::getTypeStr(fieldArrElemTy) << "\n";
-        dbgs() << "expectedPointeeTy: " << InstructionUtils::getTypeStr(expectedPointeeTy) << "\n";
+        dbgs() << "createEmbObj(): ety: " << InstructionUtils::getTypeStr(ety) << " expectedPointeeTy: " << InstructionUtils::getTypeStr(expectedPointeeTy) << "\n";
 #endif
-        if ( (!fieldTy || !InstructionUtils::same_types(fieldTy,expectedPointeeTy)) &&
-             (!fieldArrElemTy || !InstructionUtils::same_types(fieldArrElemTy,expectedPointeeTy))
-        ){
+        if (v) {
+            if (!ety || !InstructionUtils::same_types(ety,expectedPointeeTy)) {
 #ifdef DEBUG_CREATE_EMB_OBJ
-            dbgs() << "createEmbObj(): fieldTy/fieldArrElemTy and expectedPointeeTy are different...\n";
+                dbgs() << "createEmbObj(): ety and expectedPointeeTy are different...\n";
 #endif
-            return nullptr;
+                return nullptr;
+            }
         }
         if (hostObj->embObjs.find(host_dstFieldId) != hostObj->embObjs.end()){
 #ifdef DEBUG_CREATE_EMB_OBJ
@@ -1450,7 +1383,7 @@ namespace DRCHECKER {
             //We have created that embedded object previously.
             newObj = hostObj->embObjs[host_dstFieldId];
         }
-        if (!newObj || (!InstructionUtils::same_types(newObj->targetType,fieldTy) && !InstructionUtils::same_types(newObj->targetType,fieldArrElemTy)) ){
+        if (!newObj || !InstructionUtils::same_types(newObj->targetType,ety)){
 #ifdef DEBUG_CREATE_EMB_OBJ
             dbgs() << "createEmbObj(): try to create a new embed object because ";
             if (!newObj) {
@@ -1460,13 +1393,23 @@ namespace DRCHECKER {
             }
 #endif
             //Need to create a new AliasObject for the embedded struct.
-            newObj = DRCHECKER::createOutsideObj(v, currPointsTo, false, nullptr);
+            if (v) {
+                newObj = DRCHECKER::createOutsideObj(v, currPointsTo, false, nullptr);
+            }else {
+                newObj = DRCHECKER::createOutsideObj(ety, false, nullptr);
+            }
             //Properly taint it.
             if(newObj){
+#ifdef DEBUG_CREATE_EMB_OBJ
+                dbgs() << "createEmbObj(): the embedded obj created: " << (const void*)newObj << " | set is_taint_src to: " << hostObj->is_taint_src << "\n"; 
+#endif
                 newObj->is_taint_src = hostObj->is_taint_src;
                 //This new TargetObject should also be tainted according to the host object taint flags.
                 std::set<TaintFlag*> *src_taintFlags = hostObj->getFieldTaintInfo(host_dstFieldId);
                 if(src_taintFlags){
+#ifdef DEBUG_CREATE_EMB_OBJ
+                    dbgs() << "createEmbObj(): try to taint the emb obj, #TaintFlag: " << src_taintFlags->size() << "\n";
+#endif
                     for(TaintFlag *currTaintFlag:*src_taintFlags){
                         newObj->taintAllFieldsWithTag(currTaintFlag);
                     }
@@ -1476,6 +1419,10 @@ namespace DRCHECKER {
                 hostObj->embObjs[host_dstFieldId] = newObj;
                 newObj->parent = hostObj;
                 newObj->parent_field = host_dstFieldId;
+            }else {
+#ifdef DEBUG_CREATE_EMB_OBJ
+                dbgs() << "createEmbObj(): Failed to create the outside object!\n";
+#endif
             }
         }
         return newObj;

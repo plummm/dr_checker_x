@@ -166,6 +166,8 @@ namespace DRCHECKER {
         static std::vector<FieldDesc*> *getCompTyDesc(DataLayout *dl, CompositeType *ty);
 
         static bool isTyUsedByFunc(Type *ty, Function *func);
+
+        static bool isIndexValid(Type *ty, unsigned fid);
     };
 
 }

@@ -979,4 +979,20 @@ namespace DRCHECKER {
         OS << "\n";
     }
 
+    bool InstructionUtils::isIndexValid(Type *ty, unsigned fid) {
+        if (!ty) {
+            return false;
+        }
+        if (ty->isStructTy() && fid >= 0 && fid < ty->getStructNumElements()) {
+            return true;
+        }else if (ty->isArrayTy() && fid >= 0 && fid < ty->getArrayNumElements()) {
+            return true;
+        }else if (ty->isVectorTy() && fid >= 0) {
+            //The vector can be extended at desire.
+            return true;
+        }
+        //We have already covered all composite types. 
+        return (fid == 0);
+    }
+
 }
