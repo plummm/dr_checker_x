@@ -29,7 +29,7 @@ namespace DRCHECKER {
 
     //Taint the point-to object by field "srcfieldId" according to the field taint info.
     void AliasObject::taintSubObj(AliasObject *newObj, long srcfieldId, Instruction *targetInstr) {
-        std::set<TaintFlag*> *fieldTaint = getFieldTaintInfo(srcfieldId);
+        std::set<TaintFlag*> *fieldTaint = this->getFieldTaintInfo(srcfieldId);
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
         dbgs() << "AliasObject::taintSubObj(): Trying to get taint for field:" << srcfieldId << " of host object: " << (const void*)this << "\n";
 #endif
@@ -93,6 +93,13 @@ namespace DRCHECKER {
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
         fetchPointsToObjects_log(srcfieldId, dstObjects, targetInstr, create_arg_obj);
 #endif
+        //Collapse the array/vector into a single element.
+        if (this->targetType && dyn_cast<SequentialType>(this->targetType)) {
+#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
+            dbgs() << "AliasObject::fetchPointsToObjects: the host is an array/vector, we will set the srcfieldId to 0.\n";
+#endif
+            srcfieldId = 0;
+        }
         for(ObjectPointsTo *obj : pointsTo) {
             if(obj->fieldId == srcfieldId && obj->targetObject) {
                 //We handle a special case here:
@@ -137,24 +144,17 @@ namespace DRCHECKER {
         Type *ety = nullptr;
         if (!this->targetType) {
             return;
-        }else if (this->targetType->isStructTy()) {
-            if (srcfieldId >= this->targetType->getStructNumElements()) {
-                //This is a serious bug possibly due to "cast" IR.
-                dbgs() << "!!! fetchPointsToObjects(): srcfieldId out of bound (struct)!\n";
+        }else if (dyn_cast<CompositeType>(this->targetType)) {
+            //Boundary check
+            if (!InstructionUtils::isIndexValid(this->targetType,srcfieldId)) {
+                dbgs() << "!!! fetchPointsToObjects(): srcfieldId OOB!\n";
                 dbgs() << "Below is the info about current AliasObject...\n";
                 fetchPointsToObjects_log(srcfieldId, dstObjects, targetInstr, create_arg_obj);
                 return;
             }
-            ety = this->targetType->getStructElementType(srcfieldId);
-        }else if (dyn_cast<SequentialType>(this->targetType)) {
-            SequentialType *seqTy = dyn_cast<SequentialType>(this->targetType);
-            if (srcfieldId >= seqTy->getNumElements()) {
-                dbgs() << "!!! fetchPointsToObjects(): srcfieldId out of bound (array/vector)!\n";
-                dbgs() << "Below is the info about current AliasObject...\n";
-                fetchPointsToObjects_log(srcfieldId, dstObjects, targetInstr, create_arg_obj);
-                return;
-            }
-            ety = seqTy->getElementType();
+            ety = dyn_cast<CompositeType>(this->targetType)->getTypeAtIndex(srcfieldId);
+        }else if (srcfieldId == 0) {
+            ety = this->targetType;
         }else {
             return;
         }
@@ -162,7 +162,6 @@ namespace DRCHECKER {
             //TODO: What can we do here?
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
             dbgs() << "Cannot decide the type of the dst element!\n";
-            fetchPointsToObjects_log(srcfieldId, dstObjects, targetInstr, create_arg_obj);
 #endif
             return;
         }
@@ -178,7 +177,7 @@ namespace DRCHECKER {
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
             dbgs() << "fetchPointsToObjects(): dst field " << fid << " is not a pointer: " << InstructionUtils::getTypeStr(ety) << "\n"; 
 #endif
-            if (ety->isStructTy() || ety->isArrayTy()) {
+            if (dyn_cast<CompositeType>(ety)) {
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
                 dbgs() << "fetchPointsToObjects(): Try to create an emb obj for the dst field.\n"; 
 #endif
@@ -191,11 +190,7 @@ namespace DRCHECKER {
                 }
                 hostObj = newObj;
                 fid = 0;
-                if (ety->isStructTy()) {
-                    ety = ety->getStructElementType(0);
-                }else if (ety->isArrayTy()) {
-                    ety = ety->getArrayElementType();
-                }
+                ety = dyn_cast<CompositeType>(ety)->getTypeAtIndex((unsigned)0);
             }else {
                 //TODO: Can we handle any other dst element types?
                 return;
@@ -236,18 +231,18 @@ namespace DRCHECKER {
                 dstObjects.insert(dstObjects.end(), std::make_pair(0, newObj));
             }
 #endif
-        }else if (e_pointto_ty->isStructTy() || e_pointto_ty->isVoidTy() || e_pointto_ty->isIntegerTy(8)) {
-            // if there are no struct objects that this pointer field points to, generate a dummy object.
+        }else if (dyn_cast<CompositeType>(e_pointto_ty) || e_pointto_ty->isVoidTy() || e_pointto_ty->isIntegerTy(8)) {
+            // if there are no composite objects that this pointer field points to, generate a dummy object.
             //NOTE: we handle a special case here, sometimes the field type in the struct can be "void*" or "char*" ("i8*"), but it can be converted to "struct*" in the load,
             //if this is the case, we will create the dummy object based on the real converted type and still make this "void*/char*" field point to the new obj. 
-            Type *real_ty = e_pointto_ty->isStructTy() ? e_pointto_ty : expObjTy;
+            Type *real_ty = dyn_cast<CompositeType>(e_pointto_ty) ? e_pointto_ty : expObjTy;
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
             dbgs() << "fetchPointsToObjects(): the field pointee type is: " << InstructionUtils::getTypeStr(e_pointto_ty) << " real pointee type: " << InstructionUtils::getTypeStr(real_ty) << "\n";
 #endif
-            if (!real_ty || !real_ty->isStructTy()) {
+            if (!real_ty || !dyn_cast<CompositeType>(real_ty)) {
                 return;
             }
-            if(create_arg_obj || hostObj->isFunctionArg() || hostObj->isOutsideObject()) {
+            if(create_arg_obj || hostObj->isFunctionArg() || hostObj->isOutsideObject() || hostObj->isHeapLocation()) {
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
                 dbgs() << "Creating a new dummy AliasObject...\n";
 #endif
@@ -298,27 +293,41 @@ namespace DRCHECKER {
 #endif
             return;
         }
-        //If the "srcfieldId" is an embedded struct/array, we need to update the fieldPointsTo in the embedded object instead of current host object.
-        if (this->targetType && this->targetType->isStructTy() &&
-            srcfieldId >= 0 && srcfieldId < this->targetType->getStructNumElements() && 
-            dyn_cast<CompositeType>(this->targetType->getStructElementType(srcfieldId))) {
+        if (this->targetType) {
+            //Array collapse
+            if (dyn_cast<SequentialType>(this->targetType)) {
 #ifdef DEBUG_UPDATE_FIELD_POINT
-            dbgs() << "updateFieldPointsTo(): The target field is an embedded object, we need to update the embedded object then..\n";
+                dbgs() << "updateFieldPointsTo(): sequential host, set srcfieldId to 0.\n";
 #endif
-            //NOTE: this is actually getOrCreateEmbObj()
-            AliasObject *eobj = createEmbObj(this,srcfieldId);
-            if (eobj) {
-                return eobj->updateFieldPointsTo(0,dstPointsTo,propogatingInstr);
-            }else {
-                //TODO: What should we do here...
-#ifdef DEBUG_UPDATE_FIELD_POINT
-                dbgs() << "updateFieldPointsTo(): Failed to create the embedded obj!\n";
-#endif
+                srcfieldId = 0;
             }
+            //If the "srcfieldId" is an embedded struct/array, we need to recursively update the fieldPointsTo in the embedded object instead of current host object.
+            if (dyn_cast<CompositeType>(this->targetType) && InstructionUtils::isIndexValid(this->targetType,srcfieldId)) {
+                if (dyn_cast<CompositeType>(dyn_cast<CompositeType>(this->targetType)->getTypeAtIndex(srcfieldId))) {
+#ifdef DEBUG_UPDATE_FIELD_POINT
+                    dbgs() << "updateFieldPointsTo(): The target field is an embedded object, we need to update the embedded object then..\n";
+#endif
+                    //NOTE: this is actually getOrCreateEmbObj()
+                    AliasObject *eobj = createEmbObj(this,srcfieldId);
+                    if (eobj) {
+                        return eobj->updateFieldPointsTo(0,dstPointsTo,propogatingInstr);
+                    }else {
+                        //TODO: What should we do here...
+#ifdef DEBUG_UPDATE_FIELD_POINT
+                        dbgs() << "updateFieldPointsTo(): Failed to create the embedded obj!\n";
+#endif
+                    }
+                }
+            }
+        }else {
+            //Is this possible?
+#ifdef DEBUG_UPDATE_FIELD_POINT
+            dbgs() << "updateFieldPointsTo(): null type info for this host obj!\n";
+#endif
         }
         std::set<AliasObject*> currObjects;
         // first get all objects that could be pointed by srcfieldId of the current object.
-        getAllObjectsPointedByField(srcfieldId, currObjects);
+        this->getAllObjectsPointedByField(srcfieldId, currObjects);
         //Add all objects that are in the provided set by changing the field id.
         for (PointerPointsTo *currPointsTo: *dstPointsTo) {
             // insert points to information only, if it is not present.
@@ -332,7 +341,6 @@ namespace DRCHECKER {
 #endif
                 this->pointsTo.push_back(newPointsTo);
                 //hz: don't forget the "pointsFrom", it is a double link list...
-                //TODO
                 //this->addToPointsFrom(newPointsTo->targetObject);
             }
         }
@@ -346,25 +354,19 @@ namespace DRCHECKER {
         if (!objTy) {
             return nullptr;
         }
-        if (objTy->isStructTy()) {
-            if (this->dstfieldId < 0) {
-                //Is this possible?
-                return objTy;
-            }else if (this->dstfieldId == 0) {
-                //TODO: this is subtle... We're actually not sure whether it points to the host obj itself, or the field 0 in the obj...
+        if (dyn_cast<CompositeType>(objTy)) {
+            if (InstructionUtils::isIndexValid(objTy,this->dstfieldId)) {
+                //TODO: when this->dstfieldId is 0, it will be tricky since we're actually not sure whether it points to the host obj itself, or the field 0 in the obj...
                 //For now we return the type of the field 0.
-                return objTy->getStructElementType(0);
-            }else if (this->dstfieldId < objTy->getStructNumElements()) {
-                return objTy->getStructElementType(this->dstfieldId);
+                return dyn_cast<CompositeType>(objTy)->getTypeAtIndex(this->dstfieldId);
             }else {
                 //This is a bug...
-                dbgs() << "!!! ObjectPointsTo::getPointeeTy(): dstfieldId exceeds the limit, host obj ty: " << InstructionUtils::getTypeStr(objTy);
+                dbgs() << "!!! ObjectPointsTo::getPointeeTy(): invalid dstfieldId, host obj ty: " << InstructionUtils::getTypeStr(objTy);
                 dbgs() << " dstfieldId: " << this->dstfieldId << "\n";
                 //TODO: return the nullptr or the obj type?
                 return nullptr;
             }
         }
-        //TODO: what if the targetObj is an array?
         return objTy;
     }
 

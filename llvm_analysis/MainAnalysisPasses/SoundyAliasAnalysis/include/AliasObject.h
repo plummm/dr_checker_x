@@ -195,8 +195,6 @@ namespace DRCHECKER {
 
         bool auto_generated = false;
 
-        bool from_array = false;
-
         // field to indicate that all contents of this object
         // are tainted or not.
         bool all_contents_tainted = false;
@@ -1428,10 +1426,12 @@ namespace DRCHECKER {
         return newObj;
     }
 
+    //Given a embedded object and its #field within the host object, and the host type, create the host object
+    //and maintain their embedding relationships preperly.
     static AliasObject *createHostObj(AliasObject *targetObj, Type *hostTy, long field) {
-        if (!targetObj || !hostTy || !hostTy->isStructTy()) {
+        if (!targetObj || !hostTy || !dyn_cast<CompositeType>(hostTy)) {
 #ifdef DEBUG_CREATE_HOST_OBJ
-            dbgs() << "createHostObj(): !targetObj || !hostTy || !hostTy->isStructTy()\n";
+            dbgs() << "createHostObj(): !targetObj || !hostTy || !dyn_cast<CompositeType>(hostTy)\n";
 #endif
             return nullptr;
         }
@@ -1439,9 +1439,18 @@ namespace DRCHECKER {
         dbgs() << "createHostObj(): targetObj ty: " << InstructionUtils::getTypeStr(targetObj->targetType) << "\n";
         dbgs() << "createHostObj(): hostObj ty: " << InstructionUtils::getTypeStr(hostTy) << " | " << field << "\n";
 #endif
-        if (field < 0 || field >= hostTy->getStructNumElements() || !InstructionUtils::same_types(hostTy->getStructElementType(field),targetObj->targetType)) {
+        if (dyn_cast<SequentialType>(hostTy)) {
+            field = 0;
+        }
+        if (!InstructionUtils::isIndexValid(hostTy,field)) {
 #ifdef DEBUG_CREATE_HOST_OBJ
-            dbgs() << "createHostObj(): field OOB or field type doesn't match\n";
+            dbgs() << "createHostObj(): field OOB!\n";
+#endif
+            return nullptr;
+        }
+        if (!InstructionUtils::same_types(dyn_cast<CompositeType>(hostTy)->getTypeAtIndex(field),targetObj->targetType)) {
+#ifdef DEBUG_CREATE_HOST_OBJ
+            dbgs() << "createHostObj(): field type doesn't match the host!\n";
 #endif
             return nullptr;
         }

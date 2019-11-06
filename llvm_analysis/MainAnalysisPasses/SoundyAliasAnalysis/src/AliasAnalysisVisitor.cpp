@@ -210,7 +210,7 @@ namespace DRCHECKER {
     //In this version, we assume that "srcPointsTo" points to an embedded struct in a host struct.
     //NOTE: "srcPointer" in this function is related to "srcPointsTo".
     std::set<PointerPointsTo*>* AliasAnalysisVisitor::makePointsToCopy_emb(Instruction *propInstruction, Value *srcPointer, Value *resPointer,
-                                                             std::set<PointerPointsTo*>* srcPointsTo, long fieldId) {
+                                                             std::set<PointerPointsTo*>* srcPointsTo, long fieldId, bool is_var_fid) {
 #ifdef DEBUG_GET_ELEMENT_PTR
         dbgs() << "AliasAnalysisVisitor::makePointsToCopy_emb(): elements in *srcPointsTo: " << srcPointsTo->size() << " \n";
 #endif
@@ -221,81 +221,70 @@ namespace DRCHECKER {
                 continue;
             }
             long dstField = currPointsToObj->dstfieldId;
-            //We must ensure that it points to an embedded struct in another struct.
             Type *host_type = hostObj->targetType;
 #ifdef DEBUG_GET_ELEMENT_PTR
             dbgs() << "AliasAnalysisVisitor::makePointsToCopy_emb(): host_type: " << InstructionUtils::getTypeStr(host_type) << " | " << dstField << "\n";
 #endif
-            if (!host_type || !host_type->isStructTy() || host_type->getStructNumElements() <= dstField || dstField < 0) {
+            //We must ensure that it points to an embedded composite type in another composite.
+            if (!host_type || !dyn_cast<CompositeType>(host_type)) {
+#ifdef DEBUG_GET_ELEMENT_PTR
+                dbgs() << "AliasAnalysisVisitor::makePointsToCopy_emb(): host_type is not composite!\n";
+#endif
                 continue;
             }
-            Type *hostSubTy = host_type->getStructElementType(dstField);
-            if (!hostSubTy) {
+            //Boundary check.
+            if (!InstructionUtils::isIndexValid(host_type,dstField)) {
+#ifdef DEBUG_GET_ELEMENT_PTR
+                dbgs() << "AliasAnalysisVisitor::makePointsToCopy_emb(): invalid dstField for the host_type!\n";
+#endif
                 continue;
             }
-            Type *hostArrSubTy = nullptr;
-            if (hostSubTy->isArrayTy()){
-                hostArrSubTy = hostSubTy->getArrayElementType();
+            //Get the dst field type (must be composite) in the host obj.
+            Type *ety = dyn_cast<CompositeType>(host_type)->getTypeAtIndex(dstField);
+#ifdef DEBUG_GET_ELEMENT_PTR
+            dbgs() << "AliasAnalysisVisitor::makePointsToCopy_emb(): ety: " << InstructionUtils::getTypeStr(ety) <<  " | " << fieldId << "\n";
+#endif
+            if (!ety || !dyn_cast<CompositeType>(ety)) {
+#ifdef DEBUG_GET_ELEMENT_PTR
+                dbgs() << "AliasAnalysisVisitor::makePointsToCopy_emb(): ety is not a composite field!\n";
+#endif
+                continue;
+            }
+            //Variable index check.
+            if (is_var_fid) {
+                fieldId = 0;
+                if (!dyn_cast<SequentialType>(ety)) {
+#ifdef DEBUG_GET_ELEMENT_PTR
+                    dbgs() << "AliasAnalysisVisitor::makePointsToCopy_emb(): got a variable index but the ety is not sequential!\n";
+#endif
+                    continue;
+                }
+            }
+            //Boundary check.
+            if (!InstructionUtils::isIndexValid(ety,fieldId)) {
+#ifdef DEBUG_GET_ELEMENT_PTR
+                dbgs() << "AliasAnalysisVisitor::makePointsToCopy_emb(): boundary check fails for the ety!\n";
+#endif
+                continue;
             }
             PointerPointsTo *newPointsToObj = new PointerPointsTo();
             newPointsToObj->propogatingInstruction = propInstruction;
             newPointsToObj->fieldId = 0;
-            if (hostObj->from_array && dstField == 0 && fieldId < host_type->getStructNumElements()) {
-                //This means current pointee obj is from an array, so the last GEP index was used to locate it in the array (instead of locating an embed struct in the host struct),
-                //so current field ID will directly index into "hostObj" (instead of the embed struct located in field 0 of "hostObj").
+            //Ok, it's an emb struct/array, create new emb object if necessary.
 #ifdef DEBUG_GET_ELEMENT_PTR
-                dbgs() << "AliasAnalysisVisitor::makePointsToCopy_emb(): current pointee obj is from an array..\n";
+            dbgs() << "AliasAnalysisVisitor::makePointsToCopy_emb(): trying to get/create an object for the embedded struct/array..\n";
 #endif
-                //TODO: is this right??
-                hostObj->from_array = false;
-                newPointsToObj->targetPointer = resPointer;
-                if (fieldId >= 0) {
-                    newPointsToObj->dstfieldId = fieldId;
-                }else {
-                    newPointsToObj->dstfieldId = 0;
-                }
-                newPointsToObj->targetObject = hostObj;
+            newPointsToObj->targetPointer = resPointer;
+            AliasObject *newObj = this->createEmbObj(hostObj,dstField,srcPointer);
+            if(newObj){
+                newPointsToObj->targetObject = newObj;
+                newPointsToObj->dstfieldId = fieldId;
                 newPointsToInfo->insert(newPointsToInfo->begin(), newPointsToObj);
-            }else if (hostSubTy->isStructTy() && fieldId < hostSubTy->getStructNumElements()) {
-                //Ok, it's an emb struct, create new emb struct if necessary.
+            }else{
 #ifdef DEBUG_GET_ELEMENT_PTR
-                dbgs() << "AliasAnalysisVisitor::makePointsToCopy_emb(): current pointee obj is an embedded struct..\n";
+                errs() << "AliasAnalysisVisitor::makePointsToCopy_emb(): cannot get or create embedded object.\n";
 #endif
-                newPointsToObj->targetPointer = resPointer;
-                AliasObject *newObj = this->createEmbObj(hostObj,dstField,srcPointer);
-                if(newObj){
-                    newPointsToObj->targetObject = newObj;
-                    if(fieldId >= 0){
-                        newPointsToObj->dstfieldId = fieldId;
-                    }else{
-                        //Is this possible??
-                        newPointsToObj->dstfieldId = 0;
-                    }
-                    newPointsToInfo->insert(newPointsToInfo->begin(), newPointsToObj);
-                }else{
-#ifdef DEBUG_GET_ELEMENT_PTR
-                    errs() << "In AliasAnalysisVisitor::makePointsToCopy_emb(): cannot get or create embedded object.\n";
-#endif
-                    delete(newPointsToObj);
-                }
-            }else if (hostArrSubTy && fieldId < hostSubTy->getArrayNumElements()) {
-                //It's an embedded array, the result pointer should point to one array element.
-#ifdef DEBUG_GET_ELEMENT_PTR
-                dbgs() << "AliasAnalysisVisitor::makePointsToCopy_emb(): current pointee obj is an embedded array..\n";
-#endif
-                newPointsToObj->targetPointer = resPointer;
-                newPointsToObj->dstfieldId = 0;
-                AliasObject *newObj = this->createEmbObj(hostObj,dstField,resPointer);
-                if(newObj){
-                    newObj->from_array = true;
-                    newPointsToObj->targetObject = newObj;
-                    newPointsToInfo->insert(newPointsToInfo->begin(), newPointsToObj);
-                }else {
-#ifdef DEBUG_GET_ELEMENT_PTR
-                    errs() << "In AliasAnalysisVisitor::makePointsToCopy_emb(): cannot get or create embedded object.\n";
-#endif
-                    delete(newPointsToObj);
-                }
+                delete(newPointsToObj);
             }
         }
         return newPointsToInfo;
@@ -387,6 +376,12 @@ namespace DRCHECKER {
 #endif
                         goto fail_next;
                     }
+                    if (is_var_fid && !dyn_cast<SequentialType>(host_type)) {
+#ifdef DEBUG_GET_ELEMENT_PTR
+                        dbgs() << "AliasAnalysisVisitor::makePointsToCopy(): host obj matches the base pointer, but we don't support variable index in the non-sequential host obj.\n";
+#endif
+                        goto fail_next;
+                    }
                 }else {
                     //Ok, type mismatch, let's see whether the point-to field type in the host obj matches the base pointer.
                     if (dyn_cast<CompositeType>(host_type)) {
@@ -407,6 +402,12 @@ namespace DRCHECKER {
                     if (!InstructionUtils::isIndexValid(src_ety,fieldId)) {
 #ifdef DEBUG_GET_ELEMENT_PTR
                         dbgs() << "AliasAnalysisVisitor::makePointsToCopy(): we need to index into the embedded field but the fieldId is invalid for it...\n ";
+#endif
+                        goto fail_next;
+                    }
+                    if (is_var_fid && !dyn_cast<SequentialType>(src_ety)) {
+#ifdef DEBUG_GET_ELEMENT_PTR
+                        dbgs() << "AliasAnalysisVisitor::makePointsToCopy(): we need to index into the embedded field but the index is a variable while the src_ety is non-sequential!\n ";
 #endif
                         goto fail_next;
                     }
@@ -931,19 +932,15 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
             dbgs() << "About to process index: " << (i-1) << "\n";
 #endif
             ConstantInt *CI = dyn_cast<ConstantInt>(I->getOperand(i));
+            unsigned long structFieldId = 0;
+            bool is_var_fid = false;
             if (!CI) {
-                //TODO: non-constant index.
-#ifdef DEBUG_GET_ELEMENT_PTR
-                dbgs() << "Non-constant index: " << i << "\n";
-#endif
-                if (i == 2) {
-                    update = false;
-                }
-                break;
+                is_var_fid = true;
+            }else {
+                structFieldId = CI->getZExtValue();
             }
-            unsigned long structFieldId = CI->getZExtValue();
 #ifdef DEBUG_GET_ELEMENT_PTR
-            dbgs() << "Index value: " << structFieldId << "\n";
+            dbgs() << "Index value: " << structFieldId << " is_var_fid: " << is_var_fid << "\n";
 #endif
             //Loop invariant: "currPointsTo" always has contents here.
             std::set<PointerPointsTo*>* newPointsToInfo = nullptr;
@@ -963,11 +960,11 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
                 dbgs() << "resGEP: " << InstructionUtils::getValueStr(resGEP) << "\n";
 #endif
                 if (subGEP) {
-                    newPointsToInfo = makePointsToCopy_emb(propInst, subGEP, resGEP, currPointsTo, structFieldId);
+                    newPointsToInfo = makePointsToCopy_emb(propInst, subGEP, resGEP, currPointsTo, structFieldId, is_var_fid);
                 }
             }else {
                 //Most GEP should only have 2 indices..
-                newPointsToInfo = makePointsToCopy(propInst, I, currPointsTo, structFieldId);
+                newPointsToInfo = makePointsToCopy(propInst, I, currPointsTo, structFieldId, is_var_fid);
             }
             if (!newPointsToInfo || newPointsToInfo->empty()) {
                 //Fallback: just update w/ the "currPointsTo" except when this is a 2-dimension GEP.
