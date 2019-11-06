@@ -25,15 +25,15 @@ namespace DRCHECKER {
     class TaintTag {
     public:
         long fieldId;
-        Value *v;
-        Type *type;
+        Value *v = nullptr;
+        Type *type = nullptr;
         //Record all instructions (w/ its call context) that can possibly modify this taint source.
         std::map< Instruction *, std::set<std::vector<Instruction*>*> > mod_insts;
         //If this is a local taint tag (i.e. for user provided arg), record all its comparison constants here.
         std::map< Instruction *, std::set<int64_t>> cmp_constants;
         bool is_global;
         //The AliasObject that is related to this tag.
-        void *priv;
+        void *priv = nullptr;
 
         TaintTag(long fieldId, Value *v, bool is_global = true, void *p = nullptr) {
             this -> fieldId = fieldId;
@@ -104,6 +104,9 @@ namespace DRCHECKER {
         }
 
         Type *getTy() {
+            if (this->type) {
+                return this->type;
+            }
             if (!(this->v)){
                 return nullptr;
             }
@@ -111,8 +114,8 @@ namespace DRCHECKER {
             if (ty->isPointerTy()){
                 ty = ty->getPointerElementType();
             }
-            if (ty->isStructTy() && this->fieldId < ty->getStructNumElements() && this->fieldId >= 0){
-                return ty->getStructElementType(this->fieldId);
+            if (dyn_cast<CompositeType>(ty) && InstructionUtils::isIndexValid(ty,fieldId)) {
+                return dyn_cast<CompositeType>(ty)->getTypeAtIndex(fieldId);
             }
             return ty;
         }

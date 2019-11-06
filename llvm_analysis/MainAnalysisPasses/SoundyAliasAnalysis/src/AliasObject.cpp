@@ -71,14 +71,6 @@ namespace DRCHECKER {
          * i.e if a field does not point to any object.
          * Automatically generate an object and link it with srcFieldId
          */
-        //assert(this->targetType);
-        //assert(this->targetType->isStructTy());
-        /*
-        if (!this->targetType || !this->targetType->isStructTy()) {
-            //fallback method
-            return this->fetchPointsToObjects_default(srcfieldId,dstObjects,targetInstr,create_arg_obj);
-        }
-        */
         //What's the expected type of the fetched point-to object?
         Type *expFieldTy = nullptr;
         Type *expObjTy = nullptr;
@@ -112,7 +104,7 @@ namespace DRCHECKER {
                 //dbgs() << " expObjTy: " << InstructionUtils::getTypeStr(expObjTy) << "\n";
 #endif
                 if (obj->dstfieldId == 0 && obj->targetObject && obj->targetObject->isHeapLocation() && 
-                    expObjTy && expObjTy->isStructTy() && obj->targetObject->targetType != expObjTy) 
+                    expObjTy && dyn_cast<CompositeType>(expObjTy) && obj->targetObject->targetType != expObjTy) 
                 {
 #ifdef DEBUG_CHANGE_HEAPLOCATIONTYPE
                     dbgs() << "AliasObject::fetchPointsToObjects: isHeapLocation: " << (obj->targetObject && obj->targetObject->isHeapLocation()) << " dstField: " << obj->dstfieldId;

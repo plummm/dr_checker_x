@@ -29,7 +29,7 @@ namespace DRCHECKER {
         //NOTE: there are multiple places in the code that create a new OutsideObject, but we onlyd do this multi-entry cache mechanism here,
         //because other places create the object that is related to another object (emb/host/field point-to), while we only need to cache the
         //top-level outside obj here (so that other sub obj can be naturally obtained by the field records inside it).
-        if (p && p->getType() && p->getType()->isPointerTy() && p->getType()->getPointerElementType()->isStructTy()) {
+        if (p && p->getType() && p->getType()->isPointerTy() && dyn_cast<CompositeType>(p->getType()->getPointerElementType())) {
             OutsideObject *obj = DRCHECKER::getSharedObjFromCache(p->getType()->getPointerElementType());
             if (obj) {
                 //We need to bind the shared object w/ current inst.
@@ -629,7 +629,7 @@ void AliasAnalysisVisitor::visitCastInst(CastInst &I) {
 #endif
             //--------below are special processings for the point-to information---------
             if(!dstType->isVoidTy()) {
-                //src type is i8* || i8
+                //cur obj type is i8* || i8
                 if((currTgtObjType->isPointerTy() && currTgtObjType->getContainedType(0)->isIntegerTy(8)) || currTgtObjType->isIntegerTy(8)){
                     // No need to make copy
                     if(dstType->isPointerTy()) {

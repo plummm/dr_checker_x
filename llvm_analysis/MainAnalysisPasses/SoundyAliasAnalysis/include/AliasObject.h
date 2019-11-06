@@ -800,36 +800,33 @@ namespace DRCHECKER {
 
         std::set<long> getAllAvailableFields() {
             std::set<long> allAvailableFields;
-            if (this->targetType->isStructTy()) {
-                StructType *resStType = dyn_cast<StructType>(this->targetType);
-#ifdef DEBUG
-                dbgs() << "\nIs a structure type:" << resStType->getNumElements() << "\n";
-#endif
-                for (long i = 0; i < (resStType->getNumElements()); i++) {
-                    allAvailableFields.insert(allAvailableFields.end(), i);
+            Type *ty = this->targetType;
+            if (ty) {
+                if (ty->isPointerTy()) {
+                    ty = ty->getPointerElementType();
                 }
-
-            } else if (this->targetType->isPointerTy() && this->targetType->getContainedType(0)->isStructTy()) {
-                // if this is a pointer to a struct.
-                StructType *resStType = dyn_cast<StructType>(this->targetType->getContainedType(0));
-                for (long i = 0; i < (resStType->getNumElements()); i++) {
-                    allAvailableFields.insert(allAvailableFields.end(), i);
+                if (ty->isStructTy()) {
+                    for (long i = 0; i < ty->getStructNumElements(); ++i) {
+                        allAvailableFields.insert(i);
+                    }
+                    return allAvailableFields;
+                }else if (dyn_cast<SequentialType>(ty)) {
+                    for (long i = 0; i < dyn_cast<SequentialType>(ty)->getNumElements(); ++i) {
+                        allAvailableFields.insert(i);
+                    }
+                    return allAvailableFields;
                 }
-            } else if (this->pointsTo.size()) {
+            }
+            if (this->pointsTo.size()) {
                 // has some points to?
                 // iterate thru pointsTo and get all fields.
                 for (auto objPoint:this->pointsTo) {
-                    long currFieldID = objPoint->fieldId;
-                    // no added? then add.
-                    if (allAvailableFields.find(currFieldID) == allAvailableFields.end()) {
-                        allAvailableFields.insert(allAvailableFields.end(), currFieldID);
-                    }
+                    allAvailableFields.insert(objPoint->fieldId);
                 }
-
-            } else {
-                // This must be a scalar type.
+            }else {
+                // This must be a scalar type, or null type info.
                 // just add taint to the field 0.
-                allAvailableFields.insert(allAvailableFields.end(), 0);
+                allAvailableFields.insert(0);
             }
             return allAvailableFields;
         }
@@ -1664,7 +1661,7 @@ namespace DRCHECKER {
                     continue;
                 }
                 ty1 = dty->getPointerElementType();
-                if (ty1->isStructTy() || ty1->isPointerTy()) {
+                if (dyn_cast<CompositeType>(ty1) || ty1->isPointerTy()) {
                     break;
                 }
             }
