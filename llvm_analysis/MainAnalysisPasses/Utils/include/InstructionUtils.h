@@ -168,6 +168,14 @@ namespace DRCHECKER {
         static bool isTyUsedByFunc(Type *ty, Function *func);
 
         static bool isIndexValid(Type *ty, unsigned fid);
+
+        //Given a type's type desc vector, locate the first desc node for a specified field "fid",
+        //returning the index of this desc node within the vector.
+        static int locateFieldInTyDesc(std::vector<FieldDesc*> *tydesc, unsigned fid);
+
+        //Given a type's type desc vector, locate the first desc node for a specified bit offset,
+        //returning the index of this desc node within the vector.
+        static int locateBitsoffInTyDesc(std::vector<FieldDesc*> *tydesc, int boff);
     };
 
 }

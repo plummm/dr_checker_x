@@ -938,6 +938,44 @@ namespace DRCHECKER {
         return nullptr;
     }
 
+    int InstructionUtils::locateFieldInTyDesc(std::vector<FieldDesc*> *tydesc, unsigned fid) {
+        if (!tydesc || tydesc->size() == 0) {
+            return -1;
+        }
+        for (int i = 0; i < tydesc->size(); ++i) {
+            FieldDesc *fd = (*tydesc)[i];
+            if (fd) {
+                //There may exist some embedded composite typed fields in the host obj, but the "fid" here refers only to the index within the outmost host obj.
+                unsigned curid = fd->fid[fd->fid.size()-1];
+                if (curid == fid) {
+                    return i;
+                }else if (curid > fid) {
+                    //The field id in the vector is in the ascending order.
+                    //NOTE: it should be impossible to reach here if the "tydesc" is correct...
+                    return -1;
+                }
+            }
+        }
+        return -1;
+    }
+
+    int InstructionUtils::locateBitsoffInTyDesc(std::vector<FieldDesc*> *tydesc, int boff) {
+        if (!tydesc || tydesc->size() == 0) {
+            return -1;
+        }
+        for (int i = 0; i < tydesc->size(); ++i) {
+            FieldDesc *fd = (*tydesc)[i];
+            if (fd) {
+                if (fd->bitoff == boff) {
+                    return i;
+                }else if (fd->bitoff > boff) {
+                    return -1;
+                }
+            }
+        }
+        return -1;
+    }
+
     bool InstructionUtils::isTyUsedByFunc(Type *ty, Function *func) {
         if (!ty || !func) {
             return false;
