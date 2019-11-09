@@ -6,6 +6,7 @@ import fileinput
 rl = [
     ('SoundyAliasAnalysis/src/AliasAnalysisVisitor.cpp','#define DEBUG_GET_ELEMENT_PTR','//#define DEBUG_GET_ELEMENT_PTR'),
     ('SoundyAliasAnalysis/src/AliasAnalysisVisitor.cpp','#define DEBUG_STORE_INSTR','//#define DEBUG_STORE_INSTR'),
+    ('SoundyAliasAnalysis/src/AliasAnalysisVisitor.cpp','#define DEBUG_CAST_INSTR','//#define DEBUG_CAST_INSTR'),
     ('SoundyAliasAnalysis/src/AliasAnalysisVisitor.cpp','#define DEBUG_UPDATE_POINTSTO','//#define DEBUG_UPDATE_POINTSTO'),
     ('SoundyAliasAnalysis/src/TaintUtils.cpp','#define DEBUG_ADD_NEW_TAINT_FLAG','//#define DEBUG_ADD_NEW_TAINT_FLAG'),
     ('SoundyAliasAnalysis/include/AliasObject.h','#define DEBUG_CREATE_DUMMY_OBJ_IF_NULL','//#define DEBUG_CREATE_DUMMY_OBJ_IF_NULL'),
@@ -14,7 +15,9 @@ rl = [
     ('SoundyAliasAnalysis/include/AliasObject.h','#define DEBUG_UPDATE_FIELD_POINT','//#define DEBUG_UPDATE_FIELD_POINT'),
     ('SoundyAliasAnalysis/include/AliasObject.h','#define DEBUG_UPDATE_FIELD_TAINT','//#define DEBUG_UPDATE_FIELD_TAINT'),
     ('SoundyAliasAnalysis/include/AliasObject.h','#define DEBUG_CREATE_EMB_OBJ','//#define DEBUG_CREATE_EMB_OBJ'),
+    ('SoundyAliasAnalysis/include/AliasObject.h','#define DEBUG_CREATE_EMB_OBJ_CHAIN','//#define DEBUG_CREATE_EMB_OBJ_CHAIN'),
     ('SoundyAliasAnalysis/include/AliasObject.h','#define DEBUG_CREATE_HOST_OBJ','//#define DEBUG_CREATE_HOST_OBJ'),
+    ('SoundyAliasAnalysis/include/AliasObject.h','#define DEBUG_CREATE_HOST_OBJ_CHAIN','//#define DEBUG_CREATE_HOST_OBJ_CHAIN'),
     ('SoundyAliasAnalysis/include/AliasObject.h','#define DEBUG_SPECIAL_FIELD_POINTTO','//#define DEBUG_SPECIAL_FIELD_POINTTO'),
     ('SoundyAliasAnalysis/include/AliasObject.h','#define DEBUG_SHARED_OBJ_CACHE','//#define DEBUG_SHARED_OBJ_CACHE'),
 ]

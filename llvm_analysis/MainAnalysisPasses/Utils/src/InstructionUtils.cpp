@@ -1017,6 +1017,28 @@ namespace DRCHECKER {
         OS << "\n";
     }
 
+    int FieldDesc::findTy(Type *ty) {
+        if (ty) {
+            for (int i = 0; i < this->tys.size(); ++i) {
+                if (InstructionUtils::same_types(this->tys[i],ty)) {
+                    return i;
+                }
+            }
+        }
+        return -1;
+    }
+
+    int FieldDesc::findHostTy(Type *ty) {
+        if (ty) {
+            for (int i = 0; i < this->host_tys.size(); ++i) {
+                if (InstructionUtils::same_types(this->host_tys[i],ty)) {
+                    return i;
+                }
+            }
+        }
+        return -1;
+    }
+
     bool InstructionUtils::isIndexValid(Type *ty, unsigned fid) {
         if (!ty) {
             return false;

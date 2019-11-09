@@ -45,6 +45,11 @@ namespace DRCHECKER {
         }
 
         void print(raw_ostream &OS);
+
+        //Whether a certain type is in the "tys" list.
+        int findTy(Type *ty);
+
+        int findHostTy(Type *ty);
     };
 
     class CandStructInf {

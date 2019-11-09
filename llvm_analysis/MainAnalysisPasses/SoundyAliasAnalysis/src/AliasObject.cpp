@@ -369,4 +369,646 @@ namespace DRCHECKER {
         }
     }
 
+    OutsideObject* createOutsideObj(Type *ty, bool taint, std::set<TaintFlag*> *existingTaints) {
+#ifdef DEBUG_CREATE_DUMMY_OBJ_IF_NULL
+        dbgs() << "Type-based createOutsideObj(): " << InstructionUtils::getTypeStr(ty) << "\n";
+#endif
+        if (!ty || !dyn_cast<CompositeType>(ty)) {
+#ifdef DEBUG_CREATE_DUMMY_OBJ_IF_NULL
+            dbgs() << "Type-based createOutsideObj(): it's not a composite type, cannot create the outside obj!\n";
+#endif
+            return nullptr;
+        }
+        OutsideObject *newObj = new OutsideObject(nullptr, ty);
+        //All outside objects are generated automatically.
+        newObj->auto_generated = true;
+        //Need taint?
+        if (taint) {
+            if (existingTaints && !existingTaints->empty()) {
+                for (TaintFlag *currTaint : *existingTaints) {
+                    newObj->taintAllFieldsWithTag(currTaint);
+                }
+                newObj->is_taint_src = true;
+#ifdef DEBUG_CREATE_DUMMY_OBJ_IF_NULL
+                dbgs() << "Type-based createOutsideObj(): set |is_taint_src| for the outside obj.\n";
+#endif
+            }else {
+                //We don't have a value/pointer here to generate a TaintFlag..
+                //TODO:
+#ifdef DEBUG_CREATE_DUMMY_OBJ_IF_NULL
+                dbgs() << "!!!Type-based createOutsideObj(): trying to taint w/o existingTaints...\n";
+#endif
+            }
+        }
+        return newObj;
+    }
+
+    int updatePointsToRecord(Value *p, std::map<Value*,std::set<PointerPointsTo*>*> *currPointsTo, AliasObject *newObj, long fid, long dfid) {
+        if (!newObj || !p) {
+            return 0;
+        }
+        PointerPointsTo *newPointsTo = new PointerPointsTo();
+        newPointsTo->targetPointer = p;
+        newPointsTo->fieldId = fid;
+        newPointsTo->dstfieldId = dfid;
+        newPointsTo->targetObject = newObj;
+        newObj->pointersPointsTo.insert(newObj->pointersPointsTo.end(),newPointsTo);
+        //Set up point-to records in the global state.
+        if (currPointsTo) {
+            std::set<PointerPointsTo *> *newPointsToSet = new std::set<PointerPointsTo *>();
+            newPointsToSet->insert(newPointsToSet->end(), newPointsTo);
+            (*currPointsTo)[p] = newPointsToSet;
+            return 1;
+        }
+        return 0;
+    }
+
+    OutsideObject* createOutsideObj(Value *p, std::map<Value*,std::set<PointerPointsTo*>*> *currPointsTo, bool taint, std::set<TaintFlag*> *existingTaints) {
+#ifdef DEBUG_CREATE_DUMMY_OBJ_IF_NULL
+        dbgs() << "createOutsideObj(): ";
+        if(p){
+            dbgs() << InstructionUtils::getValueStr(p) << "  |  " << p->getName().str() + " : " << InstructionUtils::getTypeStr(p->getType());
+        }
+        dbgs() << "\n";
+#endif
+        //First do some sanity checks, we need to make sure that "p" is a pointer of a composite type.
+        if (!(p && p->getType()->isPointerTy() && dyn_cast<CompositeType>(p->getType()->getPointerElementType()))) {
+#ifdef DEBUG_CREATE_DUMMY_OBJ_IF_NULL
+            dbgs() << "createOutsideObj(): It's not a pointer to the composite type! Cannot create an outside object!\n";
+#endif
+            return nullptr;
+        }
+        //Don't create OutsideObject for null ptr.
+        if (p->getName().str().empty() && !dyn_cast<Instruction>(p)){
+#ifdef DEBUG_CREATE_DUMMY_OBJ_IF_NULL
+            dbgs() << "createOutsideObj(): Null value name! Cannot create an outside object!\n";
+#endif
+            return nullptr;
+        }
+#ifdef DEBUG_CREATE_DUMMY_OBJ_IF_NULL
+        dbgs() << "createOutsideObj(): Try to create new outside object.\n";
+#endif
+        //Create a new outside object.
+        //OutsideObject *newObj = new OutsideObject(p, p->getType()->getContainedType(0));
+        OutsideObject *newObj = new OutsideObject(p, p->getType()->getPointerElementType());
+#ifdef DEBUG_CREATE_DUMMY_OBJ_IF_NULL
+        dbgs() << "createOutsideObj(): New obj created: " << (const void*)newObj << "\n";
+#endif
+        //All outside objects are generated automatically.
+        newObj->auto_generated = true;
+        //Set up point-to records inside the AliasObject.
+        updatePointsToRecord(p,currPointsTo,newObj);
+        //Need taint?
+        if (taint) {
+            if (existingTaints && !existingTaints->empty()) {
+                for (TaintFlag *currTaint : *existingTaints) {
+                    newObj->taintAllFieldsWithTag(currTaint);
+                }
+            }else {
+                //The original pointer is not tainted, treat it as a global state.
+                TaintFlag *currFlag = new TaintFlag(p, true);
+                newObj->taintAllFieldsWithTag(currFlag);
+            }
+            newObj->is_taint_src = true;
+#ifdef DEBUG_CREATE_DUMMY_OBJ_IF_NULL
+            dbgs() << "createOutsideObj(): set |is_taint_src| for the outside obj.\n";
+#endif
+        }
+        return newObj;
+    }
+
+    AliasObject *createEmbObj(AliasObject *hostObj, long host_dstFieldId, Value *v, std::map<Value*, std::set<PointerPointsTo*>*> *currPointsTo) {
+#ifdef DEBUG_CREATE_EMB_OBJ
+        dbgs() << "Start createEmbObj()\n";
+#endif
+        AliasObject *newObj = nullptr;
+        if (!hostObj || !hostObj->targetType) {
+#ifdef DEBUG_CREATE_EMB_OBJ
+            dbgs() << "createEmbObj(): (!hostObj || !hostObj->targetType)\n";
+#endif
+            return nullptr;
+        }
+#ifdef DEBUG_CREATE_EMB_OBJ
+        dbgs() << "createEmbObj(): host type: " << InstructionUtils::getTypeStr(hostObj->targetType) << " | " << host_dstFieldId << "\n";
+#endif
+        if (dyn_cast<SequentialType>(hostObj->targetType)) {
+            //We collapse the array/vector to a single element.
+#ifdef DEBUG_CREATE_EMB_OBJ
+            dbgs() << "createEmbObj(): host is an array/vector, set host_dstFieldId to 0.\n";
+#endif
+            host_dstFieldId = 0;
+        }
+        Type *ety = nullptr;
+        if (dyn_cast<CompositeType>(hostObj->targetType) && InstructionUtils::isIndexValid(hostObj->targetType,host_dstFieldId)) {
+            ety = dyn_cast<CompositeType>(hostObj->targetType)->getTypeAtIndex(host_dstFieldId);
+        }
+        Type *expectedPointeeTy = nullptr;
+        if (v && v->getType() && v->getType()->isPointerTy()) {
+            expectedPointeeTy = v->getType()->getPointerElementType();
+        }
+#ifdef DEBUG_CREATE_EMB_OBJ
+        dbgs() << "createEmbObj(): ety: " << InstructionUtils::getTypeStr(ety) << " expectedPointeeTy: " << InstructionUtils::getTypeStr(expectedPointeeTy) << "\n";
+#endif
+        if (v) {
+            if (!ety || !InstructionUtils::same_types(ety,expectedPointeeTy)) {
+#ifdef DEBUG_CREATE_EMB_OBJ
+                dbgs() << "createEmbObj(): ety and expectedPointeeTy are different...\n";
+#endif
+                return nullptr;
+            }
+        }
+        if (hostObj->embObjs.find(host_dstFieldId) != hostObj->embObjs.end()){
+#ifdef DEBUG_CREATE_EMB_OBJ
+            dbgs() << "createEmbObj(): find the previosuly created embed object!\n";
+#endif
+            //We have created that embedded object previously.
+            newObj = hostObj->embObjs[host_dstFieldId];
+        }
+        if (!newObj || !InstructionUtils::same_types(newObj->targetType,ety)){
+#ifdef DEBUG_CREATE_EMB_OBJ
+            dbgs() << "createEmbObj(): try to create a new embed object because ";
+            if (!newObj) {
+                dbgs() << "there is no emb obj in cache...\n";
+            }else{
+                dbgs() << "the emb obj in cache has a different type than expected: " << InstructionUtils::getTypeStr(newObj->targetType) << "\n";
+            }
+#endif
+            //Need to create a new AliasObject for the embedded struct.
+            if (v) {
+                newObj = DRCHECKER::createOutsideObj(v, currPointsTo, false, nullptr);
+            }else {
+                newObj = DRCHECKER::createOutsideObj(ety, false, nullptr);
+            }
+            //Properly taint it.
+            if(newObj){
+#ifdef DEBUG_CREATE_EMB_OBJ
+                dbgs() << "createEmbObj(): the embedded obj created: " << (const void*)newObj << " | set is_taint_src to: " << hostObj->is_taint_src << "\n"; 
+#endif
+                newObj->is_taint_src = hostObj->is_taint_src;
+                //This new TargetObject should also be tainted according to the host object taint flags.
+                std::set<TaintFlag*> *src_taintFlags = hostObj->getFieldTaintInfo(host_dstFieldId);
+                if(src_taintFlags){
+#ifdef DEBUG_CREATE_EMB_OBJ
+                    dbgs() << "createEmbObj(): try to taint the emb obj, #TaintFlag: " << src_taintFlags->size() << "\n";
+#endif
+                    for(TaintFlag *currTaintFlag:*src_taintFlags){
+                        newObj->taintAllFieldsWithTag(currTaintFlag);
+                    }
+                }
+                //TODO: all contents taint flag.
+                //Record it in the "embObjs".
+                hostObj->embObjs[host_dstFieldId] = newObj;
+                newObj->parent = hostObj;
+                newObj->parent_field = host_dstFieldId;
+            }else {
+#ifdef DEBUG_CREATE_EMB_OBJ
+                dbgs() << "createEmbObj(): Failed to create the outside object!\n";
+#endif
+            }
+        }
+        return newObj;
+    }
+
+    AliasObject *createHostObj(AliasObject *targetObj, Type *hostTy, long field) {
+        if (!targetObj || !hostTy || !dyn_cast<CompositeType>(hostTy)) {
+#ifdef DEBUG_CREATE_HOST_OBJ
+            dbgs() << "createHostObj(): !targetObj || !hostTy || !dyn_cast<CompositeType>(hostTy)\n";
+#endif
+            return nullptr;
+        }
+#ifdef DEBUG_CREATE_HOST_OBJ
+        dbgs() << "createHostObj(): targetObj ty: " << InstructionUtils::getTypeStr(targetObj->targetType) << "\n";
+        dbgs() << "createHostObj(): hostObj ty: " << InstructionUtils::getTypeStr(hostTy) << " | " << field << "\n";
+#endif
+        if (dyn_cast<SequentialType>(hostTy)) {
+            field = 0;
+        }
+        if (!InstructionUtils::isIndexValid(hostTy,field)) {
+#ifdef DEBUG_CREATE_HOST_OBJ
+            dbgs() << "createHostObj(): field OOB!\n";
+#endif
+            return nullptr;
+        }
+        if (!InstructionUtils::same_types(dyn_cast<CompositeType>(hostTy)->getTypeAtIndex(field),targetObj->targetType)) {
+#ifdef DEBUG_CREATE_HOST_OBJ
+            dbgs() << "createHostObj(): field type doesn't match the host!\n";
+#endif
+            return nullptr;
+        }
+        AliasObject *hobj = nullptr;
+        if (targetObj->all_contents_taint_flag) {
+            std::set<TaintFlag*> *existingTaints = new std::set<TaintFlag*>();
+            existingTaints->insert(targetObj->all_contents_taint_flag);
+            hobj = DRCHECKER::createOutsideObj(hostTy, true, existingTaints);
+        }else{
+            hobj = DRCHECKER::createOutsideObj(hostTy, false, nullptr);
+        }
+        if (!hobj) {
+#ifdef DEBUG_CREATE_HOST_OBJ
+            dbgs() << "createHostObj(): fail to create the host obj!\n";
+#endif
+            return nullptr;
+        }
+        //Setup embed relationship.
+        hobj->embObjs[field] = targetObj;
+        targetObj->parent = hobj;
+        targetObj->parent_field = field;
+        return hobj;
+    }
+
+    int matchFieldsInDesc(Type *ty0, Type *ty1, int bitoff, std::vector<FieldDesc*> *fds, std::vector<unsigned> *res) {
+        if (!ty0 || !ty1 || !fds || !res) {
+            return 0;
+        }
+        int found = 0;
+        for (int i = 0; i < fds->size(); ++i) {
+            FieldDesc *fd = (*fds)[i];
+            if (!fd) 
+                continue;
+            bool ty0_match = false;
+            for (Type *t : fd->tys) {
+                if (InstructionUtils::same_types(t,ty0)) {
+                    ty0_match = true;
+                    break;
+                }
+            }
+            if (!ty0_match)
+                continue;
+            int dstoff = fd->bitoff + bitoff;
+            int step = (bitoff > 0 ? 1 : -1);
+            for (int j = i; j >= 0 && j < fds->size(); j+=step) {
+                if ((*fds)[j]->bitoff == dstoff) {
+                    bool ty1_match = false;
+                    for (Type *t : (*fds)[j]->tys) {
+                        if (InstructionUtils::same_types(t,ty1)) {
+                            ty1_match = true;
+                            break;
+                        }
+                    }
+                    if (ty1_match) {
+                        res->push_back(i);
+                        res->push_back(j);
+                        found = 1;
+                        break;
+                    }
+                }
+                if ((step > 0) != ((*fds)[j]->bitoff < dstoff)) {
+                    break;
+                }
+            }
+        }
+        return found;
+    }
+
+    void sortCandStruct(std::vector<CandStructInf*> *cands, Instruction *I) {
+        if (!cands || !cands->size()) {
+            return;
+        }
+        Function *func = nullptr;
+        if (I) {
+            func = I->getFunction();
+        }
+        for (CandStructInf *c : *cands) {
+            std::vector<FieldDesc*> *fds = c->fds;
+            FieldDesc *fd0 = (*fds)[c->ind[0]];
+            FieldDesc *fd1 = (*fds)[c->ind[1]];
+            if (!fd0->host_tys.size()) {
+                dbgs() << "!!! sortCandStruct(): No host type inf!\n";
+                continue;
+            }
+            Type *hty = fd0->host_tys[fd0->host_tys.size()-1];
+            //If the host type is referred in the target function, then we will have a high confidence.
+            if (InstructionUtils::isTyUsedByFunc(hty,func)) {
+                c->score += 1000;
+            }
+            //TODO: if the type name is similar to the function name, then we will give it a high score.
+            //
+            //Observation: it's likely that the #field of ty1 is 0 when "bitoff" is negative. 
+            if (c->ind[1] == 0) {
+                c->score += 500;
+            }
+            //TODO: consider the size of the candidate struct?
+        }
+        std::sort(cands->begin(),cands->end(),[](CandStructInf *c0, CandStructInf *c1){
+            return (c0->score - c1->score > 0);
+        });
+        return;
+    }
+
+    FieldDesc *getStructTysFromFieldDistance(DataLayout *dl, Type *ty0, Type *ty1, int bitoff, Instruction *I) {
+        if (!I || !ty0 || !ty1) {
+            return nullptr;
+        }
+        Function *func = I->getFunction();
+        Module *mod = I->getModule();
+        if (!mod || !dl) {
+            return nullptr;
+        }
+#ifdef DEBUG_CREATE_HOST_OBJ
+        dbgs() << "getStructTysFromFieldDistance(): Trying to identify a struct that can match the distanced fields.\n";
+#endif
+        std::vector<StructType*> tys = mod->getIdentifiedStructTypes();
+        std::vector<CandStructInf*> cands;
+        for (StructType *t : tys) {
+            std::vector<FieldDesc*> *tydesc = InstructionUtils::getCompTyDesc(dl,t);
+            if (!tydesc) {
+                continue;
+            }
+            //Ok, try to match to given fields w/ a specified distance.
+            std::vector<unsigned> res;
+            if (!matchFieldsInDesc(ty0,ty1,bitoff,tydesc,&res)) {
+                continue;
+            }
+#ifdef DEBUG_CREATE_HOST_OBJ
+            dbgs() << "getStructTysFromFieldDistance(): got a match: " << InstructionUtils::getTypeStr(t) << "\n"; 
+            for (FieldDesc *fd : *tydesc) {
+                fd->print(dbgs());
+            }
+#endif
+            //Ok get a match, record it.
+            for (int i = 0; i < res.size(); i += 2) {
+#ifdef DEBUG_CREATE_HOST_OBJ
+                for (int j = 0; j < 2; ++j) {
+                    dbgs() << "fid " << j << ": ";
+                    for(unsigned id : (*tydesc)[res[i+j]]->fid) {
+                        dbgs() << id << " ";
+                    }
+                }
+                dbgs() << "\n";
+#endif
+                CandStructInf *inf = new CandStructInf();
+                inf->fds = tydesc;
+                inf->ind.push_back(res[i]);
+                inf->ind.push_back(res[i+1]);
+                cands.push_back(inf);
+            }
+        }
+#ifdef DEBUG_CREATE_HOST_OBJ
+        dbgs() << "getStructTysFromFieldDistance(): #cands: " << cands.size() << "\n";
+#endif
+        //We need to select a best candidate to return...
+        sortCandStruct(&cands,I);
+        //Return the hisghest ranked candidate.
+        FieldDesc *rfd = nullptr;
+        if (cands.size() > 0) {
+            rfd = (*(cands[0]->fds))[cands[0]->ind[0]];
+        }
+        for (CandStructInf *c : cands) {
+            free(c);
+        }
+        return rfd;
+    }
+
+    PointerPointsTo *getOrCreateHostObj(DataLayout *dl, AliasObject *obj, Instruction *propInst, GEPOperator *I, int bitoff) {
+        if (!obj) {
+            return nullptr;
+        }
+#ifdef DEBUG_CREATE_HOST_OBJ
+        dbgs() << "getOrCreateHostObj(): element obj: " << InstructionUtils::getTypeStr(obj->targetType) << " bitoff: " << bitoff << "\n";
+#endif
+        PointerPointsTo *pto = new PointerPointsTo();
+        //Is this an embedded object in a known host object?
+        if (obj->parent) {
+#ifdef DEBUG_CREATE_HOST_OBJ
+            dbgs() << "getOrCreateHostObj(): There exists parent object from the record.\n";
+#endif
+            pto->targetObject = obj->parent;
+            pto->dstfieldId = obj->parent_field;
+            return pto;
+        }
+        //A typical and common scenario in which we need to call "getOrCreateHostObj()" is that in a "GEP i8 *ptr, index" IR the "ptr" points to
+        //a certain object but is converted to i8*. then the "index" calculates a pointer pointing outside this object...
+        //To find the host obj, what we want to do is to iterate over all struct types in the current module, then find the correct type(s)
+        //that has properly distanced field types that matches both the base "ptr" and the pointer type produced by the "GEP" (we need to
+        //figure out the true pointer type from the subsequent cast IRs).
+        if (I && I->getNumOperands() == 2) {
+            Type *ty0 = obj->targetType;
+            if (!ty0) {
+                return nullptr;
+            }
+            //Ok, get the type of the pointer generated by the "GEP".
+            Type *ty1 = nullptr;
+            for (User *u : I->users()) {
+                CastInst *cinst = dyn_cast<CastInst>(u);
+                if (!cinst) {
+                    continue;
+                }
+                Type *dty = cinst->getDestTy();
+                if (!dty || !dty->isPointerTy()) {
+                    continue;
+                }
+                ty1 = dty->getPointerElementType();
+                if (dyn_cast<CompositeType>(ty1) || ty1->isPointerTy()) {
+                    break;
+                }
+            }
+#ifdef DEBUG_CREATE_HOST_OBJ
+            dbgs() << "getOrCreateHostObj(): ty1: " << InstructionUtils::getTypeStr(ty1) << "\n";
+#endif
+            if (ty1) {
+                FieldDesc *fd = getStructTysFromFieldDistance(dl, ty0, ty1, bitoff, propInst);
+                if (fd && fd->host_tys.size() > 0 && fd->host_tys.size() == fd->fid.size()) {
+                    //Try to create the host obj.
+                    Type *hty = nullptr;
+                    unsigned fid = 0;
+                    if (dyn_cast<CompositeType>(ty0)) {
+                        int i;
+                        for (i = 0; i < fd->fid.size() - 1; ++i) {
+                            if (InstructionUtils::same_types(fd->host_tys[i],ty0)) {
+                                break;
+                            }
+                        }
+                        if (i < fd->fid.size() - 1) {
+                            hty = fd->host_tys[i+1];
+                            fid = fd->fid[i+1];
+                        }else {
+#ifdef DEBUG_CREATE_HOST_OBJ
+                            dbgs() << "getOrCreateHostObj(): Failed: if (i < fd->fid.size() - 1), there should be sth wrong w/ the type desc.\n";
+#endif
+                            return nullptr;
+                        }
+                    }else {
+                        hty = fd->host_tys[0];
+                        fid = fd->fid[0];
+                    }
+                    AliasObject *hobj = DRCHECKER::createHostObj(obj,hty,fid);
+                    if (hobj) {
+                        pto->targetObject = hobj;
+                        pto->dstfieldId = fid;
+                        return pto;
+                    }else {
+#ifdef DEBUG_CREATE_HOST_OBJ
+                        dbgs() << "getOrCreateHostObj(): Failed to create the host object!\n";
+#endif
+                    }
+                }else {
+                    dbgs() << "!!! getOrCreateHostObj(): cannot get a candidate host struct! null fd: " << (fd ? "False" : "True") << "\n";
+                }
+            }
+        }
+        /*
+        //It's not embedded in any known object, but we can still do some inferences here, consider a very common case:
+        //the kernel linked list mechanism will embed a "list_head" struct into every host object which needs to be linked,
+        //we may have "list_head" A embedded in host A and "list_head" B pointed from "list_head" A, though we don't have
+        //any records regarding B's host object, we can still infer its host object type (same as host A) and create a dummy
+        //object.
+        if (!obj->pointsFrom.empty()) {
+            for (AliasObject *prev : obj->pointsFrom) {
+                if (!prev) {
+                    continue;
+                }
+                //TODO: currently we only consider one layer's points-from, maybe we need more..
+                if (InstructionUtils::same_types(prev->targetType,obj->targetType)) {
+                    if (prev->parent && prev->parent->targetType) {
+                        AliasObject *hobj = DRCHECKER::createHostObj(obj,prev->parent->targetType,prev->parent_field);
+                        if (!hobj) {
+                            continue;
+                        }
+                        pto->targetObject = hobj;
+                        pto->dstfieldId = prev->parent_field;
+                        return pto;
+                    }
+                }
+            }
+        }
+        */
+        return nullptr;
+    }
+
+    int addToSharedObjCache(OutsideObject *obj) {
+#ifdef DEBUG_SHARED_OBJ_CACHE
+        dbgs() << "addToSharedObjCache(): for the obj: " << (const void*)obj << " currEntryFunc: " << DRCHECKER::currEntryFunc->getName().str() << "\n";
+#endif
+        if (!obj || !DRCHECKER::currEntryFunc ||!obj->targetType) {
+#ifdef DEBUG_SHARED_OBJ_CACHE
+            dbgs() << "addToSharedObjCache(): for the obj: (!obj || !DRCHECKER::currEntryFunc ||!obj->targetType)\n";
+#endif
+            return 0;
+        }
+        DRCHECKER::sharedObjCache[obj->targetType][DRCHECKER::currEntryFunc].insert(obj);
+        return 1;
+    }
+
+    OutsideObject *getSharedObjFromCache(Type *ty) {
+#ifdef DEBUG_SHARED_OBJ_CACHE
+        dbgs() << "getSharedObjFromCache(): At the entrance. Type: " << InstructionUtils::getTypeStr(ty) << " currEntryFunc: " << DRCHECKER::currEntryFunc->getName().str() << "\n";
+#endif
+        if (!ty || !DRCHECKER::currEntryFunc) {
+#ifdef DEBUG_SHARED_OBJ_CACHE
+            dbgs() << "getSharedObjFromCache(): (!ty || !DRCHECKER::currEntryFunc)\n";
+#endif
+            return nullptr;
+        }
+        if (DRCHECKER::sharedObjCache.find(ty) == DRCHECKER::sharedObjCache.end()) {
+#ifdef DEBUG_SHARED_OBJ_CACHE
+            dbgs() << "getSharedObjFromCache(): No same-typed objs found in the cache.\n";
+#endif
+            return nullptr;
+        }
+        for (auto &e : DRCHECKER::sharedObjCache[ty]) {
+            if (e.first != DRCHECKER::currEntryFunc) {
+                for (OutsideObject *o : e.second) {
+#ifdef DEBUG_SHARED_OBJ_CACHE
+                    dbgs() << "getSharedObjFromCache(): Ty: " << InstructionUtils::getTypeStr(ty) << " currEntryFunc: " << DRCHECKER::currEntryFunc->getName().str() << " srcEntryFunc: " << e.first->getName().str();
+                    dbgs() << " obj ID: " << (const void*)o << "\n";
+#endif
+                    return o;
+                }
+            }else {
+                //This means there is already a same-typed object created previously when analyzing current entry function.
+                //TODO: should we re-use this previous obj or create a new one?
+#ifdef DEBUG_SHARED_OBJ_CACHE
+                dbgs() << "getSharedObjFromCache(): Found a previously created obj by the current entry func.\n";
+#endif
+                break;
+            }
+        }
+        return nullptr;
+    }
+
+    int createEmbObjChain(FieldDesc *fd, PointerPointsTo *pto, int limit) {
+        if (!fd || !pto || !pto->targetObject) {
+#ifdef DEBUG_CREATE_EMB_OBJ_CHAIN
+            dbgs() << "createEmbObjChain(): (!fd || !pto || !pto->targetObject)\n";
+#endif
+            return -1;
+        }
+        if (fd->fid.size() != fd->host_tys.size() || fd->fid.size() == 0) {
+#ifdef DEBUG_CREATE_EMB_OBJ_CHAIN
+            dbgs() << "createEmbObjChain(): #fid(" << fd->fid.size() << ") and #host_tys(" << fd->host_tys.size() << ") don't match!\n";
+#endif
+            return -1;
+        }
+        int i;
+        AliasObject *currHostObj = pto->targetObject;
+#ifdef DEBUG_CREATE_EMB_OBJ_CHAIN
+        dbgs() << "createEmbObjChain(): limit: " << limit << "\n";
+#endif
+        for (i = fd->fid.size() - 1; i > std::max(0,limit); --i) {
+#ifdef DEBUG_CREATE_EMB_OBJ_CHAIN
+            dbgs() << "createEmbObjChain(): current host obj type: " << InstructionUtils::getTypeStr(currHostObj->targetType) << "\n";
+            dbgs() << "createEmbObjChain(): Index " << i << ", about to create an embedded obj for: " << InstructionUtils::getTypeStr(fd->host_tys[i]) << " | " << fd->fid[i] << "\n";
+#endif
+            if (!InstructionUtils::same_types(fd->host_tys[i],currHostObj->targetType)) {
+#ifdef DEBUG_CREATE_EMB_OBJ_CHAIN
+                dbgs() << "!!! createEmbObjChain(): current host obj type doesn't match the record in the type desc vector, i: " << i << "\n";
+#endif
+                return i+1;
+            }
+            pto->targetObject = currHostObj;
+            pto->dstfieldId = fd->fid[i];
+            AliasObject *newObj = DRCHECKER::createEmbObj(pto->targetObject, fd->fid[i]);
+            if (!newObj) {
+                //TODO: what to do now...
+#ifdef DEBUG_CREATE_EMB_OBJ_CHAIN
+                dbgs() << "createEmbObjChain(): fail to get/create the embedded obj!\n";
+#endif
+                return i;
+            }
+            currHostObj = newObj;
+        }
+        if (InstructionUtils::same_types(currHostObj->targetType,fd->host_tys[i])) {
+            pto->targetObject = currHostObj;
+            pto->dstfieldId = fd->fid[i];
+            return i;
+        }else {
+            return i+1;
+        }
+        return -1;
+    }
+
+    int createHostObjChain(FieldDesc *fd, PointerPointsTo *pto, int limit) {
+        if (!fd || !pto || !pto->targetObject) {
+#ifdef DEBUG_CREATE_HOST_OBJ_CHAIN
+            dbgs() << "createHostObjChain(): (!fd || !pto || !pto->targetObject)\n";
+#endif
+            return -1;
+        }
+        if (fd->fid.size() != fd->host_tys.size() || fd->fid.size() == 0) {
+#ifdef DEBUG_CREATE_HOST_OBJ_CHAIN
+            dbgs() << "createHostObjChain(): #fid(" << fd->fid.size() << ") and #host_tys(" << fd->host_tys.size() << ") don't match!\n";
+#endif
+            return -1;
+        }
+        int i = fd->findHostTy(pto->targetObject->targetType);
+        for (++i; i < std::min(limit,(int)fd->fid.size()); ++i) {
+#ifdef DEBUG_CREATE_HOST_OBJ_CHAIN
+            dbgs() << "createHostObjChain(): current sub obj type: " << InstructionUtils::getTypeStr(pto->targetObject->targetType) << "\n";
+            dbgs() << "createHostObjChain(): Index " << i << ", about to create its host obj: " << InstructionUtils::getTypeStr(fd->host_tys[i]) << " | " << fd->fid[i] << "\n";
+#endif
+            AliasObject *hObj = DRCHECKER::createHostObj(pto->targetObject, fd->host_tys[i], fd->fid[i]);
+            if (hObj) {
+                //Successfully created.
+                pto->targetObject = hObj;
+                pto->dstfieldId = fd->fid[i];
+            }else {
+#ifdef DEBUG_CREATE_HOST_OBJ_CHAIN
+                dbgs() << "createHostObjChain(): fail to get/create the host obj!\n";
+#endif
+                return i;
+            }
+        }
+        return i;
+    }
+
 }

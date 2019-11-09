@@ -7,7 +7,7 @@ namespace DRCHECKER {
 
 #define DEBUG_GET_ELEMENT_PTR
 //#define DEBUG_ALLOCA_INSTR
-//#define DEBUG_CAST_INSTR
+#define DEBUG_CAST_INSTR
 //#define DEBUG_BINARY_INSTR
 //#define DEBUG_PHI_INSTR
 //#define DEBUG_LOAD_INSTR
@@ -617,7 +617,14 @@ void AliasAnalysisVisitor::visitCastInst(CastInst &I) {
         //Create new pointsTo info for the current instruction.
         std::set<PointerPointsTo*>* newPointsToInfo = new std::set<PointerPointsTo*>();
         for(PointerPointsTo *currPointsToObj: *srcPointsToInfo) {
-            //NOTE: the "targetObject" will not be copied.
+            if (!currPointsToObj->targetObject || !currPointsToObj->targetObject->targetType) {
+#ifdef DEBUG_CAST_INSTR
+                dbgs() << "AliasAnalysisVisitor::visitCastInst(): null targetObject or null type info!\n";
+#endif
+                //Discard this point-to.
+                continue;
+            }
+            //NOTE: the "targetObject" will not be copied (only the pointer to it will be copied).
             PointerPointsTo *newPointsToObj = (PointerPointsTo*)currPointsToObj->makeCopy();
             newPointsToObj->propogatingInstruction = &I;
             newPointsToObj->targetPointer = &I;
@@ -625,54 +632,97 @@ void AliasAnalysisVisitor::visitCastInst(CastInst &I) {
             newPointsToObj->targetObject->is_taint_src = currPointsToObj->targetObject->is_taint_src;
             Type *currTgtObjType = newPointsToObj->targetObject->targetType;
 #ifdef DEBUG_CAST_INSTR
-            dbgs() << "AliasAnalysisVisitor::visitCastInst: current target object: " << InstructionUtils::getTypeStr(currTgtObjType) << " | " << currPointsToObj->dstfieldId << "\n";
+            dbgs() << "AliasAnalysisVisitor::visitCastInst(): current target object: " << InstructionUtils::getTypeStr(currTgtObjType) << " | " << currPointsToObj->dstfieldId << "\n";
 #endif
             //--------below are special processings for the point-to information---------
-            if(!dstType->isVoidTy()) {
-                //cur obj type is i8* || i8
-                if((currTgtObjType->isPointerTy() && currTgtObjType->getContainedType(0)->isIntegerTy(8)) || currTgtObjType->isIntegerTy(8)){
-                    // No need to make copy
-                    if(dstType->isPointerTy()) {
-                        dstType = dstType->getContainedType(0);
-                    }
-                    newPointsToObj->targetObject->targetType = dstType;
-                    //We also need to re-taint the object (if necessary) since its type has changed.
-                    std::set<TaintFlag*> *fieldTaint = newPointsToObj->targetObject->getFieldTaintInfo(0);
-                    if (fieldTaint) {
-                        for (TaintFlag *tf : *fieldTaint) {
-                            newPointsToObj->targetObject->taintAllFieldsWithTag(tf);
+            if (dstPointeeTy) {
+                if (dyn_cast<CompositeType>(currTgtObjType)) {
+                    //Ok, our src pointer points to a certain field in a certain object, although the pointer value (i.e. address) remains the same, we need to convert
+                    //the pointer type, which is because multiple different typed objects can reside at the same location (e.g. heading composite field within the host object).
+                    //In this situation we need to modify the point-to objects to the embedded/host object (may need to create new objects when necessary) recursively 
+                    //(i.e. navigate the object hierarchy at the same location in the type desc vector).
+                    std::vector<FieldDesc*> *tydesc = InstructionUtils::getCompTyDesc(this->currState.targetDataLayout, dyn_cast<CompositeType>(currTgtObjType));
+                    int i_dstField = InstructionUtils::locateFieldInTyDesc(tydesc, newPointsToObj->dstfieldId);
+                    if (i_dstField < 0) {
+#ifdef DEBUG_CAST_INSTR
+                        dbgs() << "AliasAnalysisVisitor::visitCastInst(): failed to get the dst field type desc!\n";
+#endif
+                    }else if ((*tydesc)[i_dstField]->fid.size() != (*tydesc)[i_dstField]->host_tys.size()) {
+#ifdef DEBUG_CAST_INSTR
+                        dbgs() << "AliasAnalysisVisitor::visitCastInst(): #fid and #host_tys don't match!\n";
+#endif
+                    }else {
+                        //Does a same typed object as "dstPointeeTy" already exist?
+                        FieldDesc *fd = (*tydesc)[i_dstField];
+                        if (fd->findTy(dstPointeeTy) >= 0) {
+                            //This means we need to recursively get/create the embedded field objects.
+#ifdef DEBUG_CAST_INSTR
+                            dbgs() << "AliasAnalysisVisitor::visitCastInst(): try to get/create embedded objects recursively to match the dstPointeeTy.\n";
+#endif
+                            int limit = fd->findHostTy(dstPointeeTy);
+                            //"limit" can be -1 if the dstPointeeTy is not composite, in which case we will create embedded objects for all elements in fd->host_tys.
+                            DRCHECKER::createEmbObjChain(fd,newPointsToObj,limit);
+                        }else if (dyn_cast<CompositeType>(dstPointeeTy)) {
+                            //This means we cannot match the dstPointeeTy inside current host object, we possibly need to create the container object.
+                            std::vector<FieldDesc*> *dst_tydesc = InstructionUtils::getCompTyDesc(this->currState.targetDataLayout, dyn_cast<CompositeType>(dstPointeeTy));
+                            if (dst_tydesc && dst_tydesc->size() > 0) {
+                                FieldDesc *dst_fd = (*dst_tydesc)[0];
+                                int i_srcty = dst_fd->findHostTy(currTgtObjType);
+                                if (dst_fd->fid.size() == dst_fd->host_tys.size() && dst_fd->findTy(currTgtObjType) >= 0 && i_srcty >= 0) {
+                                    DRCHECKER::createHostObjChain(dst_fd, newPointsToObj, dst_fd->fid.size());
+                                }else {
+#ifdef DEBUG_CAST_INSTR
+                                    dbgs() << "AliasAnalysisVisitor::visitCastInst(): dstPointeeTy's type desc is not correct, or it doesn't contain the srcPointeeTy at the head.\n";
+#endif
+                                }
+                            }else {
+#ifdef DEBUG_CAST_INSTR
+                                dbgs() << "AliasAnalysisVisitor::visitCastInst(): failed to get the type desc for the composite dstPointeeTy.\n";
+#endif
+                            }
+                        }else {
+#ifdef DEBUG_CAST_INSTR
+                            dbgs() << "AliasAnalysisVisitor::visitCastInst(): dstPointeeTy is not composite and we cannot match it from the type desc of current host object, skip...\n";
+#endif
                         }
                     }
-                }else if (srcPointeeTy && srcPointeeTy->isStructTy() && dstPointeeTy && dstPointeeTy->isStructTy() &&
-                          currTgtObjType == srcPointeeTy && newPointsToObj->dstfieldId == 0){
-                    //TODO: what if the pointee is an embedded struct (dstfieldId != 0) in the host obj...
-                    //hz: what if src pointer is not i8*?
-                    //hz: we need make a copy of original targetObject and change its type to dstType,
-                    //hz: we also need to properly handle the taint information.
+                }else /*if (dyn_cast<CompositeType>(currTgtObjType))*/{
+                    //This is a little strange since we now have an non-composite AliasObject...
+                    //Here we consider a case like a i8* is casted to struct*, where we can directly change the AliasObject's type and taint it properly. 
+                    //This is often the case for kmalloc'ed() memory region which is initially i8* and then used as a struct storage.
+                    if (dstPointeeTy && dyn_cast<CompositeType>(dstPointeeTy)) {
 #ifdef DEBUG_CAST_INSTR
-                    dbgs() << "About to copy src object to dst object of a different type.\n";
+                        dbgs() << "AliasAnalysisVisitor::visitCastInst(): casting a non-composite pointer to a composite one, directly change the targetObject's type...\n";
 #endif
-                    AliasObject *newTargetObj = this->x_type_obj_copy(newPointsToObj->targetObject,dstPointeeTy);
-                    if (newTargetObj){
-                        newPointsToObj->targetObject = newTargetObj;
-                    }else{
-                        //TODO: what to do now..
+                        newPointsToObj->targetObject->targetType = dstPointeeTy;
+                        //We also need to re-taint the object (if necessary) since its type has changed.
+                        std::set<TaintFlag*> *fieldTaint = newPointsToObj->targetObject->getFieldTaintInfo(0);
+                        if (fieldTaint) {
 #ifdef DEBUG_CAST_INSTR
-                        dbgs() << "x_type_obj_copy failed..\n";
+                            dbgs() << "AliasAnalysisVisitor::visitCastInst(): trying to re-taint the converted AliasObject, #fieldTaint: " << fieldTaint->size() << "\n";
+#endif
+                            for (TaintFlag *tf : *fieldTaint) {
+                                newPointsToObj->targetObject->taintAllFieldsWithTag(tf);
+                            }
+                        }
+                    }else {
+#ifdef DEBUG_CAST_INSTR
+                        dbgs() << "AliasAnalysisVisitor::visitCastInst(): try to cast a pointer to a non-composite type to another... simply propagate the point-to.\n";
 #endif
                     }
                 }
-            }else{
-                //TODO: hz: what if dst pointer is void?
+            }else /*if (dstPointeeTy)*/{
 #ifdef DEBUG_CAST_INSTR
-                dbgs() << "dstType is void...\n";
+                dbgs() << "AliasAnalysisVisitor::visitCastInst(): the cast destination is not a pointer, simply propagate the point-to record from src to dst...\n";
 #endif
             }
             //--------above are special processings for the point-to information---------
             newPointsToInfo->insert(newPointsToInfo->end(), newPointsToObj);
         }
         // Update the points to Info of the current instruction.
-        this->updatePointsToObjects(&I, newPointsToInfo);
+        if (newPointsToInfo->size() > 0) {
+            this->updatePointsToObjects(&I, newPointsToInfo);
+        }
     }else if (dstType->isPointerTy()) {
         //hz: TODO: do we need to create new OutsideObject here of the dstType?
 #ifdef DEBUG_CAST_INSTR
@@ -1219,33 +1269,12 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
         // e.g. [[[   ]    ]     ], in this case the type desc will record all these sub composite fields at the head and all #fid is 0,
         //while we don't really want to create the embedded object up to the innermost heading composite field, instead we stop at the outermost
         //head composite field here. 
-        while (!fd->fid[++limit]);
-        for (i = fd->fid.size() - 1; i > std::max(0,limit); --i) {
+        while (++limit < fd->fid.size() && !fd->fid[limit]);
+        int r = DRCHECKER::createEmbObjChain(fd,pto,limit);
+        if (r > limit) {
+            //There must be something wrong in the createEmbObjChain()...
 #ifdef DEBUG_GET_ELEMENT_PTR
-            dbgs() << "AliasAnalysisVisitor::bit2Field(): current host obj type: " << InstructionUtils::getTypeStr(pto->targetObject->targetType) << "\n";
-            dbgs() << "AliasAnalysisVisitor::bit2Field(): Round " << i << ", about to create an embedded obj for: " << InstructionUtils::getTypeStr(fd->host_tys[i]) << " | " << fd->fid[i] << "\n";
-#endif
-            if (!InstructionUtils::same_types(fd->host_tys[i],pto->targetObject->targetType)) {
-#ifdef DEBUG_GET_ELEMENT_PTR
-                dbgs() << "!!! AliasAnalysisVisitor::bit2Field(): current host obj type doesn't match the record in the type desc vector, i: " << i << "\n";
-#endif
-                return -1;
-            }
-            AliasObject *newObj = DRCHECKER::createEmbObj(pto->targetObject, fd->fid[i]);
-            if (!newObj) {
-                //TODO: what to do now...
-#ifdef DEBUG_GET_ELEMENT_PTR
-                dbgs() << "AliasAnalysisVisitor::bit2Field(): fail to get/create the embedded struct!\n";
-#endif
-                return -1;
-            }
-            pto->targetObject = newObj;
-        }
-        if (InstructionUtils::same_types(fd->host_tys[i],pto->targetObject->targetType)) {
-            pto->dstfieldId = fd->fid[i];
-        }else {
-#ifdef DEBUG_GET_ELEMENT_PTR
-            dbgs() << "!!! AliasAnalysisVisitor::bit2Field(): current host obj type doesn't match the record in the type desc vector, i: " << i << "\n";
+            dbgs() << "!!! AliasAnalysisVisitor::bit2Field(): something wrong w/ the createEmbObjChain(), point-to result will be unreliable, discard..\n";
 #endif
             return -1;
         }
