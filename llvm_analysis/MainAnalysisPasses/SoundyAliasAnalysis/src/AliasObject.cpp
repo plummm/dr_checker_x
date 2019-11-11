@@ -8,6 +8,22 @@ namespace DRCHECKER {
 
     Function *currEntryFunc = nullptr;
 
+    bool validTyForOutsideObj(Type *ty) {
+        if (!ty || !dyn_cast<CompositeType>(ty)) {
+#ifdef DEBUG_CREATE_DUMMY_OBJ_IF_NULL
+            dbgs() << "validTyForOutsideObj(): it's not a composite type, cannot create the outside obj!\n";
+#endif
+            return false;
+        }
+        if (dyn_cast<StructType>(ty) && dyn_cast<StructType>(ty)->isOpaque()) {
+#ifdef DEBUG_CREATE_DUMMY_OBJ_IF_NULL
+            dbgs() << "validTyForOutsideObj(): it's an opaque struct type, cannot create the outside obj!\n";
+#endif
+            return false;
+        }
+        return true;
+    }
+
     void AliasObject::fetchPointsToObjects_log(long srcfieldId, std::set<std::pair<long, AliasObject*>> &dstObjects,
             Instruction *targetInstr, bool create_arg_obj) {
         dbgs() << "\n*********fetchPointsToObjects**********\n";
@@ -231,10 +247,13 @@ namespace DRCHECKER {
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
             dbgs() << "fetchPointsToObjects(): the field pointee type is: " << InstructionUtils::getTypeStr(e_pointto_ty) << " real pointee type: " << InstructionUtils::getTypeStr(real_ty) << "\n";
 #endif
-            if (!real_ty || !dyn_cast<CompositeType>(real_ty)) {
-                return;
-            }
             if(create_arg_obj || hostObj->isFunctionArg() || hostObj->isOutsideObject() || hostObj->isHeapLocation()) {
+                if (!validTyForOutsideObj(real_ty)) {
+#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
+                    dbgs() << "fetchPointsToObjects(): the pointee type is invalid for an Outside object! Return...\n";
+#endif
+                    return;
+                }
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
                 dbgs() << "Creating a new dummy AliasObject...\n";
 #endif
@@ -373,10 +392,7 @@ namespace DRCHECKER {
 #ifdef DEBUG_CREATE_DUMMY_OBJ_IF_NULL
         dbgs() << "Type-based createOutsideObj(): " << InstructionUtils::getTypeStr(ty) << "\n";
 #endif
-        if (!ty || !dyn_cast<CompositeType>(ty)) {
-#ifdef DEBUG_CREATE_DUMMY_OBJ_IF_NULL
-            dbgs() << "Type-based createOutsideObj(): it's not a composite type, cannot create the outside obj!\n";
-#endif
+        if (!validTyForOutsideObj(ty)) {
             return nullptr;
         }
         OutsideObject *newObj = new OutsideObject(nullptr, ty);
@@ -432,7 +448,7 @@ namespace DRCHECKER {
         dbgs() << "\n";
 #endif
         //First do some sanity checks, we need to make sure that "p" is a pointer of a composite type.
-        if (!(p && p->getType()->isPointerTy() && dyn_cast<CompositeType>(p->getType()->getPointerElementType()))) {
+        if (!(p && p->getType()->isPointerTy() && validTyForOutsideObj(p->getType()->getPointerElementType()))) {
 #ifdef DEBUG_CREATE_DUMMY_OBJ_IF_NULL
             dbgs() << "createOutsideObj(): It's not a pointer to the composite type! Cannot create an outside object!\n";
 #endif

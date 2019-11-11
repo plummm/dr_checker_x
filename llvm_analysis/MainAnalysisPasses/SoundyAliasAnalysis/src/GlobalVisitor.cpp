@@ -17,7 +17,7 @@ namespace DRCHECKER {
 #define DEBUG_BB_VISIT
 #define FUNC_BLACKLIST
 #define HARD_LOOP_LIMIT
-#define MAX_LOOP_CNT 3
+#define MAX_LOOP_CNT 1
 #define SKIP_ASAN_INST
 
     // Basic visitor functions.
