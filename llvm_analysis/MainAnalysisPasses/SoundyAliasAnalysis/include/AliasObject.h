@@ -35,6 +35,7 @@ using namespace llvm;
 #define DEBUG_CREATE_EMB_OBJ_CHAIN
 #define DEBUG_CREATE_HOST_OBJ
 #define DEBUG_CREATE_HOST_OBJ_CHAIN
+#define DEBUG_INFER_CONTAINER
 #define DEBUG_SPECIAL_FIELD_POINTTO
 #define DEBUG_SHARED_OBJ_CACHE
 
@@ -1239,18 +1240,22 @@ namespace DRCHECKER {
 
     extern int matchFieldsInDesc(Type *ty0, Type *ty1, int bitoff, std::vector<FieldDesc*> *fds, std::vector<unsigned> *res);
 
-    extern void sortCandStruct(std::vector<CandStructInf*> *cands, Instruction *I);
+    extern void sortCandStruct(std::vector<CandStructInf*> *cands, std::set<Instruction*> *insts);
 
     //Given 2 field types and their distance (in bits), return a list of candidate struct types.
-    extern FieldDesc *getStructTysFromFieldDistance(DataLayout *dl, Type *ty0, Type *ty1, int bitoff, Instruction *I);
+    extern std::vector<CandStructInf*> *getStructFrom2Fields(DataLayout *dl, Type *ty0, Type *ty1, long bitoff, Module *mod);
 
     //hz: this method is mainly designed for the very common "container_of()" usage in the kernel,
     //we try to infer the host obj (i.e. the container) of the arg "obj" and either get (if it's already embedded in a known host obj)
     //or create its host object.
-    //Arg: "bitoff" is the bit distance between "obj" and the other field (pointed to by the result of the "I") in the host object.
-    //return: return a "PointerPointsTo" that indicates both the host object and the fieldId within it that the "obj" sits.
-    //NOTE: we only return the closest parent object we can find, the recursive creation of multi-layer objects is handled by the caller.
-    extern PointerPointsTo *getOrCreateHostObj(DataLayout *dl, AliasObject *obj, Instruction *propInst, GEPOperator *I, int bitoff);
+    extern PointerPointsTo *getOrCreateHostObj(AliasObject *obj);
+
+    //This function assumes that "v" is a i8* srcPointer of a single-index GEP and it points to the "bitoff" inside an object of "ty",
+    //our goal is to find out the possible container objects of the target object of "ty" (the single-index GEP aims to locate a field
+    //that is possibly outside the scope of current "ty" so we need to know the container), to do this we will analyze all similar GEPs
+    //that use the same "v" as the srcPointer.
+    //Return: we return a "CandStructInf" to indicate the location of the original "bitoff" inside "ty" in the larger container object.
+    extern CandStructInf *inferContainerTy(Module *m,Value *v,Type *ty,long bitoff);
 
     //hz: when analyzing multiple entry functions, they may share some objects:
     //(0) explicit global objects, we don't need to take special care of these objects since they are pre-created before all analysis and will naturally shared.

@@ -864,7 +864,7 @@ namespace DRCHECKER {
             if (!pdesc) {
                 return nullptr;
             }
-            unsigned step = dl->getTypeSizeInBits(aty);
+            unsigned step = dl->getTypeAllocSizeInBits(aty);
             for (unsigned i = 0; i < seqTy->getNumElements(); ++i) {
                 for (unsigned j = 0; j < pdesc->size(); ++j) {
                     FieldDesc *fd = new FieldDesc((*pdesc)[j]);

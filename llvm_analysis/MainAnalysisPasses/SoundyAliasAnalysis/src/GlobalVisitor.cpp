@@ -373,17 +373,17 @@ namespace DRCHECKER {
                     currCallback->setLoopIndicator(true);
                 }
 
-                for(unsigned int l=0; l <= opt_num_to_analyze; l++) {
-                    for (unsigned int j = 0; j < currSCC->size(); j++) {
-                        BasicBlock *currBB = (*currSCC)[j];
-                        this->visit(currBB);
-                    }
+                for(unsigned int l=0; l < opt_num_to_analyze; l++) {
                     // ensure that loop has been analyzed minimum number of times.
                     if(l >= (opt_num_to_analyze-1)) {
                         this->inside_loop = false;
                         for(VisitorCallback *currCallback:allCallbacks) {
                             currCallback->setLoopIndicator(false);
                         }
+                    }
+                    for (unsigned int j = 0; j < currSCC->size(); j++) {
+                        BasicBlock *currBB = (*currSCC)[j];
+                        this->visit(currBB);
                     }
                 }
 #ifdef DEBUG_GLOBAL_ANALYSIS

@@ -57,6 +57,12 @@ namespace DRCHECKER {
         std::vector<FieldDesc*> *fds;
         std::vector<int> ind;
         int score = 0;
+
+        bool same(CandStructInf *c) {
+            if (!c)
+                return false;
+            return (this->fds == c->fds && this->ind == c->ind);
+        }
     };
 
     class InstructionUtils {

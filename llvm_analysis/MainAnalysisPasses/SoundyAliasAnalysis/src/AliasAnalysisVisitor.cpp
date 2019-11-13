@@ -1178,12 +1178,15 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
             //We'll lose the point-to in this case.
             return -1;
         }
-        long resOffset = 0;
+        long dstOffset = 0, resOffset = 0, bits = 0;
         std::vector<FieldDesc*> *tydesc = nullptr;
+        int i_dstfield = 0;
+        AliasObject *targetObj = nullptr;
+        Type *targetObjTy = nullptr;
         while(true) {
-            AliasObject *targetObj = pto->targetObject;
+            targetObj = pto->targetObject;
             long dstfield = pto->dstfieldId;
-            Type *targetObjTy = targetObj->targetType;
+            targetObjTy = targetObj->targetType;
 #ifdef DEBUG_GET_ELEMENT_PTR
             dbgs() << "AliasAnalysisVisitor::bit2Field(): host obj: " << InstructionUtils::getTypeStr(targetObjTy) << " | " << dstfield << " obj ID: " << (const void*)targetObj << "\n";
 #endif
@@ -1207,7 +1210,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
 #endif
                 return -1;
             }
-            int i_dstfield = InstructionUtils::locateFieldInTyDesc(tydesc,dstfield);
+            i_dstfield = InstructionUtils::locateFieldInTyDesc(tydesc,dstfield);
             if (i_dstfield < 0) {
 #ifdef DEBUG_GET_ELEMENT_PTR
                 dbgs() << "!!! AliasAnalysisVisitor::bit2Field(): we cannot locate the dst field desc in the type desc vector, return...\n";
@@ -1215,41 +1218,82 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
                 return -1;
             }
             //NOTE: both "dstOffset" and "bits" can be divided by 8, "bits" can be negative.
-            long dstOffset = (*tydesc)[i_dstfield]->bitoff;
-            long bits = index * (long)bitWidth;
+            dstOffset = (*tydesc)[i_dstfield]->bitoff;
+            bits = index * (long)bitWidth;
             resOffset = dstOffset + bits;
 #ifdef DEBUG_GET_ELEMENT_PTR
             dbgs() << "AliasAnalysisVisitor::bit2Field(): dstOffset: " << dstOffset << " bits: " << bits << " resOffset: " << resOffset << "\n";
 #endif
-            if (resOffset < 0 || (uint64_t)resOffset >= dl->getTypeSizeInBits(targetObjTy)) {
+        	//NOTE: llvm DataLayout class has three kinds of type size: 
+        	//(1) basic size, for a composite type, this is the sum of the size of each field type.
+        	//(2) store size, a composite type may need some paddings between its fields for the alignment.
+        	//(3) alloc size, two successive composite types may need some paddings between each other for alignment.
+        	//For our purpose, we need the real size for a single type, so we use "store size", note that if the type is array, "store size" already takes the padding
+        	//between each element into account.
+            if (resOffset < 0 || (uint64_t)resOffset >= dl->getTypeStoreSizeInBits(targetObjTy)) {
                 //This is possibly the case of "container_of()" where one tries to access the host object from within the embedded object,
                 //what we should do here is try to figure out what's the host object and adjust the point-to accordingly.
 #ifdef DEBUG_GET_ELEMENT_PTR
                 dbgs() << "AliasAnalysisVisitor::bit2Field(): resOffset (in bits) out-of-bound, possibly the container_of() case, trying to figure out the host object...\n";
 #endif
-                PointerPointsTo *host_pto = getOrCreateHostObj(dl,targetObj,propInst,I,resOffset+dstOffset);
-                if (!host_pto || !host_pto->targetObject) {
+				if (targetObj->parent && targetObj->parent->targetType) {
+                    //Ok, parent object on file.
 #ifdef DEBUG_GET_ELEMENT_PTR
-                    dbgs() << "AliasAnalysisVisitor::bit2Field(): Fail to getOrCreateHostObj().\n";
+                    dbgs() << "AliasAnalysisVisitor::bit2Field(): parent object on file, try it..\n";
 #endif
-                    return -1;
-                }
-                pto->targetObject = host_pto->targetObject;
-                if (resOffset < 0) {
-                    pto->dstfieldId = host_pto->dstfieldId;
+                    pto->targetObject = targetObj->parent;
+                    pto->dstfieldId = targetObj->parent_field;
                     bitWidth = 1;
                     index = resOffset;
                 }else {
-                    pto->dstfieldId = host_pto->dstfieldId + 1;
-                    bitWidth = 1;
-                    index = (uint64_t)resOffset - dl->getTypeSizeInBits(targetObjTy);
+                    break;
                 }
             }else {
                 break;
             }
         }
+        //Have we got the parent object that can hold the resOffset?
+        if (resOffset < 0 || (uint64_t)resOffset >= dl->getTypeStoreSizeInBits(pto->targetObject->targetType)) {
+            //No.. We need infer the container type...
+#ifdef DEBUG_GET_ELEMENT_PTR
+            dbgs() << "AliasAnalysisVisitor::bit2Field(): the recorded parent object is not enough, we need to infer the unknown container object...\n";
+#endif
+            CandStructInf *floc = DRCHECKER::inferContainerTy(propInst->getModule(),I->getPointerOperand(),pto->targetObject->targetType,dstOffset);
+            if (!floc || !floc->fds || floc->ind[0] < 0 || floc->ind[0] >= floc->fds->size()) {
+#ifdef DEBUG_GET_ELEMENT_PTR
+                dbgs() << "AliasAnalysisVisitor::bit2Field(): failed to infer the container type...\n";
+#endif
+                return -1;
+            }
+            //Check whether the container can contain the target offset (in theory this should already been verified by inferContainerTy())
+            tydesc = floc->fds;
+            i_dstfield = floc->ind[0];
+            dstOffset = (*tydesc)[i_dstfield]->bitoff;
+            resOffset = dstOffset + bits;
+            targetObjTy = (*tydesc)[0]->host_tys[(*tydesc)[0]->host_tys.size()-1];
+            if (resOffset < 0 || (uint64_t)resOffset >= dl->getTypeStoreSizeInBits(targetObjTy)) {
+#ifdef DEBUG_GET_ELEMENT_PTR
+                dbgs() << "!!! AliasAnalysisVisitor::bit2Field(): the inferred container object still cannot hold the target bitoff...\n";
+#endif
+                return -1;
+            }
+#ifdef DEBUG_GET_ELEMENT_PTR
+            dbgs() << "AliasAnalysisVisitor::bit2Field(): successfully identified the container object, here is the FieldDesc of the original pointee bitoff:\n";
+            (*tydesc)[i_dstfield]->print(dbgs());
+            dbgs() << "AliasAnalysisVisitor::bit2Field(): dstOffset: " << dstOffset << " bits: " << bits << " resOffset: " << resOffset << "\n";
+#endif
+            //Ok, we may need to create the host object chain for the location pointed to by the GEP base pointer if necessary.
+            int limit = (*tydesc)[i_dstfield]->host_tys.size();
+            DRCHECKER::createHostObjChain((*tydesc)[i_dstfield],pto,limit);
+            if (!InstructionUtils::same_types(pto->targetObject->targetType,targetObjTy)) {
+#ifdef DEBUG_GET_ELEMENT_PTR
+                dbgs() << "!!! AliasAnalysisVisitor::bit2Field(): incomplete creation of the host obj chain.\n";
+#endif
+                return -1;
+            }
+        }
         //Ok, now we are sure that the target "resOffset" will not exceed the current host object since we've created all container objects by desire.
-        //Next, we need to see whether this "resOffset" is inside an embedded composite typed field within the host object, and recursively create the embedded object when necessary.
+        //Next, we need to see whether this "resOffset" is inside an embedded composite typed field within the container object, and recursively create the embedded object when necessary.
         int i_resoff = InstructionUtils::locateBitsoffInTyDesc(tydesc,resOffset);
         if (i_resoff < 0) {
 #ifdef DEBUG_GET_ELEMENT_PTR
@@ -1264,7 +1308,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
 #endif
             return -1;
         }
-        int limit = -1, i;
+        int limit = -1;
         //NOTE: at a same bit offset there can be a composite field who recursively contains multiple composite sub-fields at its head:
         // e.g. [[[   ]    ]     ], in this case the type desc will record all these sub composite fields at the head and all #fid is 0,
         //while we don't really want to create the embedded object up to the innermost heading composite field, instead we stop at the outermost
@@ -1549,7 +1593,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
                 if (newPointsToInfo->size() == 1) {
                     //TargetPointer only has one point-to record.
 #ifdef DEBUG_STORE_INSTR
-                    dbgs() << "There is only 1 point-to record for the TargetPointer, *might* (still need to see #fieldPointsTo) need a strong update.\n";
+                    dbgs() << "There is only 1 point-to record for the TargetPointer, a strong update will happen if #fieldPointsTo <= 1.\n";
 #endif
                     PointerPointsTo *dstPointsToObject = *(newPointsToInfo->begin());
                     // we have a pointer which points to only one object.

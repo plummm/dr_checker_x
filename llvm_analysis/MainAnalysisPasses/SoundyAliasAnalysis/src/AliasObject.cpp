@@ -549,6 +549,16 @@ namespace DRCHECKER {
                 dbgs() << "the emb obj in cache has a different type than expected: " << InstructionUtils::getTypeStr(newObj->targetType) << "\n";
             }
 #endif
+            if (newObj) {
+                //Erase the parent record of the existing emb obj.
+                if (newObj->parent == hostObj) {
+#ifdef DEBUG_CREATE_EMB_OBJ
+                    dbgs() << "createEmbObj(): try to erase the existing emb obj's parent record since its parent is also this hostObj.\n";
+#endif
+                    newObj->parent = nullptr;
+                    newObj->parent_field = 0;
+                }
+            }
             //Need to create a new AliasObject for the embedded struct.
             if (v) {
                 newObj = DRCHECKER::createOutsideObj(v, currPointsTo, false, nullptr);
@@ -598,6 +608,26 @@ namespace DRCHECKER {
 #endif
         if (dyn_cast<SequentialType>(hostTy)) {
             field = 0;
+        }
+        //Have we already created this parent object?
+        if (targetObj->parent) {
+            if (InstructionUtils::same_types(targetObj->parent->targetType,hostTy) && targetObj->parent_field == field) {
+#ifdef DEBUG_CREATE_HOST_OBJ
+                dbgs() << "createHostObj(): we have created this parent object before!\n";
+#endif
+                return targetObj->parent;
+            }else {
+                //TODO: what to do in this case... for now let's just re-assign the parent object.
+#ifdef DEBUG_CREATE_HOST_OBJ
+                dbgs() << "!!! createHostObj(): found a previously created parent object but w/ different field or type!\n";
+                dbgs() << "!!! createHostObj(): previous parent: " << InstructionUtils::getTypeStr(targetObj->parent->targetType) << " | " << targetObj->parent_field << ", id: " << (const void*)targetObj->parent << "\n";
+#endif
+                if (targetObj->parent->embObjs.find(targetObj->parent_field) != targetObj->parent->embObjs.end()) {
+                    targetObj->parent->embObjs[targetObj->parent_field] = nullptr;
+                }
+                targetObj->parent = nullptr;
+                targetObj->parent_field = 0;
+            }
         }
         if (!InstructionUtils::isIndexValid(hostTy,field)) {
 #ifdef DEBUG_CREATE_HOST_OBJ
@@ -676,13 +706,15 @@ namespace DRCHECKER {
         return found;
     }
 
-    void sortCandStruct(std::vector<CandStructInf*> *cands, Instruction *I) {
+    void sortCandStruct(std::vector<CandStructInf*> *cands, std::set<Instruction*> *insts) {
         if (!cands || !cands->size()) {
             return;
         }
-        Function *func = nullptr;
-        if (I) {
-            func = I->getFunction();
+        std::set<Function*> funcs;
+        if (insts) {
+            for (Instruction *i : *insts) {
+                funcs.insert(i->getFunction());
+            }
         }
         for (CandStructInf *c : *cands) {
             std::vector<FieldDesc*> *fds = c->fds;
@@ -694,16 +726,21 @@ namespace DRCHECKER {
             }
             Type *hty = fd0->host_tys[fd0->host_tys.size()-1];
             //If the host type is referred in the target function, then we will have a high confidence.
-            if (InstructionUtils::isTyUsedByFunc(hty,func)) {
-                c->score += 1000;
+            for (Function *func : funcs) {
+                if (InstructionUtils::isTyUsedByFunc(hty,func)) {
+                    c->score += 1000;
+                }
             }
             //TODO: if the type name is similar to the function name, then we will give it a high score.
             //
+            /*
             //Observation: it's likely that the #field of ty1 is 0 when "bitoff" is negative. 
             if (c->ind[1] == 0) {
                 c->score += 500;
             }
-            //TODO: consider the size of the candidate struct?
+            */
+            //Give a preference to the smaller container..
+            c->score -= (*fds)[fds->size()-1]->bitoff;
         }
         std::sort(cands->begin(),cands->end(),[](CandStructInf *c0, CandStructInf *c1){
             return (c0->score - c1->score > 0);
@@ -711,20 +748,15 @@ namespace DRCHECKER {
         return;
     }
 
-    FieldDesc *getStructTysFromFieldDistance(DataLayout *dl, Type *ty0, Type *ty1, int bitoff, Instruction *I) {
-        if (!I || !ty0 || !ty1) {
-            return nullptr;
-        }
-        Function *func = I->getFunction();
-        Module *mod = I->getModule();
-        if (!mod || !dl) {
+    std::vector<CandStructInf*> *getStructFrom2Fields(DataLayout *dl, Type *ty0, Type *ty1, long bitoff, Module *mod) {
+        if (!dl || !mod || !ty0 || !ty1) {
             return nullptr;
         }
 #ifdef DEBUG_CREATE_HOST_OBJ
         dbgs() << "getStructTysFromFieldDistance(): Trying to identify a struct that can match the distanced fields.\n";
 #endif
         std::vector<StructType*> tys = mod->getIdentifiedStructTypes();
-        std::vector<CandStructInf*> cands;
+        std::vector<CandStructInf*> *cands = new std::vector<CandStructInf*>();
         for (StructType *t : tys) {
             std::vector<FieldDesc*> *tydesc = InstructionUtils::getCompTyDesc(dl,t);
             if (!tydesc) {
@@ -756,31 +788,21 @@ namespace DRCHECKER {
                 inf->fds = tydesc;
                 inf->ind.push_back(res[i]);
                 inf->ind.push_back(res[i+1]);
-                cands.push_back(inf);
+                cands->push_back(inf);
             }
         }
 #ifdef DEBUG_CREATE_HOST_OBJ
-        dbgs() << "getStructTysFromFieldDistance(): #cands: " << cands.size() << "\n";
+        dbgs() << "getStructTysFromFieldDistance(): #cands: " << cands->size() << "\n";
 #endif
-        //We need to select a best candidate to return...
-        sortCandStruct(&cands,I);
-        //Return the hisghest ranked candidate.
-        FieldDesc *rfd = nullptr;
-        if (cands.size() > 0) {
-            rfd = (*(cands[0]->fds))[cands[0]->ind[0]];
-        }
-        for (CandStructInf *c : cands) {
-            free(c);
-        }
-        return rfd;
+        return cands;
     }
 
-    PointerPointsTo *getOrCreateHostObj(DataLayout *dl, AliasObject *obj, Instruction *propInst, GEPOperator *I, int bitoff) {
+    PointerPointsTo *getOrCreateHostObj(AliasObject *obj) {
         if (!obj) {
             return nullptr;
         }
 #ifdef DEBUG_CREATE_HOST_OBJ
-        dbgs() << "getOrCreateHostObj(): element obj: " << InstructionUtils::getTypeStr(obj->targetType) << " bitoff: " << bitoff << "\n";
+        dbgs() << "getOrCreateHostObj(): element obj: " << InstructionUtils::getTypeStr(obj->targetType) << "\n";
 #endif
         PointerPointsTo *pto = new PointerPointsTo();
         //Is this an embedded object in a known host object?
@@ -792,75 +814,9 @@ namespace DRCHECKER {
             pto->dstfieldId = obj->parent_field;
             return pto;
         }
-        //A typical and common scenario in which we need to call "getOrCreateHostObj()" is that in a "GEP i8 *ptr, index" IR the "ptr" points to
-        //a certain object but is converted to i8*. then the "index" calculates a pointer pointing outside this object...
-        //To find the host obj, what we want to do is to iterate over all struct types in the current module, then find the correct type(s)
-        //that has properly distanced field types that matches both the base "ptr" and the pointer type produced by the "GEP" (we need to
-        //figure out the true pointer type from the subsequent cast IRs).
-        if (I && I->getNumOperands() == 2) {
-            Type *ty0 = obj->targetType;
-            if (!ty0) {
-                return nullptr;
-            }
-            //Ok, get the type of the pointer generated by the "GEP".
-            Type *ty1 = nullptr;
-            for (User *u : I->users()) {
-                CastInst *cinst = dyn_cast<CastInst>(u);
-                if (!cinst) {
-                    continue;
-                }
-                Type *dty = cinst->getDestTy();
-                if (!dty || !dty->isPointerTy()) {
-                    continue;
-                }
-                ty1 = dty->getPointerElementType();
-                if (dyn_cast<CompositeType>(ty1) || ty1->isPointerTy()) {
-                    break;
-                }
-            }
-#ifdef DEBUG_CREATE_HOST_OBJ
-            dbgs() << "getOrCreateHostObj(): ty1: " << InstructionUtils::getTypeStr(ty1) << "\n";
-#endif
-            if (ty1) {
-                FieldDesc *fd = getStructTysFromFieldDistance(dl, ty0, ty1, bitoff, propInst);
-                if (fd && fd->host_tys.size() > 0 && fd->host_tys.size() == fd->fid.size()) {
-                    //Try to create the host obj.
-                    Type *hty = nullptr;
-                    unsigned fid = 0;
-                    if (dyn_cast<CompositeType>(ty0)) {
-                        int i;
-                        for (i = 0; i < fd->fid.size() - 1; ++i) {
-                            if (InstructionUtils::same_types(fd->host_tys[i],ty0)) {
-                                break;
-                            }
-                        }
-                        if (i < fd->fid.size() - 1) {
-                            hty = fd->host_tys[i+1];
-                            fid = fd->fid[i+1];
-                        }else {
-#ifdef DEBUG_CREATE_HOST_OBJ
-                            dbgs() << "getOrCreateHostObj(): Failed: if (i < fd->fid.size() - 1), there should be sth wrong w/ the type desc.\n";
-#endif
-                            return nullptr;
-                        }
-                    }else {
-                        hty = fd->host_tys[0];
-                        fid = fd->fid[0];
-                    }
-                    AliasObject *hobj = DRCHECKER::createHostObj(obj,hty,fid);
-                    if (hobj) {
-                        pto->targetObject = hobj;
-                        pto->dstfieldId = fid;
-                        return pto;
-                    }else {
-#ifdef DEBUG_CREATE_HOST_OBJ
-                        dbgs() << "getOrCreateHostObj(): Failed to create the host object!\n";
-#endif
-                    }
-                }else {
-                    dbgs() << "!!! getOrCreateHostObj(): cannot get a candidate host struct! null fd: " << (fd ? "False" : "True") << "\n";
-                }
-            }
+        Type *ty0 = obj->targetType;
+        if (!ty0) {
+            return nullptr;
         }
         /*
         //It's not embedded in any known object, but we can still do some inferences here, consider a very common case:
@@ -889,6 +845,149 @@ namespace DRCHECKER {
         }
         */
         return nullptr;
+    }
+
+    //A typical and common scenario in which we need to call "getOrCreateHostObj()" is that in a "GEP i8 *ptr, index" IR the "ptr" points to
+    //a certain object but is converted to i8*. then the "index" calculates a pointer pointing outside this object...
+    //To find the host obj, what we want to do is to iterate over all struct types in the current module, then find the correct type(s)
+    //that has properly distanced field types that matches both the base "ptr" and the pointer type produced by the "GEP" (we need to
+    //figure out the true pointer type from the subsequent cast IRs).
+    CandStructInf *inferContainerTy(Module *m,Value *v,Type *ty,long bitoff) {
+#ifdef DEBUG_INFER_CONTAINER
+        dbgs() << "inferContainerTy(): v: " << InstructionUtils::getValueStr(v) << " ty: " << InstructionUtils::getTypeStr(ty) << " bitoff: " << bitoff << "\n";
+#endif
+        if (!m || !v || !ty) {
+#ifdef DEBUG_INFER_CONTAINER
+            dbgs() << "inferContainerTy(): !m || !v || !ty\n";
+#endif
+            return nullptr;
+        }
+        DataLayout dl = m->getDataLayout();
+        long tysz = dl.getTypeStoreSizeInBits(ty);
+        //Analyze every single-index GEP w/ the same i8* srcPointer "v".
+        std::vector<CandStructInf*> cands;
+        bool init = true;
+        std::set<Instruction*> insts;
+        for (User *u : v->users()) {
+            if (dyn_cast<Instruction>(u)) {
+                insts.insert(dyn_cast<Instruction>(u));
+            }
+            GEPOperator *gep = dyn_cast<GEPOperator>(u);
+            //Make sure it has a single index.
+            if (!gep || gep->getNumOperands() != 2 || gep->getPointerOperand() != v) {
+                continue;
+            }
+            //Get the constant index value.
+            ConstantInt *CI = dyn_cast<ConstantInt>(gep->getOperand(1));
+            if (!CI) {
+                continue;
+            }
+            long index = CI->getSExtValue();
+            //Make sure the base pointer is iN*.
+            Type *bty = gep->getPointerOperandType();
+            if (bty->isPointerTy()) {
+                bty = bty->getPointerElementType();
+            }
+            if (!dyn_cast<IntegerType>(bty)) {
+                continue;
+            }
+            unsigned width = dyn_cast<IntegerType>(bty)->getBitWidth();
+            long resOff = bitoff + index * width;
+#ifdef DEBUG_INFER_CONTAINER
+            dbgs() << "inferContainerTy(): found one single-constant-index GEP using the same srcPointer: " << InstructionUtils::getValueStr(gep) << "\n";
+            dbgs() << "inferContainerTy(): index: " << index << " width: " << width << " resOff: " << resOff << " current host type size: " << tysz << "\n";
+#endif
+            if (resOff >= 0 && resOff < tysz) {
+                //This means current GEP will not index outside the original object, so useless for container inference.
+#ifdef DEBUG_INFER_CONTAINER
+                dbgs() << "inferContainerTy(): skip since this GEP doesn't access the fields outside current host (i.e. in the container).\n";
+#endif
+                continue;
+            }
+            //Try to obtain the real type of this GEP inst by looking at its users, specifically the "cast" and "load" inst.
+            Type *ty1 = nullptr;
+            std::set<Type*> candTy1;
+            for (User *u1 : gep->users()) {
+                if (dyn_cast<Instruction>(u1)) {
+                    insts.insert(dyn_cast<Instruction>(u1));
+                }
+                Type *dty = nullptr;
+                if (dyn_cast<CastInst>(u1)) {
+                    dty = dyn_cast<CastInst>(u1)->getDestTy();
+                }else if (dyn_cast<LoadInst>(u1)) {
+                    dty = dyn_cast<LoadInst>(u1)->getPointerOperandType();
+                }
+                if (dty && dty->isPointerTy()) {
+                    candTy1.insert(dty->getPointerElementType());
+                }
+            }
+            //Do a simple filtering if there are multiple candidate ty1 types.
+            for (Type *t : candTy1) {
+                ty1 = t;
+                if (dyn_cast<CompositeType>(ty1) || ty1->isPointerTy()) {
+                    break;
+                }
+            }
+            if (!ty1) {
+#ifdef DEBUG_INFER_CONTAINER
+                dbgs() << "inferContainerTy(): cannot find the ty1.\n";
+#endif
+                continue;
+            }
+#ifdef DEBUG_INFER_CONTAINER
+            dbgs() << "inferContainerTy(): ty1: " << InstructionUtils::getTypeStr(ty1) << "\n";
+#endif
+            //Ok, now we can get some candidate container types that contain both "ty" and "ty1" with a distance of "resOff".
+            std::vector<CandStructInf*> *c = DRCHECKER::getStructFrom2Fields(&dl,ty,ty1,resOff,m);
+            //We only reserve those container types that are valid for all GEPs (i.e. intersection).
+            if (!c || c->size() == 0) {
+                //TODO: directly return nullptr or continue? In theory we should return since it's an intersection but that will
+                //immediately cause us to have no container types identified... which is also less likely.
+#ifdef DEBUG_INFER_CONTAINER
+                dbgs() << "inferContainerTy(): warning: we identified no container types for this ty-ty1-resOff combination...\n";
+#endif
+                continue;
+            }
+            if (init) {
+                cands = *c;
+                init = false;
+            }else {
+                std::vector<CandStructInf*> tmp_copy = cands;
+                cands.clear();
+                for (CandStructInf *e : *c) {
+                    if (!e) {
+                        continue;
+                    }
+                    if (std::find_if(tmp_copy.begin(),tmp_copy.end(),[e](const CandStructInf *cand) {
+                        return (e->fds == cand->fds && e->ind[0] == cand->ind[0]);
+                    }) != tmp_copy.end()) {
+                        cands.push_back(e);
+                    }
+                }
+            }
+            delete c;
+        }
+#ifdef DEBUG_INFER_CONTAINER
+        dbgs() << "inferContainerTy(): all GEPs analyzed, #cand containers: " << cands.size() << "\n";
+#endif
+        if (cands.size() == 0) {
+            return nullptr;
+        }
+        //Ok now we have got a candidate container list.
+        //We need to select a best candidate to return...
+        sortCandStruct(&cands,&insts);
+        //Return the hisghest ranked candidate.
+        for (int i = 1; i < cands.size(); ++i) {
+            delete cands[i];
+        }
+        //We need to modify the CandStructInf.ind[0] to make it point to exactly the location of "bitoff" inside "ty",
+        //note that currently ind[0] is the location of "ty" in the container.
+        int idst = InstructionUtils::locateBitsoffInTyDesc(cands[0]->fds,(*cands[0]->fds)[cands[0]->ind[0]]->bitoff + bitoff);
+        if (idst < 0 || idst >= cands[0]->fds->size()) {
+            return nullptr;
+        }
+        cands[0]->ind[0] = idst;
+        return cands[0];
     }
 
     int addToSharedObjCache(OutsideObject *obj) {
