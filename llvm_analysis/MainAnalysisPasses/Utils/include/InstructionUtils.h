@@ -50,13 +50,15 @@ namespace DRCHECKER {
         int findTy(Type *ty);
 
         int findHostTy(Type *ty);
+
+        Type *getOutermostTy();
     };
 
     class CandStructInf {
         public:
         std::vector<FieldDesc*> *fds;
         std::vector<int> ind;
-        int score = 0;
+        float score = .0;
 
         bool same(CandStructInf *c) {
             if (!c)

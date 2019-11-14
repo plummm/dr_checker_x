@@ -1039,6 +1039,13 @@ namespace DRCHECKER {
         return -1;
     }
 
+    Type *FieldDesc::getOutermostTy() {
+        if (this->host_tys.size() > 0) {
+            return this->host_tys[this->host_tys.size()-1];
+        }
+        return nullptr;
+    }
+
     bool InstructionUtils::isIndexValid(Type *ty, unsigned fid) {
         if (!ty) {
             return false;

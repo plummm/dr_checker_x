@@ -728,7 +728,7 @@ namespace DRCHECKER {
             //If the host type is referred in the target function, then we will have a high confidence.
             for (Function *func : funcs) {
                 if (InstructionUtils::isTyUsedByFunc(hty,func)) {
-                    c->score += 1000;
+                    c->score += 1000.;
                 }
             }
             //TODO: if the type name is similar to the function name, then we will give it a high score.
@@ -736,11 +736,11 @@ namespace DRCHECKER {
             /*
             //Observation: it's likely that the #field of ty1 is 0 when "bitoff" is negative. 
             if (c->ind[1] == 0) {
-                c->score += 500;
+                c->score += 500.;
             }
             */
             //Give a preference to the smaller container..
-            c->score -= (*fds)[fds->size()-1]->bitoff;
+            c->score -= ((float)(*fds)[fds->size()-1]->bitoff)/100.;
         }
         std::sort(cands->begin(),cands->end(),[](CandStructInf *c0, CandStructInf *c1){
             return (c0->score - c1->score > 0);
@@ -753,7 +753,7 @@ namespace DRCHECKER {
             return nullptr;
         }
 #ifdef DEBUG_CREATE_HOST_OBJ
-        dbgs() << "getStructTysFromFieldDistance(): Trying to identify a struct that can match the distanced fields.\n";
+        dbgs() << "getStructFrom2Fields(): Trying to identify a struct that can match the distanced fields.\n";
 #endif
         std::vector<StructType*> tys = mod->getIdentifiedStructTypes();
         std::vector<CandStructInf*> *cands = new std::vector<CandStructInf*>();
@@ -768,10 +768,12 @@ namespace DRCHECKER {
                 continue;
             }
 #ifdef DEBUG_CREATE_HOST_OBJ
+            /*
             dbgs() << "getStructTysFromFieldDistance(): got a match: " << InstructionUtils::getTypeStr(t) << "\n"; 
             for (FieldDesc *fd : *tydesc) {
                 fd->print(dbgs());
             }
+            */
 #endif
             //Ok get a match, record it.
             for (int i = 0; i < res.size(); i += 2) {
@@ -792,7 +794,7 @@ namespace DRCHECKER {
             }
         }
 #ifdef DEBUG_CREATE_HOST_OBJ
-        dbgs() << "getStructTysFromFieldDistance(): #cands: " << cands->size() << "\n";
+        dbgs() << "getStructFrom2Fields(): #cands: " << cands->size() << "\n";
 #endif
         return cands;
     }
@@ -976,6 +978,15 @@ namespace DRCHECKER {
         //Ok now we have got a candidate container list.
         //We need to select a best candidate to return...
         sortCandStruct(&cands,&insts);
+#ifdef DEBUG_INFER_CONTAINER
+        for (int i = 0; i < cands.size(); ++i) {
+            Type *t = (*cands[i]->fds)[0]->getOutermostTy();
+            dbgs() << "inferContainerTy(): CAND " << i << " SCORE " << cands[i]->score << " : " << InstructionUtils::getTypeStr(t) << "\n"; 
+            for (FieldDesc *fd : *(cands[i]->fds)) {
+                fd->print(dbgs());
+            }
+        }
+#endif
         //Return the hisghest ranked candidate.
         for (int i = 1; i < cands.size(); ++i) {
             delete cands[i];
