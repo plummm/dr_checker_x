@@ -929,13 +929,6 @@ namespace DRCHECKER {
                         ctxMap[ctx_id] = *pctx;
                         CONSTRAINTS *p_constraints;
                         p_constraints = &(tagModMap[tag_id][(*p_str_inst)[3]][(*p_str_inst)[2]][(*p_str_inst)[1]][(*p_str_inst)[0]][ctx_id]);
-                        //Fill in the constraints of func args if any.
-                        std::set<uint64_t> *p_cmds = InstructionUtils::getCmdValues(ctx,e.first,&(this->switchMap));
-                        if (!p_cmds) {
-                            continue;
-                        }
-                        //TODO: we now simply assume that "cmd" is the 2nd arg of entry ioctl.
-                        (*p_constraints)[1] = *p_cmds;
                         //Fill in the mod inst traits if any.
                         if (this->modTraitMap.find(st_inst) != this->modTraitMap.end() && 
                                 this->modTraitMap[st_inst].find(ctx) != this->modTraitMap[st_inst].end())
@@ -945,6 +938,13 @@ namespace DRCHECKER {
                             //Set the trait id
                             (*p_constraints)[TRAIT_INDEX].insert((ID_TY)p_trait);
                         }
+                        //Fill in the constraints of func args if any.
+                        std::set<uint64_t> *p_cmds = InstructionUtils::getCmdValues(ctx,e.first,&(this->switchMap));
+                        if (!p_cmds) {
+                            continue;
+                        }
+                        //TODO: we now simply assume that "cmd" is the 2nd arg of entry ioctl.
+                        (*p_constraints)[1] = *p_cmds;
                     }
                 }
             }

@@ -673,7 +673,7 @@ namespace DRCHECKER {
                 continue;
             bool ty0_match = false;
             for (Type *t : fd->tys) {
-                if (InstructionUtils::same_types(t,ty0)) {
+                if (InstructionUtils::same_types(t,ty0,true)) {
                     ty0_match = true;
                     break;
                 }
@@ -686,7 +686,7 @@ namespace DRCHECKER {
                 if ((*fds)[j]->bitoff == dstoff) {
                     bool ty1_match = false;
                     for (Type *t : (*fds)[j]->tys) {
-                        if (InstructionUtils::same_types(t,ty1)) {
+                        if (InstructionUtils::same_types(t,ty1,true)) {
                             ty1_match = true;
                             break;
                         }
@@ -926,7 +926,7 @@ namespace DRCHECKER {
             //Do a simple filtering if there are multiple candidate ty1 types.
             for (Type *t : candTy1) {
                 ty1 = t;
-                if (dyn_cast<CompositeType>(ty1) || ty1->isPointerTy()) {
+                if (dyn_cast<CompositeType>(ty1) || (ty1->isPointerTy() && !ty1->getPointerElementType()->isIntegerTy())) {
                     break;
                 }
             }
@@ -968,6 +968,10 @@ namespace DRCHECKER {
                 }
             }
             delete c;
+            //We're sure that there must be a correct container type existing in the module, so as long as we have the only available candidate, we should stop and just use it.
+            if (cands.size() <= 1) {
+                break;
+            }
         }
 #ifdef DEBUG_INFER_CONTAINER
         dbgs() << "inferContainerTy(): all GEPs analyzed, #cand containers: " << cands.size() << "\n";

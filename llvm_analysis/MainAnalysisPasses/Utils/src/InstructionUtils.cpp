@@ -521,7 +521,7 @@ namespace DRCHECKER {
     //In theory, we can simply compare two Type* by "==" in llvm,
     //but sometimes we want to handle cases like "%struct.A" and "%struct.A.123", 
     //they are basically the same but llvm does assign different Type* for them.
-    bool InstructionUtils::same_types(Type* ty0, Type* ty1) {
+    bool InstructionUtils::same_types(Type* ty0, Type* ty1, bool wild_intp) {
 #ifdef DEBUG_TYPE_CMP
         if (ty0->isFunctionTy()) {
             dbgs() << "InstructionUtils::same_types() FUNC: " << InstructionUtils::getTypeStr(ty0) << " | " << InstructionUtils::getTypeStr(ty1) << "\n";
@@ -540,6 +540,14 @@ namespace DRCHECKER {
         unsigned n = ty0->getNumContainedTypes();
         if (n != ty1->getNumContainedTypes()) {
             return false;
+        }
+        if (wild_intp) {
+            if (ty0->isPointerTy() && ty0->getPointerElementType()->isIntegerTy(8)) {
+                return ty1->isPointerTy();
+            }
+            if (ty1->isPointerTy() && ty1->getPointerElementType()->isIntegerTy(8)) {
+                return ty0->isPointerTy();
+            }
         }
 #ifdef DEBUG_TYPE_CMP
         dbgs() << "InstructionUtils::same_types(): " << "#SUB:" << n << " " << InstructionUtils::getTypeStr(ty0) << " | " << InstructionUtils::getTypeStr(ty1) << "\n";
@@ -976,23 +984,39 @@ namespace DRCHECKER {
         return -1;
     }
 
+    bool InstructionUtils::ptr_sub_type(Type *ty0, Type *ty1) {
+        if (!ty0 || !ty1) {
+            return false;
+        }
+        if (!ty1->isPointerTy()) {
+            return InstructionUtils::same_types(ty0,ty1);
+        }
+        while (ty1->isPointerTy()) {
+            ty1 = ty1->getPointerElementType();
+            if (InstructionUtils::same_types(ty0,ty1)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     bool InstructionUtils::isTyUsedByFunc(Type *ty, Function *func) {
         if (!ty || !func) {
             return false;
         }
         for (Value& v : func->args()) {
-            if (InstructionUtils::same_types(v.getType(),ty)) {
+            if (InstructionUtils::ptr_sub_type(ty,v.getType())) {
                 return true;
             }
         }
         for (BasicBlock& bb : *func) {
             for (Instruction& ins : bb) {
-                if (InstructionUtils::same_types(ins.getType(),ty)) {
+                if (InstructionUtils::ptr_sub_type(ty,ins.getType())) {
                     return true;
                 }
                 for (unsigned i = 0; i < ins.getNumOperands(); ++i) {
                     Value *v = ins.getOperand(i);
-                    if (InstructionUtils::same_types(v->getType(),ty)) {
+                    if (InstructionUtils::ptr_sub_type(ty,v->getType())) {
                         return true;
                     }
                 }
