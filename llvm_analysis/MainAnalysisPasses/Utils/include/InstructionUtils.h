@@ -191,6 +191,8 @@ namespace DRCHECKER {
         //Given a type's type desc vector, locate the first desc node for a specified bit offset,
         //returning the index of this desc node within the vector.
         static int locateBitsoffInTyDesc(std::vector<FieldDesc*> *tydesc, int boff);
+
+        static std::string getStFieldName(Module *mod, StructType *ty, unsigned fid);
     };
 
 }

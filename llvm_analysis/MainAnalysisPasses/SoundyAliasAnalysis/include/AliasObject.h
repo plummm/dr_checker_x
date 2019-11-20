@@ -1238,12 +1238,12 @@ namespace DRCHECKER {
     //and maintain their embedding relationships preperly.
     extern AliasObject *createHostObj(AliasObject *targetObj, Type *hostTy, long field);
 
-    extern int matchFieldsInDesc(Type *ty0, Type *ty1, int bitoff, std::vector<FieldDesc*> *fds, std::vector<unsigned> *res);
+    extern int matchFieldsInDesc(Type *ty0, std::string& n0, Type *ty1, std::string& n1, int bitoff, std::vector<FieldDesc*> *fds, std::vector<unsigned> *res);
 
     extern void sortCandStruct(std::vector<CandStructInf*> *cands, std::set<Instruction*> *insts);
 
     //Given 2 field types and their distance (in bits), return a list of candidate struct types.
-    extern std::vector<CandStructInf*> *getStructFrom2Fields(DataLayout *dl, Type *ty0, Type *ty1, long bitoff, Module *mod);
+    extern std::vector<CandStructInf*> *getStructFrom2Fields(DataLayout *dl, Type *ty0, std::string& n0, Type *ty1, std::string& n1, long bitoff, Module *mod);
 
     //hz: this method is mainly designed for the very common "container_of()" usage in the kernel,
     //we try to infer the host obj (i.e. the container) of the arg "obj" and either get (if it's already embedded in a known host obj)

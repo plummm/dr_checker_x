@@ -14,6 +14,7 @@ namespace DRCHECKER {
 
 #define DEBUG_IS_ASAN_INST
 //#define DEBUG_GET_TY_DESC
+#define DEBUG_GET_FIELD_NAME
 
     bool InstructionUtils::isPointerInstruction(Instruction *I) {
         bool retVal = false;
@@ -1084,6 +1085,74 @@ namespace DRCHECKER {
         }
         //We have already covered all composite types. 
         return (fid == 0);
+    }
+
+    //Get the name of a specified field within a struct type, w/ the debug info.
+    std::string InstructionUtils::getStFieldName(Module *mod, StructType *ty, unsigned fid) {
+        static std::map<Type*,std::map<unsigned,std::string>> ncache;
+#ifdef DEBUG_GET_FIELD_NAME
+        dbgs() << "InstructionUtils::getStFieldName(): for ty: " << InstructionUtils::getTypeStr(ty) << " | " << fid << "\n";
+#endif
+        if (!mod || !ty || !ty->hasName()) {
+            return "";
+        }
+        if (ncache.find(ty) == ncache.end()) {
+            std::string stn = ty->getName().str();
+            //Strip the name prefix
+            std::size_t pdot = stn.rfind(".");
+            if (pdot != std::string::npos) {
+                stn = stn.substr(pdot+1);
+            }
+#ifdef DEBUG_GET_FIELD_NAME
+            dbgs() << "InstructionUtils::getStFieldName(): type name: " << stn << "\n";
+#endif
+            NamedMDNode *nmd = mod->getNamedMetadata(*(new Twine(stn)));
+            if (!nmd) {
+#ifdef DEBUG_GET_FIELD_NAME
+                dbgs() << "InstructionUtils::getStFieldName(): Cannot get the NamedMDNode for the type name: " << stn << "\n";
+#endif
+                return "";
+            }
+            for (unsigned i = 0; i < nmd->getNumOperands(); ++i) {
+                MDNode *md = nmd->getOperand(i);
+                if (!md) {
+                    continue;
+                }
+                if (dyn_cast<DICompositeType>(md)) {
+                    //Ok, got it.
+#ifdef DEBUG_GET_FIELD_NAME
+                    dbgs() << "InstructionUtils::getStFieldName(): Got the DICompositeType MDNode!\n";
+#endif
+                    DINodeArray dia=dyn_cast<DICompositeType>(md)->getElements(); 
+                    for (unsigned j = 0; j < dia.size(); ++j) {
+                        DIType *field=dyn_cast<DIType>(dia[j]);
+                        if (!field) {
+#ifdef DEBUG_GET_FIELD_NAME
+                            dbgs() << "InstructionUtils::getStFieldName(): cannot get the DIType for field: " << j << "\n";
+#endif
+                            continue;
+                        }
+                        ncache[ty][j] = field->getName().str();
+                    }
+                    break;
+                }
+            }//for
+        }//if not in cache.
+        //Note that as long as we processed one request for a single field in a certain StructType, we will cache all fields in the same type.
+        if (ncache.find(ty) != ncache.end()) {
+            if (ncache[ty].find(fid) != ncache[ty].end()) {
+#ifdef DEBUG_GET_FIELD_NAME
+                dbgs() << "InstructionUtils::getStFieldName(): Got the result from the cache: " << ncache[ty][fid] << "\n";
+#endif
+                return ncache[ty][fid];
+            }else {
+#ifdef DEBUG_GET_FIELD_NAME
+                dbgs() << "InstructionUtils::getStFieldName(): Got the type from the cache but not the field!\n";
+#endif
+                return "";
+            }
+        }
+        return "";
     }
 
 }

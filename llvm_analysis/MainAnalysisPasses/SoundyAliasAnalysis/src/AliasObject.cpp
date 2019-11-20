@@ -662,16 +662,18 @@ namespace DRCHECKER {
         return hobj;
     }
 
-    int matchFieldsInDesc(Type *ty0, Type *ty1, int bitoff, std::vector<FieldDesc*> *fds, std::vector<unsigned> *res) {
+    int matchFieldsInDesc(Type *ty0, std::string& n0, Type *ty1, std::string& n1, int bitoff, std::vector<FieldDesc*> *fds, std::vector<unsigned> *res) {
         if (!ty0 || !ty1 || !fds || !res) {
             return 0;
         }
-        int found = 0;
+        std::vector<unsigned> type_res;
+        std::vector<unsigned> prio_res;
         for (int i = 0; i < fds->size(); ++i) {
             FieldDesc *fd = (*fds)[i];
             if (!fd) 
                 continue;
             bool ty0_match = false;
+            bool ty0_name_match = false;
             for (Type *t : fd->tys) {
                 if (InstructionUtils::same_types(t,ty0,true)) {
                     ty0_match = true;
@@ -692,9 +694,12 @@ namespace DRCHECKER {
                         }
                     }
                     if (ty1_match) {
-                        res->push_back(i);
-                        res->push_back(j);
-                        found = 1;
+                        //Ok, now we're sure that we get a type match for the two fields in the struct, we'll see whether the field names are also matched.
+                        //If so, put the matching field id in a special priority queue.
+                        if (n0.size() > 0) 
+                        if (matchFieldName(ty0,n0,fd))
+                        type_res->push_back(i);
+                        type_res->push_back(j);
                         break;
                     }
                 }
@@ -748,7 +753,7 @@ namespace DRCHECKER {
         return;
     }
 
-    std::vector<CandStructInf*> *getStructFrom2Fields(DataLayout *dl, Type *ty0, Type *ty1, long bitoff, Module *mod) {
+    std::vector<CandStructInf*> *getStructFrom2Fields(DataLayout *dl, Type *ty0, std::string& n0, Type *ty1, std::string& n1, long bitoff, Module *mod) {
         if (!dl || !mod || !ty0 || !ty1) {
             return nullptr;
         }
@@ -764,7 +769,7 @@ namespace DRCHECKER {
             }
             //Ok, try to match to given fields w/ a specified distance.
             std::vector<unsigned> res;
-            if (!matchFieldsInDesc(ty0,ty1,bitoff,tydesc,&res)) {
+            if (!matchFieldsInDesc(ty0,n0,ty1,n1,bitoff,tydesc,&res)) {
                 continue;
             }
 #ifdef DEBUG_CREATE_HOST_OBJ
@@ -912,6 +917,9 @@ namespace DRCHECKER {
             for (User *u1 : gep->users()) {
                 if (dyn_cast<Instruction>(u1)) {
                     insts.insert(dyn_cast<Instruction>(u1));
+                    if (InstructionUtils::isAsanInst(dyn_cast<Instruction>(u1))) {
+                        continue;
+                    }
                 }
                 Type *dty = nullptr;
                 if (dyn_cast<CastInst>(u1)) {
