@@ -1238,7 +1238,7 @@ namespace DRCHECKER {
     //and maintain their embedding relationships preperly.
     extern AliasObject *createHostObj(AliasObject *targetObj, Type *hostTy, long field);
 
-    extern int matchFieldsInDesc(Type *ty0, std::string& n0, Type *ty1, std::string& n1, int bitoff, std::vector<FieldDesc*> *fds, std::vector<unsigned> *res);
+    extern int matchFieldsInDesc(Module *mod, Type *ty0, std::string& n0, Type *ty1, std::string& n1, int bitoff, std::vector<FieldDesc*> *fds, std::vector<unsigned> *res);
 
     extern void sortCandStruct(std::vector<CandStructInf*> *cands, std::set<Instruction*> *insts);
 

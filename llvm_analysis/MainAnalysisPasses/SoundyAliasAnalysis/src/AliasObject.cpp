@@ -662,7 +662,30 @@ namespace DRCHECKER {
         return hobj;
     }
 
-    int matchFieldsInDesc(Type *ty0, std::string& n0, Type *ty1, std::string& n1, int bitoff, std::vector<FieldDesc*> *fds, std::vector<unsigned> *res) {
+    bool matchFieldName(Module *mod, Type *ty, std::string& n, FieldDesc *fd) {
+        if (!ty || !fd || n.size() == 0) {
+            return false;
+        }
+        //Be sure that "ty" exists in the "fd".
+        if (fd->findTy(ty) < 0) {
+            return false;
+        }
+        if (fd->host_tys.size() != fd->fid.size()) {
+            return false;
+        }
+        int i = fd->findHostTy(ty);
+        if (i < fd->host_tys.size() - 1) {
+            //NOTE that this can also handle the case wherer "i = -1", which means "ty" is the innermost field and its direct host object is host_tys[0].
+            std::string fn = InstructionUtils::getStFieldName(mod,dyn_cast<StructType>(fd->host_tys[i+1]),fd->fid[i+1]);
+            return (n.find(fn) != std::string::npos);
+        }else {
+            //It's not a field in a host struct, it's the host struct itself and we don't know its name..
+            return false;
+        }
+        return false;
+    }
+
+    int matchFieldsInDesc(Module *mod, Type *ty0, std::string& n0, Type *ty1, std::string& n1, int bitoff, std::vector<FieldDesc*> *fds, std::vector<unsigned> *res) {
         if (!ty0 || !ty1 || !fds || !res) {
             return 0;
         }
@@ -670,45 +693,41 @@ namespace DRCHECKER {
         std::vector<unsigned> prio_res;
         for (int i = 0; i < fds->size(); ++i) {
             FieldDesc *fd = (*fds)[i];
-            if (!fd) 
-                continue;
-            bool ty0_match = false;
-            bool ty0_name_match = false;
-            for (Type *t : fd->tys) {
-                if (InstructionUtils::same_types(t,ty0,true)) {
-                    ty0_match = true;
-                    break;
-                }
-            }
-            if (!ty0_match)
+            if (!fd || fd->findTy(ty0) < 0) 
                 continue;
             int dstoff = fd->bitoff + bitoff;
             int step = (bitoff > 0 ? 1 : -1);
             for (int j = i; j >= 0 && j < fds->size(); j+=step) {
-                if ((*fds)[j]->bitoff == dstoff) {
-                    bool ty1_match = false;
-                    for (Type *t : (*fds)[j]->tys) {
-                        if (InstructionUtils::same_types(t,ty1,true)) {
-                            ty1_match = true;
-                            break;
-                        }
+                if ((*fds)[j]->bitoff == dstoff && (*fds)[j]->findTy(ty1) >= 0) {
+                    //Ok, now we're sure that we get a type match for the two fields in the struct, we'll see whether the field names are also matched.
+                    //If so, put the matching field id in a special priority queue.
+                    bool nm_match = false;
+                    if (n0.size() > 0 && n1.size() > 0) {
+                        nm_match = (matchFieldName(mod,ty0,n0,fd) && matchFieldName(mod,ty1,n1,(*fds)[j]));
+                    }else if (n0.size() > 0 || n1.size() > 0) {
+                        nm_match = (n0.size() > 0 ? matchFieldName(mod,ty0,n0,fd) : matchFieldName(mod,ty1,n1,(*fds)[j]));
                     }
-                    if (ty1_match) {
-                        //Ok, now we're sure that we get a type match for the two fields in the struct, we'll see whether the field names are also matched.
-                        //If so, put the matching field id in a special priority queue.
-                        if (n0.size() > 0) 
-                        if (matchFieldName(ty0,n0,fd))
-                        type_res->push_back(i);
-                        type_res->push_back(j);
-                        break;
+                    if (nm_match) {
+                        prio_res.push_back(i);
+                        prio_res.push_back(j);
                     }
+                    type_res.push_back(i);
+                    type_res.push_back(j);
+                    break;
                 }
                 if ((step > 0) != ((*fds)[j]->bitoff < dstoff)) {
                     break;
                 }
             }
         }
-        return found;
+        if (prio_res.size() > 0) {
+            *res = prio_res;
+            return 2;
+        }else if (type_res.size() > 0) {
+            *res = type_res;
+            return 1;
+        }
+        return 0;
     }
 
     void sortCandStruct(std::vector<CandStructInf*> *cands, std::set<Instruction*> *insts) {
@@ -762,6 +781,8 @@ namespace DRCHECKER {
 #endif
         std::vector<StructType*> tys = mod->getIdentifiedStructTypes();
         std::vector<CandStructInf*> *cands = new std::vector<CandStructInf*>();
+        //"prio_cands" records the candidate structs whose field names also match the provided two fields.
+        std::vector<CandStructInf*> *prio_cands = new std::vector<CandStructInf*>();
         for (StructType *t : tys) {
             std::vector<FieldDesc*> *tydesc = InstructionUtils::getCompTyDesc(dl,t);
             if (!tydesc) {
@@ -769,7 +790,8 @@ namespace DRCHECKER {
             }
             //Ok, try to match to given fields w/ a specified distance.
             std::vector<unsigned> res;
-            if (!matchFieldsInDesc(ty0,n0,ty1,n1,bitoff,tydesc,&res)) {
+            int rc = matchFieldsInDesc(mod,ty0,n0,ty1,n1,bitoff,tydesc,&res);
+            if (rc == 0) {
                 continue;
             }
 #ifdef DEBUG_CREATE_HOST_OBJ
@@ -796,11 +818,17 @@ namespace DRCHECKER {
                 inf->ind.push_back(res[i]);
                 inf->ind.push_back(res[i+1]);
                 cands->push_back(inf);
+                if (rc == 2) {
+                    prio_cands->push_back(inf);
+                }
             }
         }
 #ifdef DEBUG_CREATE_HOST_OBJ
-        dbgs() << "getStructFrom2Fields(): #cands: " << cands->size() << "\n";
+        dbgs() << "getStructFrom2Fields(): #cands: " << cands->size() << " #prio_cands: " << prio_cands->size() << "\n";
 #endif
+        if (prio_cands->size() > 0) {
+            return prio_cands;
+        }
         return cands;
     }
 
@@ -944,11 +972,13 @@ namespace DRCHECKER {
 #endif
                 continue;
             }
+            std::string n0 = "";
+            std::string n1 = (gep->hasName() ? gep->getName().str() : "");
 #ifdef DEBUG_INFER_CONTAINER
-            dbgs() << "inferContainerTy(): ty1: " << InstructionUtils::getTypeStr(ty1) << "\n";
+            dbgs() << "inferContainerTy(): ty1: " << InstructionUtils::getTypeStr(ty1) << " n1: " << n1 << "\n";
 #endif
             //Ok, now we can get some candidate container types that contain both "ty" and "ty1" with a distance of "resOff".
-            std::vector<CandStructInf*> *c = DRCHECKER::getStructFrom2Fields(&dl,ty,ty1,resOff,m);
+            std::vector<CandStructInf*> *c = DRCHECKER::getStructFrom2Fields(&dl,ty,n0,ty1,n1,resOff,m);
             //We only reserve those container types that are valid for all GEPs (i.e. intersection).
             if (!c || c->size() == 0) {
                 //TODO: directly return nullptr or continue? In theory we should return since it's an intersection but that will
