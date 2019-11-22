@@ -1104,15 +1104,17 @@ namespace DRCHECKER {
     //I do think they should make a convenient API to enumerate all metadata nodes...
     void createMetadataSlot(MDNode *N, DenseMap<MDNode*, unsigned> *mdnMap) {
         static int mdnNext = 0;
+        static std::set<MDNode*> visited;
         if (!mdnMap || !N) {
             return;
         }
+        if (visited.find(N) != visited.end()) {
+            //Already visited.
+            return;
+        }
+        visited.insert(N);
         //NOTE: in theory we can get *all* MDNodes, but for now we're only interested in the DICompositeType.
-        if (dyn_cast<DICompositeType>(N)) {
-        //if (!N->isFunctionLocal()) {
-            if(mdnMap->find(N) != mdnMap->end()) {
-                return;
-            }
+        if (isa<DICompositeType>(N) && mdnMap->find(N) == mdnMap->end()) {
             //the map also stores the number of each metadata node. It is the same order as in the dumped bc file.
             (*mdnMap)[N] = mdnNext++;
         }

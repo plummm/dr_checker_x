@@ -693,7 +693,7 @@ namespace DRCHECKER {
 #ifdef DEBUG_CREATE_HOST_OBJ
         dbgs() << "matchFieldName(): fd->findHostTy(ty): " << i << " #host_tys: " << fd->host_tys.size() << "\n";
 #endif
-        if (i < fd->host_tys.size() - 1) {
+        if (i < ((int)fd->host_tys.size()) - 1) {
             //NOTE that this can also handle the case wherer "i = -1", which means "ty" is the innermost field and its direct host object is host_tys[0].
             std::string fn = InstructionUtils::getStFieldName(mod,dyn_cast<StructType>(fd->host_tys[i+1]),fd->fid[i+1]);
 #ifdef DEBUG_CREATE_HOST_OBJ
@@ -753,7 +753,9 @@ namespace DRCHECKER {
             }
         }
 #ifdef DEBUG_CREATE_HOST_OBJ
-        dbgs() << "matchFieldsInDesc(): #prio_res: " << prio_res.size() << ", #type_res: " << type_res.size() << "\n";
+        if (type_res.size() > 0) {
+            dbgs() << "matchFieldsInDesc(): #prio_res: " << prio_res.size() << ", #type_res: " << type_res.size() << "\n";
+        }
 #endif
         if (prio_res.size() > 0) {
             *res = prio_res;
