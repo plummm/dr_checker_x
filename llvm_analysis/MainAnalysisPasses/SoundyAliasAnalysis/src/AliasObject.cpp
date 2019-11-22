@@ -724,11 +724,13 @@ namespace DRCHECKER {
                     //Ok, now we're sure that we get a type match for the two fields in the struct, we'll see whether the field names are also matched.
                     //If so, put the matching field id in a special priority queue.
 #ifdef DEBUG_CREATE_HOST_OBJ
+                    /*
                     dbgs() << "matchFieldsInDesc(): Got a match in current tydesc, n0: " << n0 << ", n1: " << n1 << " ======\n";
                     dbgs() << "Ty0: ";
                     fd->print_path(dbgs());
                     dbgs() << "Ty1: ";
                     (*fds)[j]->print_path(dbgs());
+                    */
 #endif
                     bool nm_match = false;
                     if (n0.size() > 0 && n1.size() > 0) {
@@ -1032,6 +1034,7 @@ namespace DRCHECKER {
                         continue;
                     }
                     if (std::find_if(tmp_copy.begin(),tmp_copy.end(),[e](const CandStructInf *cand) {
+                        //NOTE: ind[1] may be different since we consider multiple different GEPs (using the same base ty0) as ty1.
                         return (e->fds == cand->fds && e->ind[0] == cand->ind[0]);
                     }) != tmp_copy.end()) {
                         cands.push_back(e);
@@ -1054,12 +1057,20 @@ namespace DRCHECKER {
         //We need to select a best candidate to return...
         sortCandStruct(&cands,&insts);
 #ifdef DEBUG_INFER_CONTAINER
+        /*
         for (int i = 0; i < cands.size(); ++i) {
             Type *t = (*cands[i]->fds)[0]->getOutermostTy();
             dbgs() << "inferContainerTy(): CAND " << i << " SCORE " << cands[i]->score << " : " << InstructionUtils::getTypeStr(t) << "\n"; 
             for (FieldDesc *fd : *(cands[i]->fds)) {
                 fd->print(dbgs());
             }
+        }
+        */
+        for (int i = 0; i < cands.size(); ++i) {
+            Type *t = (*cands[i]->fds)[0]->getOutermostTy();
+            dbgs() << "inferContainerTy(): ==============CAND " << i << " SCORE " << cands[i]->score << " : " << InstructionUtils::getTypeStr(t) << "\n"; 
+            dbgs() << "Ty0: ";
+            (*cands[i]->fds)[cands[i]->ind[0]]->print_path(dbgs());
         }
 #endif
         //Return the hisghest ranked candidate.
