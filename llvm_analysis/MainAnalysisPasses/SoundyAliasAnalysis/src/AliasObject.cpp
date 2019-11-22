@@ -699,7 +699,7 @@ namespace DRCHECKER {
 #ifdef DEBUG_CREATE_HOST_OBJ
             dbgs() << "matchFieldName(): got the field name: " << fn << "\n";
 #endif
-            return (n.find(fn) != std::string::npos);
+            return (fn.size() > 0 && n.find(fn) != std::string::npos);
         }else {
             //It's not a field in a host struct, it's the host struct itself and we don't know its name..
             return false;
@@ -791,6 +791,10 @@ namespace DRCHECKER {
                 if (InstructionUtils::isTyUsedByFunc(hty,func)) {
                     c->score += 1000.;
                 }
+            }
+            //TODO: is this reasonable? Is the field name match more important than "used by the function"?
+            if (c->field_name_matched) {
+                c->score += 1000;
             }
             //TODO: if the type name is similar to the function name, then we will give it a high score.
             //
