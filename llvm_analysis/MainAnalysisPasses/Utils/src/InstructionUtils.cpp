@@ -1042,6 +1042,17 @@ namespace DRCHECKER {
         OS << "\n";
     }
 
+    void FieldDesc::print_path(raw_ostream &OS) {
+        if (this->host_tys.size() > 0 && this->host_tys.size() == this->fid.size()) {
+            for (int i = this->fid.size()-1; i >= 0; --i) {
+                OS << InstructionUtils::getTypeStr(this->host_tys[i]) << " | " << this->fid[i] << " --> ";
+            }
+        }else {
+            OS << "Error! #host_tys: " << this->host_tys.size() << " #fid: " << this->fid.size();
+        }
+        OS << "\n";
+    }
+
     int FieldDesc::findTy(Type *ty) {
         if (ty) {
             for (int i = 0; i < this->tys.size(); ++i) {
@@ -1087,8 +1098,95 @@ namespace DRCHECKER {
         return (fid == 0);
     }
 
+    //////////////////////////////////////////////////////////////////////////////////////////////////////////
+    //Most of below metadata related code is copied from the llvm 7.0's internal implementation on ".ll" generation.
+    //https://github.com/llvm/llvm-project/blob/release/7.x/llvm/lib/IR/AsmWriter.cpp
+    //I do think they should make a convenient API to enumerate all metadata nodes...
+    void createMetadataSlot(MDNode *N, DenseMap<MDNode*, unsigned> *mdnMap) {
+        static int mdnNext = 0;
+        if (!mdnMap || !N) {
+            return;
+        }
+        //NOTE: in theory we can get *all* MDNodes, but for now we're only interested in the DICompositeType.
+        if (dyn_cast<DICompositeType>(N)) {
+        //if (!N->isFunctionLocal()) {
+            if(mdnMap->find(N) != mdnMap->end()) {
+                return;
+            }
+            //the map also stores the number of each metadata node. It is the same order as in the dumped bc file.
+            (*mdnMap)[N] = mdnNext++;
+        }
+        for (unsigned i = 0, e = N->getNumOperands(); i != e; ++i) {
+            if (MDNode *Op = dyn_cast_or_null<MDNode>(N->getOperand(i))) {
+                createMetadataSlot(Op,mdnMap);
+            }
+        }
+    }
+
+	void processGlobalObjectMetadata(const GlobalObject &GO, DenseMap<MDNode*, unsigned> *mdnMap) {
+  		SmallVector<std::pair<unsigned, MDNode *>, 4> MDs;
+  		GO.getAllMetadata(MDs);
+  		for (auto &MD : MDs)
+    		createMetadataSlot(MD.second,mdnMap);
+	}
+
+	void processInstructionMetadata(const Instruction &I, DenseMap<MDNode*, unsigned> *mdnMap) {
+  		// Process metadata used directly by intrinsics.
+  		if (const CallInst *CI = dyn_cast<CallInst>(&I))
+    		if (Function *F = CI->getCalledFunction())
+      			if (F->isIntrinsic())
+        			for (auto &Op : I.operands())
+          				if (auto *V = dyn_cast_or_null<MetadataAsValue>(Op))
+            				if (MDNode *N = dyn_cast<MDNode>(V->getMetadata()))
+              					createMetadataSlot(N,mdnMap);
+  		// Process metadata attached to this instruction.
+  		SmallVector<std::pair<unsigned, MDNode *>, 4> MDs;
+  		I.getAllMetadata(MDs);
+  		for (auto &MD : MDs)
+    		createMetadataSlot(MD.second,mdnMap);
+	}
+
+    int InstructionUtils::getAllMDNodes(Module *mod, DenseMap<MDNode*, unsigned> *mdnMap) {
+        if (!mod || !mdnMap) {
+            return 1;
+        }
+        //Get all metadata nodes for global variables.
+        for (const GlobalVariable &Var : mod->globals()) {
+            processGlobalObjectMetadata(Var,mdnMap);
+        }
+        //Add metadata used by named metadata.
+  		for (const NamedMDNode &NMD : mod->named_metadata()) {
+    		for (unsigned i = 0, e = NMD.getNumOperands(); i != e; ++i)
+      			createMetadataSlot(NMD.getOperand(i),mdnMap);
+  		}
+        //Add metadata used by all functions and instructions.
+		for (const Function &F : *mod) {
+            processGlobalObjectMetadata(F,mdnMap);
+            for (auto &BB : F) {
+                for (auto &I : BB)
+                    processInstructionMetadata(I,mdnMap);
+            }
+        }
+        return 0;
+    }
+
+    DICompositeType *getMDNForCompositeTy(DenseMap<MDNode*, unsigned> *mdnmap, std::string& n) {
+        if (!mdnmap) {
+            return nullptr;
+        }
+        for (auto& e : *mdnmap) {
+            DICompositeType *nd = dyn_cast<DICompositeType>(e.first);
+            if (nd && nd->getName() == n) {
+                return nd;
+            }
+        }
+        return nullptr;
+    }
+    //////////////////////////////////////////////////////////////////////////////////////////////////////////
+ 
     //Get the name of a specified field within a struct type, w/ the debug info.
     std::string InstructionUtils::getStFieldName(Module *mod, StructType *ty, unsigned fid) {
+        static DenseMap<MDNode*, unsigned> mdncache;
         static std::map<Type*,std::map<unsigned,std::string>> ncache;
 #ifdef DEBUG_GET_FIELD_NAME
         dbgs() << "InstructionUtils::getStFieldName(): for ty: " << InstructionUtils::getTypeStr(ty) << " | " << fid << "\n";
@@ -1096,47 +1194,40 @@ namespace DRCHECKER {
         if (!mod || !ty || !ty->hasName()) {
             return "";
         }
+        if (mdncache.empty()) {
+            InstructionUtils::getAllMDNodes(mod,&mdncache);
+        }
         if (ncache.find(ty) == ncache.end()) {
             std::string stn = ty->getName().str();
             //Strip the name prefix
-            std::size_t pdot = stn.rfind(".");
-            if (pdot != std::string::npos) {
-                stn = stn.substr(pdot+1);
+            if (stn.find("struct.") == 0) {
+                stn = stn.substr(7);
             }
 #ifdef DEBUG_GET_FIELD_NAME
             dbgs() << "InstructionUtils::getStFieldName(): type name: " << stn << "\n";
 #endif
-            NamedMDNode *nmd = mod->getNamedMetadata(*(new Twine(stn)));
+            DICompositeType *nmd = getMDNForCompositeTy(&mdncache,stn);
             if (!nmd) {
 #ifdef DEBUG_GET_FIELD_NAME
-                dbgs() << "InstructionUtils::getStFieldName(): Cannot get the NamedMDNode for the type name: " << stn << "\n";
+                dbgs() << "InstructionUtils::getStFieldName(): cannot get the DICompositeType MDNode!\n";
 #endif
                 return "";
             }
-            for (unsigned i = 0; i < nmd->getNumOperands(); ++i) {
-                MDNode *md = nmd->getOperand(i);
-                if (!md) {
+            //Ok, got it.
+#ifdef DEBUG_GET_FIELD_NAME
+            dbgs() << "InstructionUtils::getStFieldName(): Got the DICompositeType MDNode!\n";
+#endif
+            DINodeArray dia=nmd->getElements(); 
+            for (unsigned j = 0; j < dia.size(); ++j) {
+                DIType *field=dyn_cast<DIType>(dia[j]);
+                if (!field) {
+#ifdef DEBUG_GET_FIELD_NAME
+                    dbgs() << "InstructionUtils::getStFieldName(): cannot get the DIType for field: " << j << "\n";
+#endif
                     continue;
                 }
-                if (dyn_cast<DICompositeType>(md)) {
-                    //Ok, got it.
-#ifdef DEBUG_GET_FIELD_NAME
-                    dbgs() << "InstructionUtils::getStFieldName(): Got the DICompositeType MDNode!\n";
-#endif
-                    DINodeArray dia=dyn_cast<DICompositeType>(md)->getElements(); 
-                    for (unsigned j = 0; j < dia.size(); ++j) {
-                        DIType *field=dyn_cast<DIType>(dia[j]);
-                        if (!field) {
-#ifdef DEBUG_GET_FIELD_NAME
-                            dbgs() << "InstructionUtils::getStFieldName(): cannot get the DIType for field: " << j << "\n";
-#endif
-                            continue;
-                        }
-                        ncache[ty][j] = field->getName().str();
-                    }
-                    break;
-                }
-            }//for
+                ncache[ty][j] = field->getName().str();
+            }
         }//if not in cache.
         //Note that as long as we processed one request for a single field in a certain StructType, we will cache all fields in the same type.
         if (ncache.find(ty) != ncache.end()) {

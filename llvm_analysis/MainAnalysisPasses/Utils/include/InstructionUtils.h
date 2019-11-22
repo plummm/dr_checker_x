@@ -46,6 +46,8 @@ namespace DRCHECKER {
 
         void print(raw_ostream &OS);
 
+        void print_path(raw_ostream &OS);
+
         //Whether a certain type is in the "tys" list.
         int findTy(Type *ty);
 
@@ -59,6 +61,7 @@ namespace DRCHECKER {
         std::vector<FieldDesc*> *fds;
         std::vector<int> ind;
         float score = .0;
+        bool field_name_matched = false;
 
         bool same(CandStructInf *c) {
             if (!c)
@@ -193,6 +196,8 @@ namespace DRCHECKER {
         static int locateBitsoffInTyDesc(std::vector<FieldDesc*> *tydesc, int boff);
 
         static std::string getStFieldName(Module *mod, StructType *ty, unsigned fid);
+
+        static int getAllMDNodes(Module *mod, DenseMap<MDNode*, unsigned> *mdnMap);
     };
 
 }

@@ -663,20 +663,42 @@ namespace DRCHECKER {
     }
 
     bool matchFieldName(Module *mod, Type *ty, std::string& n, FieldDesc *fd) {
+#ifdef DEBUG_CREATE_HOST_OBJ
+        dbgs() << "matchFieldName(): try to match the field name: " << n << " of type: " << InstructionUtils::getTypeStr(ty) << "\n";
+#endif
         if (!ty || !fd || n.size() == 0) {
+#ifdef DEBUG_CREATE_HOST_OBJ
+            dbgs() << "matchFieldName(): (False) !ty || !fd || n.size() == 0\n";
+#endif
             return false;
         }
+#ifdef DEBUG_CREATE_HOST_OBJ
+        dbgs() << "matchFieldName(): FieldDesc: ";
+        fd->print_path(dbgs());
+#endif
         //Be sure that "ty" exists in the "fd".
         if (fd->findTy(ty) < 0) {
+#ifdef DEBUG_CREATE_HOST_OBJ
+            dbgs() << "matchFieldName(): (False) no target ty resides at this fd...\n";
+#endif
             return false;
         }
         if (fd->host_tys.size() != fd->fid.size()) {
+#ifdef DEBUG_CREATE_HOST_OBJ
+            dbgs() << "!!! matchFieldName(): (False) #host_tys and #fid mismatch in the fd...\n";
+#endif
             return false;
         }
         int i = fd->findHostTy(ty);
+#ifdef DEBUG_CREATE_HOST_OBJ
+        dbgs() << "matchFieldName(): fd->findHostTy(ty): " << i << " #host_tys: " << fd->host_tys.size() << "\n";
+#endif
         if (i < fd->host_tys.size() - 1) {
             //NOTE that this can also handle the case wherer "i = -1", which means "ty" is the innermost field and its direct host object is host_tys[0].
             std::string fn = InstructionUtils::getStFieldName(mod,dyn_cast<StructType>(fd->host_tys[i+1]),fd->fid[i+1]);
+#ifdef DEBUG_CREATE_HOST_OBJ
+            dbgs() << "matchFieldName(): got the field name: " << fn << "\n";
+#endif
             return (n.find(fn) != std::string::npos);
         }else {
             //It's not a field in a host struct, it's the host struct itself and we don't know its name..
@@ -701,12 +723,22 @@ namespace DRCHECKER {
                 if ((*fds)[j]->bitoff == dstoff && (*fds)[j]->findTy(ty1) >= 0) {
                     //Ok, now we're sure that we get a type match for the two fields in the struct, we'll see whether the field names are also matched.
                     //If so, put the matching field id in a special priority queue.
+#ifdef DEBUG_CREATE_HOST_OBJ
+                    dbgs() << "matchFieldsInDesc(): Got a match in current tydesc, n0: " << n0 << ", n1: " << n1 << " ======\n";
+                    dbgs() << "Ty0: ";
+                    fd->print_path(dbgs());
+                    dbgs() << "Ty1: ";
+                    (*fds)[j]->print_path(dbgs());
+#endif
                     bool nm_match = false;
                     if (n0.size() > 0 && n1.size() > 0) {
                         nm_match = (matchFieldName(mod,ty0,n0,fd) && matchFieldName(mod,ty1,n1,(*fds)[j]));
                     }else if (n0.size() > 0 || n1.size() > 0) {
                         nm_match = (n0.size() > 0 ? matchFieldName(mod,ty0,n0,fd) : matchFieldName(mod,ty1,n1,(*fds)[j]));
                     }
+#ifdef DEBUG_CREATE_HOST_OBJ
+                    dbgs() << "matchFieldsInDesc(): nm_match: " << nm_match << "\n";
+#endif
                     if (nm_match) {
                         prio_res.push_back(i);
                         prio_res.push_back(j);
@@ -720,6 +752,9 @@ namespace DRCHECKER {
                 }
             }
         }
+#ifdef DEBUG_CREATE_HOST_OBJ
+        dbgs() << "matchFieldsInDesc(): #prio_res: " << prio_res.size() << ", #type_res: " << type_res.size() << "\n";
+#endif
         if (prio_res.size() > 0) {
             *res = prio_res;
             return 2;
@@ -804,21 +839,13 @@ namespace DRCHECKER {
 #endif
             //Ok get a match, record it.
             for (int i = 0; i < res.size(); i += 2) {
-#ifdef DEBUG_CREATE_HOST_OBJ
-                for (int j = 0; j < 2; ++j) {
-                    dbgs() << "fid " << j << ": ";
-                    for(unsigned id : (*tydesc)[res[i+j]]->fid) {
-                        dbgs() << id << " ";
-                    }
-                }
-                dbgs() << "\n";
-#endif
                 CandStructInf *inf = new CandStructInf();
                 inf->fds = tydesc;
                 inf->ind.push_back(res[i]);
                 inf->ind.push_back(res[i+1]);
                 cands->push_back(inf);
                 if (rc == 2) {
+                    inf->field_name_matched = true;
                     prio_cands->push_back(inf);
                 }
             }
