@@ -114,9 +114,11 @@ namespace DRCHECKER {
             if (ty->isPointerTy()){
                 ty = ty->getPointerElementType();
             }
+            /*
             if (dyn_cast<CompositeType>(ty) && InstructionUtils::isIndexValid(ty,fieldId)) {
                 return dyn_cast<CompositeType>(ty)->getTypeAtIndex(fieldId);
             }
+            */
             return ty;
         }
 

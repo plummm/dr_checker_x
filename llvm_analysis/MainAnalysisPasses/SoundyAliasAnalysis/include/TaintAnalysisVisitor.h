@@ -57,9 +57,7 @@ namespace DRCHECKER {
 
         virtual void visit(Instruction &I) {
 #ifdef DEBUG_TAINT_INSTR_VISIT
-            dbgs() << "Visiting instruction(In TaintAnalysis):";
-            I.print(dbgs());
-            dbgs() << "\n";
+            dbgs() << "TaintAnalysisVisitor: Visit(): " << InstructionUtils::getValueStr(&I) << "\n";
 #endif
         }
 
@@ -184,6 +182,9 @@ namespace DRCHECKER {
                                                 std::set<TaintFlag*>* srcTaintInfo,
                                                 std::set<TaintFlag*> *dstTaintInfo = nullptr);
 
+        std::set<TaintFlag*>* makeTaintInfoCopy(Value *srcOperand, Instruction *targetInstruction,
+                                                TaintFlag *srcTaintFlag,
+                                                std::set<TaintFlag*> *dstTaintInfo = nullptr);
 
     };
 }

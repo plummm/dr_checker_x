@@ -704,12 +704,27 @@ namespace DRCHECKER {
          * @return true if added else false if the taint flag is a duplicate.
          */
         bool addFieldTaintFlag(long srcfieldId, TaintFlag *targetTaintFlag) {
+#ifdef DEBUG_UPDATE_FIELD_TAINT
+            dbgs() << "AliasObject::addFieldTaintFlag(): " << InstructionUtils::getTypeStr(this->targetType) << " | " << srcfieldId << " obj: " << (const void*)this << "\n";
+#endif
             FieldTaint *targetFieldTaint = this->getFieldTaint(srcfieldId);
             if(targetFieldTaint == nullptr) {
+#ifdef DEBUG_UPDATE_FIELD_TAINT
+                dbgs() << "AliasObject::addFieldTaintFlag(): No field taint exists for this field.\n";
+#endif
                 targetFieldTaint = new FieldTaint(srcfieldId);
                 this->taintedFields.push_back(targetFieldTaint);
             }
-            return targetFieldTaint->addTaintFlag(targetTaintFlag);
+            if (targetFieldTaint->addTaintFlag(targetTaintFlag)) {
+#ifdef DEBUG_UPDATE_FIELD_TAINT
+                if (targetTaintFlag->tag) {
+                    dbgs() << "++++TAG:\n";
+                    targetTaintFlag->tag->dumpInfo(dbgs());
+                }
+#endif
+                return true;
+            }
+            return false;
         }
 
         /***
@@ -727,7 +742,7 @@ namespace DRCHECKER {
                 // add the taint to all available fields.
                 for (auto fieldId:allAvailableFields) {
 #ifdef DEBUG_UPDATE_FIELD_TAINT
-                    dbgs() << "Adding taint to field:" << fieldId << "\n";
+                    dbgs() << "AliasObject::taintAllFields(): Adding taint to field:" << fieldId << "\n";
 #endif
                     addFieldTaintFlag(fieldId, targetTaintFlag);
                 }
@@ -753,7 +768,7 @@ namespace DRCHECKER {
             Value *v = this->getValue();
             if (v == nullptr && this->targetType == nullptr){
 #ifdef DEBUG_UPDATE_FIELD_TAINT
-                dbgs() << "taintAllFieldsWithTag(): Neither Value nor Type information available for obj: " << (const void*)this << "\n";
+                dbgs() << "AliasObject::taintAllFieldsWithTag(): Neither Value nor Type information available for obj: " << (const void*)this << "\n";
 #endif
                 return false;
             }
@@ -778,11 +793,11 @@ namespace DRCHECKER {
 
                 // add the taint to all available fields.
 #ifdef DEBUG_UPDATE_FIELD_TAINT
-                dbgs() << "taintAllFieldsWithTag(): Updating field taint for obj: " << (const void*)this << "\n";
+                dbgs() << "AliasObject::taintAllFieldsWithTag(): Updating field taint for obj: " << (const void*)this << "\n";
 #endif
                 for (auto fieldId:allAvailableFields) {
 #ifdef DEBUG_UPDATE_FIELD_TAINT
-                    dbgs() << "taintAllFieldsWithTag(): Adding taint to field:" << fieldId << "\n";
+                    dbgs() << "AliasObject::taintAllFieldsWithTag(): Adding taint to field:" << fieldId << "\n";
 #endif
                     TaintTag *tag = nullptr;
                     if (v) {

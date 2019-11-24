@@ -17,7 +17,7 @@ namespace DRCHECKER {
 //#define DEBUG
 //#define DEBUG_BIN_INSTR
 #define ENFORCE_TAINT_PATH
-//#define DEBUG_ENFORCE_TAINT_PATH
+#define DEBUG_ENFORCE_TAINT_PATH
 
     std::set<TaintFlag*>* TaintAnalysisVisitor::getTaintInfo(Value *targetVal) {
         return TaintUtils::getTaintInfo(this->currState, this->currFuncCallSites, targetVal);
@@ -74,10 +74,10 @@ namespace DRCHECKER {
 #endif
                 if(add_taint) {
                     TaintFlag *newTaintFlag = new TaintFlag(currTaint, targetInstruction, srcOperand);
-                    newTaintInfo->insert(newTaintInfo->end(), newTaintFlag);
+                    TaintAnalysisVisitor::addNewTaintFlag(newTaintInfo,newTaintFlag);
                 }else {
 #ifdef DEBUG_ENFORCE_TAINT_PATH
-                    dbgs() << "TaintAnalysisVisitor::makeTaintInfoCopy: Failed to pass the taint path test, the TaintFlag:\n";
+                    dbgs() << "TaintAnalysisVisitor::makeTaintInfoCopy(): Failed to pass the taint path test, the TaintFlag:\n";
                     currTaint->dumpInfo(dbgs());
                     dbgs() << "Current Inst: ";
                     InstructionUtils::printInst(targetInstruction,dbgs());
@@ -107,6 +107,17 @@ namespace DRCHECKER {
             return newTaintInfo;
         }
         return nullptr;
+    }
+
+    std::set<TaintFlag*>* TaintAnalysisVisitor::makeTaintInfoCopy(Value *srcOperand, Instruction *targetInstruction,
+                                                                  TaintFlag *srcTaintFlag,
+                                                                  std::set<TaintFlag*> *dstTaintInfo) {
+        if (!srcTaintFlag) {
+            return nullptr;
+        }
+        std::set<TaintFlag*> srcTaintInfo;
+        srcTaintInfo.insert(srcTaintFlag);
+        return TaintAnalysisVisitor::makeTaintInfoCopy(srcOperand,targetInstruction,&srcTaintInfo,dstTaintInfo);
     }
 
     std::set<TaintFlag*>* TaintAnalysisVisitor::mergeTaintInfo(std::set<Value *> &srcVals, Value *targetInstr) {
@@ -270,10 +281,7 @@ namespace DRCHECKER {
 #ifdef DEBUG_LOAD_INSTR
             dbgs() << "The src pointer itself is tainted.\n";
 #endif
-            for(auto currTaintFlag:*srcTaintInfo) {
-                TaintFlag *newTaintFlag = new TaintFlag(currTaintFlag, &I, srcPointer);
-                TaintAnalysisVisitor::addNewTaintFlag(newTaintInfo, newTaintFlag);
-            }
+            TaintAnalysisVisitor::makeTaintInfoCopy(srcPointer,&I,srcTaintInfo,newTaintInfo);
         }
 
         if(!already_stripped) {
@@ -346,9 +354,7 @@ namespace DRCHECKER {
 
     void TaintAnalysisVisitor::visitStoreInst(StoreInst &I) {
 #ifdef DEBUG_STORE_INSTR
-        dbgs() << "TaintAnalysisVisitor::visitStoreInst(): ";
-        I.print(dbgs());
-        dbgs() << "\n";
+        dbgs() << "TaintAnalysisVisitor::visitStoreInst(): " << InstructionUtils::getValueStr(&I) << "\n";
 #endif
         Value *srcPointer = I.getValueOperand();
         std::set<TaintFlag *> *srcTaintInfo = getTaintInfo(srcPointer);
@@ -368,21 +374,7 @@ namespace DRCHECKER {
             // create newTaintInfo set.
             std::set<TaintFlag *> *newTaintInfo = new std::set<TaintFlag *>();
 
-            bool add_taint;
-            for(auto currTaintFlag:*srcTaintInfo) {
-                add_taint = true;
-                Instruction *currTaintInstr = dyn_cast<Instruction>(&I);
-                if(currTaintInstr != nullptr) {
-                    add_taint = BBTraversalHelper::isReachable(currTaintInstr, &I, this->currFuncCallSites);
-                }
-                if(add_taint) {
-                    TaintFlag *newTaintFlag = new TaintFlag(currTaintFlag, &I, srcPointer);
-                    // add the current instruction in the instruction trace.
-                    newTaintFlag->addInstructionToTrace(&I);
-                    TaintAnalysisVisitor::addNewTaintFlag(newTaintInfo, newTaintFlag);
-                }
-            }
-
+            TaintAnalysisVisitor::makeTaintInfoCopy(srcPointer,&I,srcTaintInfo,newTaintInfo);
 
             // check dstTaintInfo.
 
