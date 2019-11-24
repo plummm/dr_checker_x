@@ -197,6 +197,11 @@ namespace DRCHECKER {
             OS << "Obj: " << (const void*)this->priv << " Value: " << InstructionUtils::getValueStr(this->v) << "\n";
         }
 
+        void dumpInfo_light(raw_ostream &OS) {
+            OS << "Tag: " << (const void *)this;
+            OS << " Type: " << InstructionUtils::getTypeStr(this->type) << " | " << this->fieldId << " is_global: " << this->is_global << " obj: " << (const void*)this->priv << "\n";
+        }
+
         void printModInsts(raw_ostream &OS, std::map<BasicBlock*,std::set<uint64_t>> *switchMap) {
             OS << "###Mod Instruction List###\n";
             for (auto e : this->mod_insts) {

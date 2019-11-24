@@ -42,8 +42,8 @@ namespace DRCHECKER {
             if (targetTaintInfo) {
                 for (TaintFlag *tf : *targetTaintInfo) {
                     if (tf && tf->tag) {
-                        dbgs() << "++++TAG:\n";
-                        tf->tag->dumpInfo(dbgs());
+                        dbgs() << "++++TAG: ";
+                        tf->tag->dumpInfo_light(dbgs());
                     }
                 }
             }
@@ -58,8 +58,8 @@ namespace DRCHECKER {
             if (TaintUtils::addNewTaintFlag(existingTaintInfo, currTaintFlag)) {
 #ifdef DEBUG_ADD_NEW_TAINT_FLAG
                 if (currTaintFlag && currTaintFlag->tag) {
-                    dbgs() << "++++TAG:\n";
-                    currTaintFlag->tag->dumpInfo(dbgs());
+                    dbgs() << "++++TAG: ";
+                    currTaintFlag->tag->dumpInfo_light(dbgs());
                 }
 #endif
             }

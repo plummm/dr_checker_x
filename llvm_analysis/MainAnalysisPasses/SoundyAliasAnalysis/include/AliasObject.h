@@ -718,8 +718,8 @@ namespace DRCHECKER {
             if (targetFieldTaint->addTaintFlag(targetTaintFlag)) {
 #ifdef DEBUG_UPDATE_FIELD_TAINT
                 if (targetTaintFlag->tag) {
-                    dbgs() << "++++TAG:\n";
-                    targetTaintFlag->tag->dumpInfo(dbgs());
+                    dbgs() << "++++TAG: ";
+                    targetTaintFlag->tag->dumpInfo_light(dbgs());
                 }
 #endif
                 return true;
