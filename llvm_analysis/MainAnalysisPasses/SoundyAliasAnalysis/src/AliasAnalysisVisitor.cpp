@@ -694,9 +694,10 @@ void AliasAnalysisVisitor::visitCastInst(CastInst &I) {
 #ifdef DEBUG_CAST_INSTR
                         dbgs() << "AliasAnalysisVisitor::visitCastInst(): casting a non-composite pointer to a composite one, directly change the targetObject's type...\n";
 #endif
-                        newPointsToObj->targetObject->targetType = dstPointeeTy;
                         //We also need to re-taint the object (if necessary) since its type has changed.
                         std::set<TaintFlag*> *fieldTaint = newPointsToObj->targetObject->getFieldTaintInfo(0);
+                        newPointsToObj->targetObject->reset(&I,dstPointeeTy);
+                        //TODO: fieldTaint or all_contents_taint_flag?
                         if (fieldTaint) {
 #ifdef DEBUG_CAST_INSTR
                             dbgs() << "AliasAnalysisVisitor::visitCastInst(): trying to re-taint the converted AliasObject, #fieldTaint: " << fieldTaint->size() << "\n";

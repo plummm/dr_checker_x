@@ -753,7 +753,9 @@ namespace DRCHECKER {
 
         }
 
-        inline Value * getValue();
+        inline Value *getValue();
+
+        inline void setValue(Value*);
 
         virtual void taintSubObj(AliasObject *newObj, long srcfieldId, Instruction *targetInstr);
 
@@ -814,6 +816,22 @@ namespace DRCHECKER {
             }
             return false;
 
+        }
+
+        //In some situations we need to reset this AliasObject, e.g. the obj is originally allocated by kmalloc() w/ a type i8*, and then converted to a composite type. 
+        //NOTE: after invoking this we usually need to re-taint the changed object.
+        void reset(Value *v, Type *ty) {
+            this->setValue(v);
+            if (v && v->getType() && !ty) {
+                ty = v->getType();
+                if (ty->isPointerTy()) {
+                    ty = ty->getPointerElementType();
+                }
+            }
+            this->targetType = ty;
+            this->all_contents_tainted = false;
+            delete this->all_contents_taint_flag;
+            //TODO: whether need to clear the old field taints...
         }
 
         std::set<long> getAllAvailableFields() {
@@ -900,6 +918,9 @@ namespace DRCHECKER {
             return nullptr;
         }
 
+        virtual void setObjectPtr(Value *v) {
+            return;
+        }
 
         virtual bool isSameObject(AliasObject *other) {
             return this == other;
@@ -1022,7 +1043,7 @@ namespace DRCHECKER {
     class FunctionLocalVariable : public AliasObject {
     public:
         Function *targetFunction;
-        AllocaInst *targetAllocaInst;
+        Value *targetAllocaInst;
         Value *targetVar;
         // This differentiates local variables from different calling context.
         std::vector<Instruction *> *callSiteContext;
@@ -1054,6 +1075,10 @@ namespace DRCHECKER {
 
         Value* getObjectPtr() {
             return this->targetAllocaInst;
+        }
+
+        void setObjectPtr(Value *v) {
+            this->targetAllocaInst = v;
         }
 
         bool isFunctionLocal() {
@@ -1097,6 +1122,10 @@ namespace DRCHECKER {
             return this->targetVar;
         }
 
+        void setObjectPtr(Value *v) {
+            this->targetVar = v;
+        }
+
         bool isGlobalObject() {
             return true;
         }
@@ -1125,8 +1154,13 @@ namespace DRCHECKER {
         AliasObject* makeCopy() {
             return new OutsideObject(this);
         }
+
         Value* getObjectPtr() {
             return this->targetVar;
+        }
+
+        void setObjectPtr(Value *v) {
+            this->targetVar = v;
         }
 
         bool isOutsideObject() {
@@ -1138,7 +1172,7 @@ namespace DRCHECKER {
     class HeapLocation : public AliasObject {
     public:
         Function *targetFunction;
-        Instruction *targetAllocInstruction;
+        Value *targetAllocInstruction;
         std::vector<Instruction *> *callSiteContext;
         Value *targetAllocSize;
         bool is_malloced;
@@ -1167,6 +1201,10 @@ namespace DRCHECKER {
         }
         Value* getObjectPtr() {
             return this->targetAllocInstruction;
+        }
+
+        void setObjectPtr(Value *v) {
+            this->targetAllocInstruction = v;
         }
 
         Value* getAllocSize() {
@@ -1204,11 +1242,17 @@ namespace DRCHECKER {
             this->callSiteContext = srcFunctionArg->callSiteContext;
             this->targetType = srcFunctionArg->targetType;
         }
+
         AliasObject* makeCopy() {
             return new FunctionArgument(this);
         }
+
         Value* getObjectPtr() {
             return this->targetArgument;
+        }
+
+        void setObjectPtr(Value *v) {
+            this->targetArgument = v;
         }
 
         bool isFunctionArg() {
@@ -1217,7 +1261,7 @@ namespace DRCHECKER {
     };
 
     //hz: get the llvm::Value behind this AliasObject.
-    Value * AliasObject::getValue() {
+    Value *AliasObject::getValue() {
         return this->getObjectPtr();
         /*
         Value *v = nullptr;
@@ -1232,6 +1276,10 @@ namespace DRCHECKER {
         }//TODO: HeapAllocation
         return v;
         */
+    }
+
+    void AliasObject::setValue(Value *v) {
+        this->setObjectPtr(v);
     }
 
     //hz: A helper method to create and (taint) a new OutsideObject according to a given type.

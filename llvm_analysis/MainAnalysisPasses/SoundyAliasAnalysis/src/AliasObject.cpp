@@ -128,7 +128,7 @@ namespace DRCHECKER {
                     dbgs() << "AliasObject::fetchPointsToObjects: Change type of the HeapLocation.\n";
 #endif
                     //Change type.
-                    obj->targetObject->targetType = expObjTy;
+                    obj->targetObject->reset(targetInstr,expObjTy);
                     //Do the taint accordingly.
                     this->taintSubObj(obj->targetObject,srcfieldId,targetInstr);
                 }
