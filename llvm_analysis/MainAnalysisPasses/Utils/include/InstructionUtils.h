@@ -198,6 +198,10 @@ namespace DRCHECKER {
         static std::string getStFieldName(Module *mod, StructType *ty, unsigned fid);
 
         static int getAllMDNodes(Module *mod, DenseMap<MDNode*, unsigned> *mdnMap);
+
+        static bool isPrimitivePtr(Type *ty);
+
+        static bool isPrimitiveTy(Type *ty);
     };
 
 }

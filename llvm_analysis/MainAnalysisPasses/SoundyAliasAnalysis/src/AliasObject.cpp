@@ -102,14 +102,17 @@ namespace DRCHECKER {
         fetchPointsToObjects_log(srcfieldId, dstObjects, targetInstr, create_arg_obj);
 #endif
         //Collapse the array/vector into a single element.
+        long org_srcfieldId = srcfieldId;
         if (this->targetType && dyn_cast<SequentialType>(this->targetType)) {
+            //if (this->countObjectPointsTo(srcfieldId) == 0) {
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-            dbgs() << "AliasObject::fetchPointsToObjects: the host is an array/vector, we will set the srcfieldId to 0.\n";
+            dbgs() << "AliasObject::fetchPointsToObjects: the host is an array/vector, now set srcfieldId to 0.\n";
 #endif
             srcfieldId = 0;
+            //}
         }
-        for(ObjectPointsTo *obj : pointsTo) {
-            if(obj->fieldId == srcfieldId && obj->targetObject) {
+        for (ObjectPointsTo *obj : pointsTo) {
+            if (obj->fieldId == srcfieldId && obj->targetObject) {
                 //We handle a special case here:
                 //Many malloc'ed HeapLocation object can be of the type i8*, while only in the later code the pointer will be converted to a certain struct*,
                 //we choose to do this conversion here, specifically we need to:
@@ -133,7 +136,7 @@ namespace DRCHECKER {
                     this->taintSubObj(obj->targetObject,srcfieldId,targetInstr);
                 }
                 auto p = std::make_pair(obj->dstfieldId, obj->targetObject);
-                if(std::find(dstObjects.begin(), dstObjects.end(), p) == dstObjects.end()) {
+                if (std::find(dstObjects.begin(), dstObjects.end(), p) == dstObjects.end()) {
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
                     dbgs() << "Found an obj in |pointsTo| records:\n";
                     dbgs() << "Type: " << InstructionUtils::getTypeStr(obj->targetObject->targetType) << " | " << obj->dstfieldId << " | is_taint_src:" << obj->targetObject->is_taint_src << "\n";
@@ -144,7 +147,7 @@ namespace DRCHECKER {
                 }
             }
         }
-        if(hasObjects || InstructionUtils::isAsanInst(targetInstr)) {
+        if (hasObjects || InstructionUtils::isAsanInst(targetInstr)) {
             return;
         }
         //Below we try to create a dummy object.
@@ -176,49 +179,57 @@ namespace DRCHECKER {
         //Get the pointee type of the dst field.
         //There will be several cases here:
         //(1) The dst element is a pointer, then we can try to create a dummy obj for it since there are no related records in "pointsTo";
-        //(2) The dst element is an embedded struct/array, if this is the case we need to recursively extract the first field of it until we get a non-emb-struct field, then we can decide the type of dummy obj to create.
+        //(2) The dst element is an embedded composite, if this is the case we need to recursively extract the first field of it until we get a non-emb-struct field, then we can decide the type of dummy obj to create.
         //(3) No type information for the dst element is available, return directly.
-        Type *e_pointto_ty = nullptr;
         AliasObject *hostObj = this;
         long fid = srcfieldId;
-        while (!ety->isPointerTy()) {
+        while (dyn_cast<CompositeType>(ety)) {
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-            dbgs() << "fetchPointsToObjects(): dst field " << fid << " is not a pointer: " << InstructionUtils::getTypeStr(ety) << "\n"; 
+            dbgs() << "fetchPointsToObjects(): dst field " << fid << " is a composite: " << InstructionUtils::getTypeStr(ety) << "\n"; 
+            dbgs() << "fetchPointsToObjects(): Try to get/create an emb obj for the dst field.\n"; 
 #endif
-            if (dyn_cast<CompositeType>(ety)) {
+            AliasObject *newObj = DRCHECKER::createEmbObj(hostObj, fid);
+            if (!newObj) {
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-                dbgs() << "fetchPointsToObjects(): Try to create an emb obj for the dst field.\n"; 
+                dbgs() << "!!! fetchPointsToObjects(): Failed to create the emb obj.\n"; 
 #endif
-                AliasObject *newObj = DRCHECKER::createEmbObj(hostObj, fid);
-                if (!newObj) {
-#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-                    dbgs() << "!!! fetchPointsToObjects(): Failed to create the emb obj.\n"; 
-#endif
-                    break;
-                }
-                hostObj = newObj;
-                fid = 0;
-                ety = dyn_cast<CompositeType>(ety)->getTypeAtIndex((unsigned)0);
-            }else {
-                //TODO: Can we handle any other dst element types?
                 return;
             }
+            //assert(InstructionUtils::same_types(newObj->targetType,ety));
+            hostObj = newObj;
+            fid = 0;
+            ety = dyn_cast<CompositeType>(ety)->getTypeAtIndex((unsigned)fid);
         }
-        if (ety->isPointerTy()) {
-            e_pointto_ty = ety->getPointerElementType();
-        }else {
+        //It's possible that the embedded object already has the point-to record for field 0, if not, we may need to create the dummy pointee objects.
+        if (hostObj != this && hostObj->countObjectPointsTo(fid) > 0) {
+#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
+            dbgs() << "fetchPointsToObjects(): recursively get the point-to from the embedded composite field.\n"; 
+#endif
+            return hostObj->fetchPointsToObjects(fid,dstObjects,targetInstr,create_arg_obj);
+        }
+        //We need to decide the type of the dummy object we want to create..
+        //NOTE: a non-pointer field can also be converted to a pointer and thus have pointees... 
+        Type *real_ty = nullptr;
+        if (ety->isPointerTy() && !InstructionUtils::isPrimitivePtr(ety)) {
+            real_ty = ety->getPointerElementType();
+        }else if (expObjTy && !InstructionUtils::isPrimitiveTy(expObjTy)) {
+            //NOTE: we handle a special case here, sometimes the field type in the struct can be "void*" or "char*" ("i8*"), but it can be converted to "struct*" in the load,
+            //if this is the case, we will create the dummy object based on the real converted type and still make this "void*/char*" field point to the new obj. 
+            real_ty = expObjTy;
+        }
+#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
+        dbgs() << "fetchPointsToObjects(): about to create dummy obj of type: " << InstructionUtils::getTypeStr(real_ty) << "\n"; 
+#endif
+        if (!real_ty) {
             return;
         }
-        //TODO: replace the below "this->" w/ possibly newly created emb obj.
-        //Create the dummy obj according to the dst element type.
-        if (!e_pointto_ty || !hostObj) {
-            return;
-        }else if (e_pointto_ty->isFunctionTy()) {
+        //Create the dummy obj according to the dst type.
+        if (real_ty->isFunctionTy()) {
             //This is a function pointer w/o point-to function, which can cause trobule later in resolving indirect function call.
             //We can try to do some smart resolving here by looking at the same-typed global constant objects.
 #ifdef SMART_FUNC_PTR_RESOLVE
             std::vector<Function*> candidateFuncs;
-            hostObj->getPossibleMemberFunctions(targetInstr, dyn_cast<FunctionType>(e_pointto_ty), hostObj->targetType, fid, candidateFuncs);
+            hostObj->getPossibleMemberFunctions(targetInstr, dyn_cast<FunctionType>(real_ty), hostObj->targetType, fid, candidateFuncs);
             for (Function *func : candidateFuncs) {
                 GlobalObject *newObj = new GlobalObject(func);
 
@@ -239,21 +250,9 @@ namespace DRCHECKER {
                 dstObjects.insert(dstObjects.end(), std::make_pair(0, newObj));
             }
 #endif
-        }else if (dyn_cast<CompositeType>(e_pointto_ty) || e_pointto_ty->isVoidTy() || e_pointto_ty->isIntegerTy(8)) {
+        }else if (validTyForOutsideObj(real_ty)) {
             // if there are no composite objects that this pointer field points to, generate a dummy object.
-            //NOTE: we handle a special case here, sometimes the field type in the struct can be "void*" or "char*" ("i8*"), but it can be converted to "struct*" in the load,
-            //if this is the case, we will create the dummy object based on the real converted type and still make this "void*/char*" field point to the new obj. 
-            Type *real_ty = dyn_cast<CompositeType>(e_pointto_ty) ? e_pointto_ty : expObjTy;
-#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-            dbgs() << "fetchPointsToObjects(): the field pointee type is: " << InstructionUtils::getTypeStr(e_pointto_ty) << " real pointee type: " << InstructionUtils::getTypeStr(real_ty) << "\n";
-#endif
             if(create_arg_obj || hostObj->isFunctionArg() || hostObj->isOutsideObject() || hostObj->isHeapLocation()) {
-                if (!validTyForOutsideObj(real_ty)) {
-#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-                    dbgs() << "fetchPointsToObjects(): the pointee type is invalid for an Outside object! Return...\n";
-#endif
-                    return;
-                }
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
                 dbgs() << "Creating a new dummy AliasObject...\n";
 #endif
@@ -287,6 +286,10 @@ namespace DRCHECKER {
 
                 dstObjects.insert(dstObjects.end(), std::make_pair(0, newObj));
             }
+        }else {
+#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
+                dbgs() << "fetchPointsToObjects(): the pointee type is invalid to create a dummy obj!\n";
+#endif
         }
     }
 

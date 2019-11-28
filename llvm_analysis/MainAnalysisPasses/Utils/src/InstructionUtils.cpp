@@ -1248,4 +1248,18 @@ namespace DRCHECKER {
         return "";
     }
 
+    bool InstructionUtils::isPrimitiveTy(Type *ty) {
+        if (ty) {
+            return (ty->isVoidTy() || ty->isIntegerTy());
+        }
+        return true;
+    }
+
+    bool InstructionUtils::isPrimitivePtr(Type *ty) {
+        if (!ty || !ty->isPointerTy()) {
+            return false;
+        }
+        return InstructionUtils::isPrimitiveTy(ty->getPointerElementType());
+    }
+
 }

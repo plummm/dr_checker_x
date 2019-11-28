@@ -25,7 +25,7 @@ using namespace llvm;
 //#define DEBUG_OUTSIDE_OBJ_CREATION
 #define ENABLE_SUB_OBJ_CACHE
 #define SMART_FUNC_PTR_RESOLVE
-//#define DEBUG_SMART_FUNCTION_PTR_RESOLVE
+#define DEBUG_SMART_FUNCTION_PTR_RESOLVE
 #define DEBUG_FETCH_POINTS_TO_OBJECTS
 #define DEBUG_CHANGE_HEAPLOCATIONTYPE
 #define DEBUG_UPDATE_FIELD_POINT
@@ -605,14 +605,17 @@ namespace DRCHECKER {
 
         //Try to find a proper function for a func pointer field in a struct.
         bool getPossibleMemberFunctions(Instruction *inst, FunctionType *targetFunctionType, Type *host_ty, long field, std::vector<Function *> &targetFunctions) {
-            if (!inst || !targetFunctionType || !host_ty || field < 0 || field >= host_ty->getStructNumElements()) {
+            if (!inst || !targetFunctionType || !host_ty || !dyn_cast<CompositeType>(host_ty)) {
+                return false;
+            }
+            if (field < 0 || !InstructionUtils::isIndexValid(host_ty,(unsigned)field)) {
                 return false;
             }
 #ifdef DEBUG_SMART_FUNCTION_PTR_RESOLVE
             dbgs() << "getPossibleMemberFunctions: inst: ";
             dbgs() << InstructionUtils::getValueStr(inst) << "\n";
             dbgs() << "FUNC: " << InstructionUtils::getTypeStr(targetFunctionType);
-            dbgs() << " STRUCT: " << InstructionUtils::getTypeStr(host_ty) << " #" << field << "\n";
+            dbgs() << " STRUCT: " << InstructionUtils::getTypeStr(host_ty) << " | " << field << "\n";
 #endif
             Module *currModule = inst->getParent()->getParent()->getParent();
             for(auto a = currModule->begin(), b = currModule->end(); a != b; a++) {
@@ -637,12 +640,27 @@ namespace DRCHECKER {
                         }
                         dbgs() << "\n";
 #endif
-                        if (InstructionUtils::same_types((x.first)->getType(), host_ty) && x.second.find(field) != x.second.end()) {
+                        if (InstructionUtils::same_types((x.first)->getType(), host_ty)) {
+                            if (dyn_cast<StructType>(host_ty)) {
+                                //field-sensitive for the struct.
+                                if (x.second.find(field) != x.second.end()) {
 #ifdef DEBUG_SMART_FUNCTION_PTR_RESOLVE
-                            dbgs() << "getPossibleMemberFunctions: add to final list.\n";
+                                    dbgs() << "getPossibleMemberFunctions: add to final list (struct).\n";
 #endif
-                            targetFunctions.push_back(currFunction);
-                            break;
+                                    targetFunctions.push_back(currFunction);
+                                    break;
+                                }
+                            }else if (dyn_cast<SequentialType>(host_ty)) {
+                                //Since we now collapse an array to one element, we need to return func pointers for all fields..
+#ifdef DEBUG_SMART_FUNCTION_PTR_RESOLVE
+                                dbgs() << "getPossibleMemberFunctions: add to final list (sequential).\n";
+#endif
+                                targetFunctions.push_back(currFunction);
+                                break;
+                            }else {
+                                //Impossible.
+                                assert("Unrecognized CompositeType" && false);
+                            }
                         }
                     }
                 }
