@@ -31,11 +31,6 @@ namespace DRCHECKER {
 
         std::vector<VisitorCallback *> &allCallbacks;
 
-#ifdef FAST_HEURISTIC
-        // a map of basic block to number of times it is analyzed.
-        std::map<const BasicBlock*, unsigned long> numTimeAnalyzed;
-#endif
-
         // order in which BBs needs to be analyzed.
         // This ideally should be in topological order of the
         // SCCs (Strongly connected components) in the CFG

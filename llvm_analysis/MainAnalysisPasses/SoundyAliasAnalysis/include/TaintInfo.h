@@ -236,11 +236,14 @@ namespace DRCHECKER {
 
     public:
         //Constructors
-        TaintFlag(Value *targetInstr, bool is_tainted) {
+        TaintFlag(Value *targetInstr, bool is_tainted, TaintTag *tag = nullptr) {
             assert(targetInstr != nullptr && "Target Instruction cannot be NULL");
             this->targetInstr = targetInstr;
+            if (dyn_cast<Instruction>(targetInstr)) {
+                this->instructionTrace.push_back(dyn_cast<Instruction>(targetInstr));
+            }
             this->is_tainted = is_tainted;
-            this->tag = nullptr;
+            this->tag = tag;
         }
 
         TaintFlag(TaintFlag *copyTaint, Value *targetInstr, Value *srcOperand) {

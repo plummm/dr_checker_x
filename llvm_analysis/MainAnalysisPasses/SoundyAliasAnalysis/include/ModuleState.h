@@ -124,6 +124,10 @@ namespace DRCHECKER {
         //hz: func name -> call inst -> set of ctx ptr
         std::map<std::string,std::map<CallInst*,std::set<std::vector<Instruction*>*>>> calleeMap;
 
+        // a map of basic block to number of times it is analyzed.
+        std::map<const BasicBlock*, unsigned long> numTimeAnalyzed;
+
+
         GlobalState(RangeAnalysis::RangeAnalysis *ra, DataLayout *currDataLayout) {
             this->range_analysis = ra;
             this->targetDataLayout = currDataLayout;

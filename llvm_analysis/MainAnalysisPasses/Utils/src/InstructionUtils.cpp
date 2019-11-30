@@ -1262,4 +1262,18 @@ namespace DRCHECKER {
         return InstructionUtils::isPrimitiveTy(ty->getPointerElementType());
     }
 
+    //Note: the struct name is like "struct.file"
+    Type *InstructionUtils::getStTypeByName(Module *mod, std::string &n) {
+        if (!mod) {
+            return nullptr;
+        }
+        std::vector<StructType*> tys = mod->getIdentifiedStructTypes();
+        for (StructType *ty : tys) {
+            if (ty && ty->hasName() && ty->getName().str() == n) {
+                return ty;
+            }
+        }
+        return nullptr;
+    }
+
 }

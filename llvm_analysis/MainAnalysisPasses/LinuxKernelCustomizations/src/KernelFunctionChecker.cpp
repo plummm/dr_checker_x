@@ -28,6 +28,8 @@ namespace DRCHECKER {
                                                                              "strlcat"};
 
     const std::set<std::string> KernelFunctionChecker::atoiLikeFunctions{"kstrto", "simple_strto"};
+    // fd creation function.
+    const std::set<std::string> KernelFunctionChecker::fd_creation_function_names{"anon_inode_getfd"};
 
     bool KernelFunctionChecker::is_debug_function(const Function *targetFunction) {
         if(targetFunction->hasName()) {
@@ -181,5 +183,36 @@ namespace DRCHECKER {
 
     }
     
+    bool KernelFunctionChecker::is_fd_creation_function(const Function *targetFunction) {
+        if(targetFunction->isDeclaration() && targetFunction->hasName()) {
+            std::string func_name = targetFunction->getName().str();
+            for (const std::string &curr_func:KernelFunctionChecker::fd_creation_function_names) {
+                if (func_name.find(curr_func.c_str()) != std::string::npos) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    std::map<long,long> KernelFunctionChecker::get_fd_field_arg_map(const Function *targetFunction) {
+        std::map<long,long> fieldArgMap;
+        if(targetFunction->isDeclaration() && targetFunction->hasName()) {
+            std::string func_name = targetFunction->getName().str();
+            if(func_name == "anon_inode_getfd") {
+                //func prototype:
+                //int anon_inode_getfd(const char *name, const struct file_operations *fops, void *priv, int flags)
+                fieldArgMap[3] = 1; //file->f_op
+                fieldArgMap[16] = 2; //file->private_data
+                return fieldArgMap;
+            }
+
+        }
+        // should never reach here..make sure that you call is_fd_creation_function function
+        // before this.
+        assert(false);
+        return fieldArgMap;
+    }
+
 }
 

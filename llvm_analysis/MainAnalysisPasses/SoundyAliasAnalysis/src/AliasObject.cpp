@@ -412,7 +412,7 @@ namespace DRCHECKER {
                 dbgs() << "Type-based createOutsideObj(): set |is_taint_src| for the outside obj.\n";
 #endif
             }else {
-                //We don't have a value/pointer here to generate a TaintFlag..
+                //We don't have a value/pointer here to generate a TaintFlag...
                 //TODO:
 #ifdef DEBUG_CREATE_DUMMY_OBJ_IF_NULL
                 dbgs() << "!!!Type-based createOutsideObj(): trying to taint w/o existingTaints...\n";

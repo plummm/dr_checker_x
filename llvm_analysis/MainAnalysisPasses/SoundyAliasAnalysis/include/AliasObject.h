@@ -191,6 +191,8 @@ namespace DRCHECKER {
         std::vector<AliasObject*> pointsFrom;
         // All Objects that could be pointed by this object.
         std::vector<ObjectPointsTo*> pointsTo;
+        // The reference instruction of this AliasObject (usually the inst where this obj is created.).
+        Instruction *refInst = nullptr;
 
         //Information needed for Taint Analysis.
         // fields that store information which is tainted.
@@ -243,6 +245,7 @@ namespace DRCHECKER {
             this->embObjs = srcAliasObject->embObjs;
             this->parent = srcAliasObject->parent;
             this->parent_field = srcAliasObject->parent_field;
+            this->refInst = srcAliasObject->refInst;
 
         }
         AliasObject() {
@@ -250,6 +253,7 @@ namespace DRCHECKER {
             this->id = getCurrID();
             this->parent = nullptr;
             this->parent_field = 0;
+            this->refInst = nullptr;
         }
 
         ~AliasObject() {

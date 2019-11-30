@@ -301,9 +301,9 @@ namespace DRCHECKER {
 
 
     void GlobalVisitor::visit(BasicBlock *BB) {
+        if(this->currState.numTimeAnalyzed.find(BB) != this->currState.numTimeAnalyzed.end()) {
 #ifdef FAST_HEURISTIC
-        if(this->numTimeAnalyzed.find(BB) != this->numTimeAnalyzed.end()) {
-            if(this->numTimeAnalyzed[BB] >= GlobalVisitor::MAX_NUM_TO_VISIT) {
+            if(this->currState.numTimeAnalyzed[BB] >= GlobalVisitor::MAX_NUM_TO_VISIT) {
 #ifdef DEBUG_BB_VISIT
                 dbgs() << "Ignoring BB:" << BB->getName().str()
                        << " ad it has been analyzed more than:"
@@ -311,11 +311,11 @@ namespace DRCHECKER {
 #endif
                 return;
             }
-            this->numTimeAnalyzed[BB] = this->numTimeAnalyzed[BB] + 1;
-        } else {
-            this->numTimeAnalyzed[BB] = 1;
-        }
 #endif
+            this->currState.numTimeAnalyzed[BB] = this->currState.numTimeAnalyzed[BB] + 1;
+        } else {
+            this->currState.numTimeAnalyzed[BB] = 1;
+        }
 #ifdef DEBUG_BB_VISIT
         dbgs() << "Starting to analyze BB:" <<  BB->getName().str() << ":at:"<< BB->getParent()->getName() << "\n";
         /*

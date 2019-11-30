@@ -202,6 +202,8 @@ namespace DRCHECKER {
         static bool isPrimitivePtr(Type *ty);
 
         static bool isPrimitiveTy(Type *ty);
+
+        static Type *getStTypeByName(Module *mod, std::string &n);
     };
 
 }

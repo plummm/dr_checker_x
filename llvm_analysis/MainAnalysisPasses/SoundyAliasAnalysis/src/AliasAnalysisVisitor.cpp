@@ -1811,6 +1811,45 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
         }
     }
 
+    void AliasAnalysisVisitor::handleFdCreationFunction(std::map<long,long> &fdFieldMap, Function *currFunc, CallInst &I) {
+        if (!currFunc) {
+#ifdef DEBUG_CALL_INSTR
+            dbgs() << "AliasAnalysisVisitor::handleFdCreationFunction(): Null currFunc!!!\n";
+#endif
+            return;
+        }
+        //We need to create a new struct.file object and set its field point-to according to the field-to-arg map.
+        std::string fn("struct.file");
+        Type *file_ty = InstructionUtils::getStTypeByName(I.getModule(), fn);
+        if (!file_ty) {
+#ifdef DEBUG_CALL_INSTR
+            dbgs() << "AliasAnalysisVisitor::handleFdCreationFunction(): Cannot get the struct.file type!!!\n";
+#endif
+        }
+        //If we have already visited this call site then the file obj should already be created, now let's just skip it.
+        //NOTE: count == 1 means that it's the first time we're analyzing current BB, among all call contexts.
+        if ( this->currState.numTimeAnalyzed.find(I.getParent()) != this->currState.numTimeAnalyzed.end() &&
+             this->currState.numTimeAnalyzed[I.getParent()] > 1 ) {
+            //TODO: "anon_inode_getfd" doesn't return the pointer to the created file struct, so we don't need to update the point-to of this call inst,
+            //but we may have other fd creation functions that needs us to do so. If that's the case, we need to retrieve the previously created obj and update the pointer.
+            return;
+        }
+        //Type based object creation.
+        //Since this will create a fd, we always treat it as a global taint source.
+        std::set<TaintFlag*> existingTaints;
+        TaintTag *tag = new TaintTag(0,file_ty,true);
+        TaintFlag *tf = new TaintFlag(&I,true,tag);
+        existingTaints.insert(tf);
+        OutsideObject *newObj = DRCHECKER::createOutsideObj(file_ty,true,&existingTaints);
+        //Ok, now add it to the global object cache.
+        if (newObj) {
+            DRCHECKER::addToSharedObjCache(newObj);
+        }else {
+#ifdef DEBUG_CALL_INSTR
+            dbgs() << "AliasAnalysisVisitor::handleFdCreationFunction(): Cannot create the file struct!!!\n";
+#endif
+        }
+    }
 
     // Need to implement these
     VisitorCallback* AliasAnalysisVisitor::visitCallInst(CallInst &I, Function *currFunc,
@@ -1818,9 +1857,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
             std::vector<Instruction *> *callSiteContext) {
 
 #ifdef DEBUG_CALL_INSTR
-        dbgs() << "AliasAnalysisVisitor::visitCallInst(): ";
-        I.print(dbgs());
-        dbgs() << "\n";
+        dbgs() << "AliasAnalysisVisitor::visitCallInst(): " << InstructionUtils::getValueStr(&I) << "\n";
 #endif
         std::string currFuncName = currFunc->getName().str();
         // if we do not have function definition
@@ -1832,7 +1869,11 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
                 // handle memcpy function.
                 std::vector<long> memcpyArgs = targetChecker->get_memcpy_arguments(currFunc);
                 this->handleMemcpyFunction(memcpyArgs, I);
-            } else {
+            }else if (targetChecker->is_fd_creation_function(currFunc)) {
+                // handle fd creation function
+                std::map<long,long> fdFieldMap = targetChecker->get_fd_field_arg_map(currFunc);
+                this->handleFdCreationFunction(fdFieldMap,currFunc,I);
+            }else {
                 //std::set<PointerPointsTo*>* newPointsToInfo = KernelFunctionHandler::handleKernelFunction(I, currFunc, this->currFuncCallSites);
                 bool is_handled;
                 is_handled = false;

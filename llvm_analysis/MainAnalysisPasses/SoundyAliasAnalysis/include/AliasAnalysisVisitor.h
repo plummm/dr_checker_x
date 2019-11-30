@@ -188,6 +188,8 @@ namespace DRCHECKER {
          */
         void handleMemcpyFunction(std::vector<long> &memcpyArgs, CallInst &I);
 
+        void handleFdCreationFunction(std::map<long,long> &fdFieldMap, Function *currFunc, CallInst &I);
+
         void handleInlinePointerOperand(Instruction &currIns, Value **srcPointer);
 
         //hz: A helper method to create and (taint) a new OutsideObject.
