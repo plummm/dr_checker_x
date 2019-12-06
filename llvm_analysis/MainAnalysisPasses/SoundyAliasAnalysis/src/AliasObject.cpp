@@ -1104,7 +1104,85 @@ namespace DRCHECKER {
         return 1;
     }
 
-    OutsideObject *getSharedObjFromCache(Type *ty) {
+    //Ok, now get the "->private" pointee type of the file struct as pointed to by "p".
+    //(1) get all GEPs that use the "p" as the base pointer and make the indices (0,16).
+    //(2) decide the type of the resulting GEP pointer, by looking at the GEP's users (e.g. a cast inst).
+    void probeFilePrivTy(Value *p, std::set<Type*> &retSet) {
+        if (!p) {
+            return;
+        }
+        for (User *u : p->users()) {
+            GEPOperator *gep = dyn_cast<GEPOperator>(u);
+            //Make sure it has a single index.
+            if (!gep || gep->getNumOperands() != 3 || gep->getPointerOperand() != p) {
+                continue;
+            }
+            //Get the 2nd constant index value.
+            ConstantInt *CI = dyn_cast<ConstantInt>(gep->getOperand(2));
+            if (!CI) {
+                continue;
+            }
+            long index = CI->getSExtValue();
+            //"16" is a hardcoded index of the ".private" in the file struct.
+            if (index != 16) {
+                continue;
+            }
+            //Infer the type from the cast inst of this gep.
+            for (User *e : gep->users()) {
+                CastInst *cinst = dyn_cast<CastInst>(e);
+                if (!cinst || cinst->getOperand(0) != dyn_cast<Value>(e)) {
+                    continue;
+                }
+                Type *t = cinst->getDestTy();
+                if (t && t->isPointerTy()) {
+                    retSet.insert(t->getPointerElementType());
+                }
+            }
+        }
+        return;
+    }
+
+    int AliasObject::maybeAPointee(Value *p) {
+        if (!p || !p->getType()) {
+            return -1;
+        }
+        Type *vt = p->getType();
+        if (!vt->isPointerTy()) {
+            //Since it's not a pointer, we cannot get the type info of the pointee, so conservatively let's return true.
+            return 0;
+        }
+        Type *pointeeTy = vt->getPointerElementType();
+        //i8* or void* can in theory point to anything.
+        if (pointeeTy && (pointeeTy->isIntegerTy() || pointeeTy->isVoidTy())) {
+            return 0;
+        }
+        //TODO: For the composite type in theory we need to inspect its type desc, but for now we assume that "p" can point to any composite type,
+        //except for some special cases that we will deal with as below.
+        //***Special processing for "struct.file" type: match its "->private" pointee object type.
+        std::set<Type*> fty0;
+        if (pointeeTy && InstructionUtils::same_types(pointeeTy,this->targetType) && dyn_cast<StructType>(pointeeTy)) {
+            StructType *stTy = dyn_cast<StructType>(pointeeTy);
+            if (stTy->hasName() && stTy->getName().str() == "struct.file") {
+                //Ok, it's a file struct, now get the pointee type of "->private" of this AliasObject.
+                this->getFieldPointeeTy(16, fty0);
+                if (fty0.empty()) {
+                    return 0;
+                }
+            }
+        }
+        std::set<Type*> fty1;
+        probeFilePrivTy(p,fty1);
+        for (Type *t0 : fty0) {
+            for (Type *t1 : fty1) {
+                if (InstructionUtils::same_types(t0,t1)) {
+                    return 1;
+                }
+            }
+        }
+        return 0;
+    }
+
+    OutsideObject *getSharedObjFromCache(Value *v, Type *ty) {
 #ifdef DEBUG_SHARED_OBJ_CACHE
         dbgs() << "getSharedObjFromCache(): At the entrance. Type: " << InstructionUtils::getTypeStr(ty) << " currEntryFunc: " << DRCHECKER::currEntryFunc->getName().str() << "\n";
 #endif
@@ -1120,6 +1198,8 @@ namespace DRCHECKER {
 #endif
             return nullptr;
         }
+        OutsideObject *ro = nullptr;
+        int max_s = -99;
         for (auto &e : DRCHECKER::sharedObjCache[ty]) {
             if (e.first != DRCHECKER::currEntryFunc) {
                 for (OutsideObject *o : e.second) {
@@ -1127,7 +1207,15 @@ namespace DRCHECKER {
                     dbgs() << "getSharedObjFromCache(): Ty: " << InstructionUtils::getTypeStr(ty) << " currEntryFunc: " << DRCHECKER::currEntryFunc->getName().str() << " srcEntryFunc: " << e.first->getName().str();
                     dbgs() << " obj ID: " << (const void*)o << "\n";
 #endif
-                    return o;
+                    if (!v) {
+                        return o;
+                    }else {
+                        int t = o->maybeAPointee(v);
+                        if (t > max_s) {
+                            max_s = t;
+                            ro = o;
+                        }
+                    }
                 }
             }else {
                 //This means there is already a same-typed object created previously when analyzing current entry function.
@@ -1135,10 +1223,9 @@ namespace DRCHECKER {
 #ifdef DEBUG_SHARED_OBJ_CACHE
                 dbgs() << "getSharedObjFromCache(): Found a previously created obj by the current entry func.\n";
 #endif
-                break;
             }
         }
-        return nullptr;
+        return ro;
     }
 
     int createEmbObjChain(FieldDesc *fd, PointerPointsTo *pto, int limit) {

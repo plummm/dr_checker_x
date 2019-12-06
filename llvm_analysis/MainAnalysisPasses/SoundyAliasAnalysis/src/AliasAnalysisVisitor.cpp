@@ -30,7 +30,7 @@ namespace DRCHECKER {
         //because other places create the object that is related to another object (emb/host/field point-to), while we only need to cache the
         //top-level outside obj here (so that other sub obj can be naturally obtained by the field records inside it).
         if (p && p->getType() && p->getType()->isPointerTy() && dyn_cast<CompositeType>(p->getType()->getPointerElementType())) {
-            OutsideObject *obj = DRCHECKER::getSharedObjFromCache(p->getType()->getPointerElementType());
+            OutsideObject *obj = DRCHECKER::getSharedObjFromCache(p,p->getType()->getPointerElementType());
             if (obj) {
                 //We need to bind the shared object w/ current inst.
                 DRCHECKER::updatePointsToRecord(p,currPointsTo,obj);

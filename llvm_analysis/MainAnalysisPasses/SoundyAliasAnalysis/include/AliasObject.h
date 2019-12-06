@@ -395,6 +395,17 @@ namespace DRCHECKER {
             }
         }
 
+        void getFieldPointeeTy(long fid, std::set<Type*> &retSet) {
+            std::set<AliasObject*> fieldPointee;
+            this->getAllObjectsPointedByField(16,fieldPointee);
+            for (AliasObject *e : fieldPointee) {
+                if (e->targetType) {
+                    retSet.insert(e->targetType);
+                }
+            }
+            return;
+        }
+
         void updateFieldPointsToFromObjects(std::vector<ObjectPointsTo*>* dstPointsToObject,
                                             Instruction *propagatingInstr) {
             /***
@@ -786,6 +797,10 @@ namespace DRCHECKER {
 
         virtual void fetchPointsToObjects_log(long srcfieldId, std::set<std::pair<long, AliasObject*>> &dstObjects,
             Instruction *targetInstr, bool create_arg_obj);
+
+        //Decide whether the "p" may point to this AliasObject.
+        //Return: negative: impossible, positive: the larger, the more likely.
+        virtual int maybeAPointee(Value *p);
 
         //hz: taint all fields and attach a different taint tag for each field in the TaintFlag.
         bool taintAllFieldsWithTag(TaintFlag *targetTaintFlag) {
@@ -1354,7 +1369,7 @@ namespace DRCHECKER {
 
     extern int addToSharedObjCache(OutsideObject *obj);
 
-    extern OutsideObject *getSharedObjFromCache(Type *ty);
+    extern OutsideObject *getSharedObjFromCache(Value *v,Type *ty);
 
     //"fd" is a bit offset desc of "pto->targetObject", it can reside in nested composite fields, this function creates all nested composite fields
     //in order to access the bit offset of "fd", while "limit" is the lowest index we try to create an emb obj in fd->host_tys[].
