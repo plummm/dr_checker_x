@@ -1843,6 +1843,32 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
         OutsideObject *newObj = DRCHECKER::createOutsideObj(file_ty,true,&existingTaints);
         //Ok, now add it to the global object cache.
         if (newObj) {
+            //Update the field point-to according to the "fdFieldMap".
+            for (auto &e : fdFieldMap) {
+                long fid = e.first;
+                long arg_no = e.second;
+                if (arg_no == -1) {
+                    //this means the function return value should point to the newly created file struct.
+                    std::set<PointerPointsTo*> *newPointsToInfo = new std::set<PointerPointsTo*>();
+                    PointerPointsTo *pto = new PointerPointsTo();
+                    pto->targetObject = newObj;
+                    pto->fieldId = 0;
+                    pto->dstfieldId = 0;
+                    pto->propogatingInstruction = &I;
+                    pto->targetPointer = &I;
+                    newPointsToInfo->insert(pto);
+                    this->updatePointsToObjects(&I, newPointsToInfo);
+                    continue;
+                }
+                if (arg_no < 0 || arg_no >= (long)I.getNumArgOperands()) {
+                    continue;
+                }
+                Value *arg = I.getArgOperand(arg_no);
+                if (arg && hasPointsToObjects(arg)) {
+                    std::set<PointerPointsTo*>* srcPointsTo = getPointsToObjects(arg);
+                    newObj->performWeakUpdate(fid,srcPointsTo,&I);
+                }
+            }
             DRCHECKER::addToSharedObjCache(newObj);
         }else {
 #ifdef DEBUG_CALL_INSTR

@@ -29,7 +29,7 @@ namespace DRCHECKER {
 
     const std::set<std::string> KernelFunctionChecker::atoiLikeFunctions{"kstrto", "simple_strto"};
     // fd creation function.
-    const std::set<std::string> KernelFunctionChecker::fd_creation_function_names{"anon_inode_getfd"};
+    const std::set<std::string> KernelFunctionChecker::fd_creation_function_names{"anon_inode_getfd","anon_inode_getfile"};
 
     bool KernelFunctionChecker::is_debug_function(const Function *targetFunction) {
         if(targetFunction->hasName()) {
@@ -204,6 +204,14 @@ namespace DRCHECKER {
                 //int anon_inode_getfd(const char *name, const struct file_operations *fops, void *priv, int flags)
                 fieldArgMap[3] = 1; //file->f_op
                 fieldArgMap[16] = 2; //file->private_data
+                return fieldArgMap;
+            }
+            if(func_name == "anon_inode_getfile") {
+                //func prototype:
+                //struct file *anon_inode_getfd(const char *name, const struct file_operations *fops, void *priv, int flags)
+                fieldArgMap[3] = 1; //file->f_op
+                fieldArgMap[16] = 2; //file->private_data
+                fieldArgMap[-1] = 0; //this means the func ret should point to the created file struct.
                 return fieldArgMap;
             }
 
