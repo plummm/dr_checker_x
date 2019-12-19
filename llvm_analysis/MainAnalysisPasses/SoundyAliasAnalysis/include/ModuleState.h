@@ -550,7 +550,6 @@ namespace DRCHECKER {
         };
 
         bool in_hierarchy_history(AliasObject *obj, long field, std::vector<std::pair<long, AliasObject*>>& history, bool to_add) {
-            //
             auto to_check = std::make_pair(field, obj);
             if (std::find(history.begin(),history.end(),to_check) != history.end()) {
                 return true;
@@ -652,6 +651,104 @@ namespace DRCHECKER {
             return strs; 
         }
 
+        //A wrapper of getHierarchyStr() w/ a cache.
+        std::set<std::string> *getTagHierarchy(TaintTag *tag) {
+            static std::map<TaintTag*,std::set<std::string>*> cache;
+            if (!tag || !tag->priv) {
+                return nullptr;
+            }
+            if (cache.find(tag) == cache.end()) {
+                std::vector<std::pair<long, AliasObject*>> history;
+                history.clear();
+                std::set<std::string> *strs = getHierarchyStr((AliasObject*)tag->priv, tag->fieldId, 0, history);
+                cache[tag] = strs;
+            }
+            return cache[tag];
+        }
+
+        bool is_prefix_hierarchy(std::set<std::string> *hs0, std::set<std::string> *hs1) {
+            if (!hs0 || !hs1) {
+                return false;
+            }
+            //If any string in hs0 is a string prefix (e.g. A is a prefix of AB) of any string in hs1.
+            bool is_prefix = false;
+            for (const std::string &s0 : *hs0) {
+                for (const std::string &s1 : *hs1) {
+                    //TODO: sometimes prefix and suffix may only have a sub-str overlapped (e.g. ABC and BCD).
+                    if (s1.find(s0) == 0 && s0 != s1) {
+                        is_prefix = true;
+                        break;
+                    }
+                }
+                if (is_prefix) {
+                    break;
+                }
+            }
+            //Dirty hack: special case: exclude file->private.
+            if (!is_prefix) {
+                for (const std::string &s0 : *hs0) {
+                    if (s0.find("struct.file") == 1 && s0.rfind("16") == s0.size() - 2) {
+                        is_prefix = true;
+                        break;
+                    }
+                }
+            }
+            return is_prefix;
+        }
+
+        //Filter out those tags whose object hierarchy is a prefix of that of other tags.
+        int filterTagsByHierarchy(std::set<TaintTag*> *tags) {
+            if (!tags) {
+                return 0;
+            }
+            std::set<TaintTag*> rtags;
+            for (TaintTag *tag : *tags) {
+                if (!tag || !tag->priv) {
+                    continue;
+                }
+                std::set<std::string> *hs0 = getTagHierarchy(tag);
+                if (!hs0) {
+                    continue;
+                }
+                Type *ty0 = tag->getFieldTy();
+                if (ty0 && ty0->isPointerTy()) {
+                    ty0 = ty0->getPointerElementType();
+                }else {
+                    ty0 = nullptr;
+                }
+                //See whether its hierarchy is any other tag's prefix.
+                bool is_prefix = false;
+                for (TaintTag *t : *tags) {
+                    if (t == tag) {
+                        //Exclude itself.
+                        continue;
+                    }
+                    std::set<std::string> *hs1 = getTagHierarchy(t);
+                    if (!hs1) {
+                        continue;
+                    }
+                    //simple string prefix
+                    if (is_prefix_hierarchy(hs0,hs1)) {
+                        is_prefix = true;
+                        break;
+                    }
+                    Type *ty1 = t->getTy();
+                    //Sometimes it may not be the simple string prefix due to our obj hierarchy is not perfect,
+                    //but we may still be able to infer the prefix by the tag type (e.g. tag1 is a pointer to tag2).
+                    if (ty1 && InstructionUtils::same_types(ty0,ty1)) {
+                        is_prefix = true;
+                        break;
+                    }
+                }
+                if (!is_prefix) {
+                    rtags.insert(tag);
+                }
+            }
+            tags->clear();
+            tags->insert(rtags.begin(),rtags.end());
+            return tags->size();
+        }
+
         //Dump all the taint information to the raw_ostream.
         void dumpTaintInfo(llvm::raw_ostream& O) {
 #ifdef DEBUG_TAINT_DUMP_PROGRESS
@@ -701,18 +798,22 @@ namespace DRCHECKER {
                     //Dump the TaintFlag(s) for current value under current context.
                     std::set<TaintFlag*> *pflags = jt.second;
                     std::set<TaintTag*> uniqVarTags; 
-                    for (TaintFlag *p : *pflags){
-                        if (!p->tag || uniqVarTags.find(p->tag) != uniqVarTags.end()) {
-                            continue;
-                        }else {
+                    for (TaintFlag *p : *pflags) {
+                        if (p->tag) {
                             uniqVarTags.insert(p->tag);
                         }
+                    }
+                    //Ok, now we need to filter out some tags based on its hierarchy.
+                    filterTagsByHierarchy(&uniqVarTags);
+                    for (TaintFlag *p : *pflags){
+                        if (!p->tag || uniqVarTags.find(p->tag) == uniqVarTags.end()) {
+                            //This means either there is no tag inf or the tag has been filtered out, so we will just skip this TaintFlag.
+                            continue;
+                        }
                         O << "------------------Taint------------------\n";
-                        p->dumpInfo(O,&uniqTags);
+                        p->dumpInfo(O);
                         if (p->tag && p->tag->priv) {
-                            std::vector<std::pair<long, AliasObject*>> history;
-                            history.clear();
-                            std::set<std::string> *strs = getHierarchyStr((AliasObject*)p->tag->priv, p->tag->fieldId, 0, history);
+                            std::set<std::string> *strs = getTagHierarchy(p->tag);
                             if (strs && !strs->empty()) {
                                 O << "---TAG OBJ HIERARCHY---\n";
                                 for (auto& hs : *strs) {
@@ -721,6 +822,7 @@ namespace DRCHECKER {
                             }
                         }
                     }
+                    uniqTags.insert(uniqVarTags.begin(),uniqVarTags.end());
                     uniqVarTags.clear();
                 }
 #ifdef DEBUG_TAINT_DUMP_PROGRESS
@@ -864,13 +966,23 @@ namespace DRCHECKER {
                         //No trait, so set an invalid trait ID.
                         std::get<0>((*p_br_inf)[ctx_id]) = 0;
                     }
-                    for (TaintFlag *p : *pflags){
-                        //Add the tag id
-                        std::get<1>((*p_br_inf)[ctx_id]).insert((ID_TY)(p->tag));
-                        if(p->tag){
-                            uniqTags.insert(p->tag);
+                    //Get and filter the TaintTags that taint current inst.
+                    std::set<TaintTag*> uniqVarTags;
+                    for (TaintFlag *p : *pflags) {
+                        if (p && p->tag && p->tag->priv) {
+                            uniqVarTags.insert(p->tag);
                         }
                     }
+                    filterTagsByHierarchy(&uniqVarTags);
+                    for (TaintFlag *p : *pflags) {
+                        if (!p || !p->tag || uniqVarTags.find(p->tag) == uniqVarTags.end()) {
+                            continue;
+                        }
+                        //Add the tag id
+                        std::get<1>((*p_br_inf)[ctx_id]).insert((ID_TY)(p->tag));
+                        uniqTags.insert(p->tag);
+                    }
+                    uniqVarTags.clear();
                 }
                 if (any_br_taint) {
                     //Record current AnalysisContext.
@@ -890,7 +1002,7 @@ namespace DRCHECKER {
             int tag_cnt = 0;
             int total_tag_cnt = uniqTags.size();
 #endif
-            for (TaintTag *tag : uniqTags){
+            for (TaintTag *tag : uniqTags) {
 #ifdef DEBUG_TAINT_SERIALIZE_PROGRESS
                 dbgs() << (++tag_cnt) << "/" << total_tag_cnt << "\n";
 #endif
@@ -902,9 +1014,7 @@ namespace DRCHECKER {
                 tagInfoMap[tag_id]["v"] = InstructionUtils::getValueStr(tag->v);
                 tagInfoMap[tag_id]["vid"] = std::to_string((unsigned long)(tag->v));
                 if (tag->priv) {
-                    std::vector<std::pair<long, AliasObject*>> history;
-                    history.clear();
-                    std::set<std::string> *hstrs = getHierarchyStr((AliasObject*)tag->priv, tag->fieldId, 0, history);
+                    std::set<std::string> *hstrs = getTagHierarchy(tag);
                     if (hstrs && !hstrs->empty()) {
                         int hc = 0;
                         for (auto& hs : *hstrs) {

@@ -122,6 +122,14 @@ namespace DRCHECKER {
             return ty;
         }
 
+        Type *getFieldTy() {
+            Type *hostTy = this->getTy();
+            if (!hostTy || !dyn_cast<CompositeType>(hostTy) || !InstructionUtils::isIndexValid(hostTy,this->fieldId)) {
+                return nullptr;
+            }
+            return dyn_cast<CompositeType>(hostTy)->getTypeAtIndex(this->fieldId);
+        }
+
         bool isTagEquals(TaintTag *dstTag) {
             if (!dstTag){
                 return false;
@@ -329,7 +337,7 @@ namespace DRCHECKER {
         Value *targetInstr;
         // trace of instructions that resulted in this taint.
         std::vector<Instruction *> instructionTrace;
-        void dumpInfo(raw_ostream &OS, std::set<TaintTag*> *uniqTags = nullptr) {
+        void dumpInfo(raw_ostream &OS) {
 
             //OS << "Taint Flag for:";
             //this->targetInstr->print(OS);
@@ -351,10 +359,6 @@ namespace DRCHECKER {
             OS << "is_inherent: " << this->is_inherent << "\n";
             //hz: dump tag information if any.
             if (this->tag) {
-                //TODO: is it enough to depend on the pointer value to filter out duplications?
-                if (uniqTags) {
-                    uniqTags->insert(this->tag);
-                }
                 this->tag->dumpInfo(OS);
             }
 
