@@ -684,15 +684,6 @@ namespace DRCHECKER {
                     break;
                 }
             }
-            //Dirty hack: special case: exclude file->private.
-            if (!is_prefix) {
-                for (const std::string &s0 : *hs0) {
-                    if (s0.find("struct.file") == 1 && s0.rfind("16") == s0.size() - 2) {
-                        is_prefix = true;
-                        break;
-                    }
-                }
-            }
             return is_prefix;
         }
 
@@ -740,6 +731,17 @@ namespace DRCHECKER {
                         break;
                     }
                 }
+                //Ok, now do an extra special filtering:
+                //Dirty hack: special case: exclude file->private.
+                if (!is_prefix) {
+                    for (const std::string &s0 : *hs0) {
+                        if (s0.find("struct.file") == 1 && s0.rfind("16") == s0.size() - 2) {
+                            is_prefix = true;
+                            break;
+                        }
+                    }
+                }
+                //Add to the final set if it's not a prefix.
                 if (!is_prefix) {
                     rtags.insert(tag);
                 }

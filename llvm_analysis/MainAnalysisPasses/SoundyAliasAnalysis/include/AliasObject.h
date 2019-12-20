@@ -26,18 +26,18 @@ using namespace llvm;
 #define ENABLE_SUB_OBJ_CACHE
 #define SMART_FUNC_PTR_RESOLVE
 #define DEBUG_SMART_FUNCTION_PTR_RESOLVE
-#define DEBUG_FETCH_POINTS_TO_OBJECTS
-#define DEBUG_CHANGE_HEAPLOCATIONTYPE
-#define DEBUG_UPDATE_FIELD_POINT
-#define DEBUG_UPDATE_FIELD_TAINT
-#define DEBUG_CREATE_DUMMY_OBJ_IF_NULL
-#define DEBUG_CREATE_EMB_OBJ
-#define DEBUG_CREATE_EMB_OBJ_CHAIN
-#define DEBUG_CREATE_HOST_OBJ
-#define DEBUG_CREATE_HOST_OBJ_CHAIN
-#define DEBUG_INFER_CONTAINER
-#define DEBUG_SPECIAL_FIELD_POINTTO
-#define DEBUG_SHARED_OBJ_CACHE
+//#define DEBUG_FETCH_POINTS_TO_OBJECTS
+//#define DEBUG_CHANGE_HEAPLOCATIONTYPE
+//#define DEBUG_UPDATE_FIELD_POINT
+//#define DEBUG_UPDATE_FIELD_TAINT
+//#define DEBUG_CREATE_DUMMY_OBJ_IF_NULL
+//#define DEBUG_CREATE_EMB_OBJ
+//#define DEBUG_CREATE_EMB_OBJ
+//#define DEBUG_CREATE_HOST_OBJ
+//#define DEBUG_CREATE_HOST_OBJ
+//#define DEBUG_INFER_CONTAINER
+//#define DEBUG_SPECIAL_FIELD_POINTTO
+//#define DEBUG_SHARED_OBJ_CACHE
 
 namespace DRCHECKER {
 //#define DEBUG_FUNCTION_ARG_OBJ_CREATION
@@ -855,7 +855,7 @@ namespace DRCHECKER {
 
         }
 
-        //In some situations we need to reset this AliasObject, e.g. the obj is originally allocated by kmalloc() w/ a type i8*, and then converted to a composite type. 
+        //In some situations we need to reset this AliasObject, e.g. the obj is originally allocated by kmalloc() w/ a type i8*, and then converted to a composite type.
         //NOTE: after invoking this we usually need to re-taint the changed object.
         void reset(Value *v, Type *ty) {
             this->setValue(v);

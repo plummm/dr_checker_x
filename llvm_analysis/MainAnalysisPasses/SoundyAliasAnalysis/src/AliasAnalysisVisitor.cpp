@@ -5,13 +5,13 @@
 
 namespace DRCHECKER {
 
-#define DEBUG_GET_ELEMENT_PTR
+//#define DEBUG_GET_ELEMENT_PTR
 //#define DEBUG_ALLOCA_INSTR
-#define DEBUG_CAST_INSTR
+//#define DEBUG_CAST_INSTR
 //#define DEBUG_BINARY_INSTR
 //#define DEBUG_PHI_INSTR
 //#define DEBUG_LOAD_INSTR
-#define DEBUG_STORE_INSTR
+//#define DEBUG_STORE_INSTR
 //#define DEBUG_CALL_INSTR
 //#define STRICT_CAST
 //#define DEBUG_RET_INSTR
@@ -19,7 +19,7 @@ namespace DRCHECKER {
 //#define MAX_ALIAS_OBJ 50
 //hz: Enable creating new outside objects on the fly when the pointer points to nothing.
 #define CREATE_DUMMY_OBJ_IF_NULL
-#define DEBUG_UPDATE_POINTSTO
+//#define DEBUG_UPDATE_POINTSTO
 //#define DEBUG_TMP
 
     //hz: A helper method to create and (taint) a new OutsideObject.
@@ -639,7 +639,7 @@ void AliasAnalysisVisitor::visitCastInst(CastInst &I) {
                 if (dyn_cast<CompositeType>(currTgtObjType)) {
                     //Ok, our src pointer points to a certain field in a certain object, although the pointer value (i.e. address) remains the same, we need to convert
                     //the pointer type, which is because multiple different typed objects can reside at the same location (e.g. heading composite field within the host object).
-                    //In this situation we need to modify the point-to objects to the embedded/host object (may need to create new objects when necessary) recursively 
+                    //In this situation we need to modify the point-to objects to the embedded/host object (may need to create new objects when necessary) recursively
                     //(i.e. navigate the object hierarchy at the same location in the type desc vector).
                     std::vector<FieldDesc*> *tydesc = InstructionUtils::getCompTyDesc(this->currState.targetDataLayout, dyn_cast<CompositeType>(currTgtObjType));
                     int i_dstField = InstructionUtils::locateFieldInTyDesc(tydesc, newPointsToObj->dstfieldId);
@@ -688,7 +688,7 @@ void AliasAnalysisVisitor::visitCastInst(CastInst &I) {
                     }
                 }else /*if (dyn_cast<CompositeType>(currTgtObjType))*/{
                     //This is a little strange since we now have an non-composite AliasObject...
-                    //Here we consider a case like a i8* is casted to struct*, where we can directly change the AliasObject's type and taint it properly. 
+                    //Here we consider a case like a i8* is casted to struct*, where we can directly change the AliasObject's type and taint it properly.
                     //This is often the case for kmalloc'ed() memory region which is initially i8* and then used as a struct storage.
                     if (dstPointeeTy && dyn_cast<CompositeType>(dstPointeeTy)) {
 #ifdef DEBUG_CAST_INSTR
@@ -1225,7 +1225,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
 #ifdef DEBUG_GET_ELEMENT_PTR
             dbgs() << "AliasAnalysisVisitor::bit2Field(): dstOffset: " << dstOffset << " bits: " << bits << " resOffset: " << resOffset << "\n";
 #endif
-        	//NOTE: llvm DataLayout class has three kinds of type size: 
+        	//NOTE: llvm DataLayout class has three kinds of type size:
         	//(1) basic size, for a composite type, this is the sum of the size of each field type.
         	//(2) store size, a composite type may need some paddings between its fields for the alignment.
         	//(3) alloc size, two successive composite types may need some paddings between each other for alignment.
@@ -1313,7 +1313,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
         //NOTE: at a same bit offset there can be a composite field who recursively contains multiple composite sub-fields at its head:
         // e.g. [[[   ]    ]     ], in this case the type desc will record all these sub composite fields at the head and all #fid is 0,
         //while we don't really want to create the embedded object up to the innermost heading composite field, instead we stop at the outermost
-        //head composite field here. 
+        //head composite field here.
         while (++limit < fd->fid.size() && !fd->fid[limit]);
         int r = DRCHECKER::createEmbObjChain(fd,pto,limit);
         if (r > limit) {

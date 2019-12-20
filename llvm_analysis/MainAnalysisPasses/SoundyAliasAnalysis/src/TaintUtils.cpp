@@ -6,7 +6,7 @@
 
 using namespace llvm;
 
-#define DEBUG_ADD_NEW_TAINT_FLAG
+//#define DEBUG_ADD_NEW_TAINT_FLAG
 
 namespace DRCHECKER {
     std::set<TaintFlag*>* TaintUtils::getTaintInfo(GlobalState &currState,
