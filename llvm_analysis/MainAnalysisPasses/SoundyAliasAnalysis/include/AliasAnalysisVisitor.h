@@ -122,6 +122,8 @@ namespace DRCHECKER {
          * @return Pointer to the set of objects to which the provided pointer points to.
          */
         std::set<PointerPointsTo*>* getPointsToObjects(Value *srcPointer);
+        bool isPtoDuplicated(const PointerPointsTo *p0, const PointerPointsTo *p1, bool dbg);
+        bool matchPtoTy(Value *srcPointer, PointerPointsTo *pto);
         /***
          * Update points to information for the provided pointer.
          * @param srcPointer pointer whose points to information need to be updated.

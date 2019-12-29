@@ -63,6 +63,124 @@ namespace DRCHECKER {
 
 
 
+    bool AliasAnalysisVisitor::isPtoDuplicated(const PointerPointsTo *p0, const PointerPointsTo *p1, bool dbg = false) {
+        if (!p0 && !p1) {
+            return true;
+        }
+        if ((!p0) != (!p1)) {
+            return false;
+        }
+        //hz: a simple hack here to avoid duplicated objects.
+        if(dbg){
+            dbgs() << "----------------------------\n";
+        }
+        if(p0->dstfieldId != p1->dstfieldId){
+            if(dbg){
+                dbgs() << "dstField mismatch: " << p0->dstfieldId << "|" << p1->dstfieldId << "\n";
+            }
+            return false;
+        }
+        AliasObject *o0 = p0->targetObject;
+        AliasObject *o1 = p1->targetObject;
+        if(dbg){
+            dbgs() << (o0?"t":"f") << (o1?"t":"f") << (o0?(o0->isOutsideObject()?"t":"f"):"n") << (o1?(o1->isOutsideObject()?"t":"f"):"n") << "\n";
+        }
+        if(o0 && o1){
+            if(dbg){
+                dbgs() << "Ty0: " << InstructionUtils::getTypeStr(o0->targetType) << " Ty1: " << InstructionUtils::getTypeStr(o1->targetType) << "\n";
+            }
+            if(o0->targetType != o1->targetType){
+                if(dbg){
+                    dbgs() << "Target obj type mismatch!\n";
+                }
+                return false;
+            }
+            //Ok, now these two points-to have the same target obj type and dst field, what then?
+            //We will further look at the object ptr of the target AliasObject, if they are also the same, we regard these 2 objs the same.
+            Value *v0 = o0->getObjectPtr();
+            Value *v1 = o1->getObjectPtr();
+            if(dbg){
+                dbgs() << "Ptr0: " << InstructionUtils::getValueStr(v0) << " Ptr1: " << InstructionUtils::getValueStr(v1) << "RES: " << (v0==v1?"T":"F") << "\n";
+            }
+            if(v0 || v1){
+                return (v0 == v1);
+            }
+        }else if(o0 || o1){
+            //One is null but the other is not, obviously not the same.
+            if(dbg){
+                dbgs() << "One of the 2 objs is null\n";
+            }
+            return false;
+        }
+        if(dbg){
+            dbgs() << "Default Cmp\n";;
+        }
+        return  p0->isIdenticalPointsTo(p1);
+    }
+
+    //Basically we try to see whether the pointee object type matches that of srcPointer, if not, we try adjust the PointerPointsTo, e.g.,
+    //by walking through the embed/parent hierarchy of the pointee object.
+    //Return: whether the type is matched in the end.
+    bool AliasAnalysisVisitor::matchPtoTy(Value *srcPointer, PointerPointsTo *pto) {
+        if (!srcPointer || !pto || !pto->targetObject) {
+            return false;
+        }
+        Type *srcTy = srcPointer->getType();
+        if (!srcTy || !srcTy->isPointerTy()) {
+            return false;
+        }
+        srcTy = srcTy->getPointerElementType();
+        Type *pTy = pto->targetObject->targetType;
+        long dstfieldId = pto->dstfieldId;
+        if (dstfieldId == 0 && InstructionUtils::same_types(srcTy,pTy)) {
+            //Quick path.
+            return true;
+        }
+        if (!srcTy || !pTy) {
+            return false;
+        }
+        DataLayout *dl = this->currState.targetDataLayout;
+        //Ok, first let's see whether srcTy can match the type of any embedded fields in the pto.
+        if (dyn_cast<CompositeType>(pTy) && InstructionUtils::isIndexValid(pTy,dstfieldId)) {
+            Type *eTy = dyn_cast<CompositeType>(pTy)->getTypeAtIndex(dstfieldId);
+            //Quick path
+            if (InstructionUtils::same_types(eTy,srcTy)) {
+                return true;
+            }
+            FieldDesc *hd = InstructionUtils::getHeadFieldDesc(eTy);
+            if (hd && hd->findTy(srcTy) >= 0) {
+                //Got a match in the embedded field, try to create the required embedded objects.
+#ifdef DEBUG_UPDATE_POINTSTO
+                dbgs() << "AliasAnalysisVisitor::matchPtoTy(): We need to adjust the current pto to an embedded field to match the srcPointer!\n";
+#endif
+                //TODO: +1 or not? +1, we point to target object's parent w/ a specified field, otherwise, we point to the object itself w/ field set to 0.
+                int limit = hd->findHostTy(srcTy) + 1;
+                //A small hack in order to use "createEmbObjChain".
+                hd->host_tys.push_back(pTy);
+                hd->fid.push_back(dstfieldId);
+                return DRCHECKER::createEmbObjChain(hd,pto,limit) == limit;
+            }
+        }
+        //Then let's see whether the pto has any parent object (e.g. it's embedded in another object) that can match srcTy.
+        //NOTE: different than embedded fields, here we are not obligated to create new container object - we only look up the existing ones.
+        if (dstfieldId == 0 && !InstructionUtils::same_types(srcTy,pTy)) {
+            AliasObject *obj = pto->targetObject;
+            while (obj && obj->parent && obj->parent_field == 0) {
+                obj = obj->parent;
+                if (InstructionUtils::same_types(srcTy,obj->targetType)) {
+                    //Got the match!
+#ifdef DEBUG_UPDATE_POINTSTO
+                    dbgs() << "AliasAnalysisVisitor::matchPtoTy(): We need to adjust the current pto to a parent object to match the srcPointer!\n";
+#endif
+                    pto->targetObject = obj;
+                    pto->dstfieldId = 0;
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     void AliasAnalysisVisitor::updatePointsToObjects(Value *srcPointer, std::set<PointerPointsTo*>* newPointsToInfo) {
         /***
          *  Update the pointsto objects of the srcPointer to newPointstoInfo
@@ -98,74 +216,20 @@ namespace DRCHECKER {
 #ifdef DEBUG_UPDATE_POINTSTO
             dbgs() << " #existingPointsTo: " << existingPointsTo->size() << "\n";
 #endif
+            //Deduplication.
             for(PointerPointsTo *currPointsTo: *newPointsToInfo) {
                 // for each points to, see if we already have that information, if yes, ignore it.
-                if(std::find_if(existingPointsTo->begin(), existingPointsTo->end(), [currPointsTo,dbg](const PointerPointsTo *n) {
-                    //hz: a simple hack here to avoid duplicated objects.
-                    if(dbg){
-                        dbgs() << "----------------------------\n";
-                    }
-                    if(currPointsTo->dstfieldId != n->dstfieldId){
-                        if(dbg){
-                            dbgs() << "dstField mismatch: " << n->dstfieldId << "\n";
-                        }
-                        return false;
-                    }
-                    AliasObject *o0 = currPointsTo->targetObject;
-                    AliasObject *o1 = n->targetObject;
-                    if(dbg){
-                        dbgs() << (o0?"t":"f") << (o1?"t":"f") << (o0?(o0->isOutsideObject()?"t":"f"):"n") << (o1?(o1->isOutsideObject()?"t":"f"):"n") << "\n";
-                    }
-                    if(o0 && o1){
-                        if(dbg){
-                            dbgs() << "Ty0: " << InstructionUtils::getTypeStr(o0->targetType) << " Ty1: " << InstructionUtils::getTypeStr(o1->targetType) << "\n";
-                        }
-                        if(o0->targetType != o1->targetType){
-                            if(dbg){
-                                dbgs() << "Target obj type mismatch!\n";
-                            }
-                            return false;
-                        }
-                        //Ok, now these two points-to have the same target obj type and dst field, what then?
-                        //We will further look at the object ptr of the target AliasObject, if they are also the same, we regard these 2 objs the same.
-                        Value *v0 = o0->getObjectPtr();
-                        Value *v1 = o1->getObjectPtr();
-                        if(dbg){
-                            dbgs() << "Ptr0: " << InstructionUtils::getValueStr(v0) << " Ptr1: " << InstructionUtils::getValueStr(v1) << "RES: " << (v0==v1?"T":"F") << "\n";
-                        }
-                        if(v0 || v1){
-                            return (v0 == v1);
-                        }
-                    }else if(o0 || o1){
-                        //One is null but the other is not, obviously not the same.
-                        if(dbg){
-                            dbgs() << "One of the 2 objs is null\n";
-                        }
-                        return false;
-                    }
-                    if(dbg){
-                        dbgs() << "Default Cmp\n";;
-                    }
-                    return  n->isIdenticalPointsTo(currPointsTo);
+                if(std::find_if(existingPointsTo->begin(), existingPointsTo->end(), [currPointsTo,dbg,this](const PointerPointsTo *n) {
+                    return this->isPtoDuplicated(currPointsTo,n,dbg);
                 }) == existingPointsTo->end()) {
                     if(dbg){
                         dbgs() << "############# Inserted!!!\n";
                     }
+                    //handle the implicit type cast (i.e. type cast that is not explicitly performed by the 'cast' inst) if any.
+                    matchPtoTy(srcPointer,currPointsTo);
 #ifdef DEBUG_UPDATE_POINTSTO
-                    dbgs() << "Insert point-to: " << InstructionUtils::getTypeStr(currPointsTo->targetObject->targetType);
-                    dbgs() << " | " << currPointsTo->dstfieldId << " ,is_taint_src: " << currPointsTo->targetObject->is_taint_src << "\n";
-                    dbgs() << "Obj ID: " << (const void*)(currPointsTo->targetObject) << "\n";
-                    Value *tv = currPointsTo->targetObject->getValue();
-                    if (tv){
-                        dbgs() << "Inst/Val: " << InstructionUtils::getValueStr(tv) << "\n";
-                        /*
-                        if (dyn_cast<Instruction>(tv)){
-                            InstructionUtils::printInst(dyn_cast<Instruction>(tv),dbgs());
-                        }else{
-                            dbgs() << InstructionUtils::getValueStr(tv) << "\n";
-                        }
-                        */
-                    }
+                    dbgs() << "Insert point-to: ";
+                    currPointsTo->print(dbgs());
 #endif
                     existingPointsTo->insert(existingPointsTo->end(), currPointsTo);
                 } else {

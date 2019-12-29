@@ -170,6 +170,8 @@ namespace DRCHECKER {
             os << " from field:" << obj.fieldId <<" points to field:"<< obj.dstfieldId <<" of the object, with ID:" << obj.targetObject;
             return os;
         }
+
+        void print(llvm::raw_ostream& OS);
     };
 
 

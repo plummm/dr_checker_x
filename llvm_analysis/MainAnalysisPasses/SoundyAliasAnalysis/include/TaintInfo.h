@@ -143,6 +143,14 @@ namespace DRCHECKER {
                    this->type == dstTag->type &&
                    this->is_global == dstTag->is_global &&
                    this->priv == dstTag->priv;
+            /*
+            if ( (this->priv == dstTag->priv && this->fieldId == dstTag->fieldId) ||
+                 (dyn_cast<CompositeType>(this->type) && InstructionUtils::same_types(this->type,dstTag->type) && this->fieldId == dstTag->fieldId && this->is_global == dstTag->is_global)
+               ){
+                return true;
+            }
+            return false;
+            */
         }
 
         /*

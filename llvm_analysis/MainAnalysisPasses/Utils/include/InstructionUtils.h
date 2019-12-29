@@ -181,6 +181,8 @@ namespace DRCHECKER {
 
         static bool isPotentialAsanInst(Instruction *inst);
 
+        static FieldDesc *getHeadFieldDesc(Type *ty);
+
         static std::vector<FieldDesc*> *getCompTyDesc(DataLayout *dl, CompositeType *ty);
 
         static bool isTyUsedByFunc(Type *ty, Function *func);

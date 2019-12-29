@@ -372,7 +372,7 @@ namespace DRCHECKER {
                 GlobalVisitor *vis = new GlobalVisitor(currState, &currFunction, pcallSites, traversalOrder, allCallBacks);
 
                 //SAAVisitor *vis = new SAAVisitor(currState, &currFunction, pcallSites, traversalOrder);
-                dbgs() << "Starting Analyzing function:" << fi->name << "\n";
+                dbgs() << "Analyzing new function:" << fi->name << " Call depth:1\n";
                 DRCHECKER::currEntryFunc = &currFunction;
                 vis->analyze();
 

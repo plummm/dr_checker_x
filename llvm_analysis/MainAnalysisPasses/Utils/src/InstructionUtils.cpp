@@ -836,6 +836,33 @@ namespace DRCHECKER {
         return true;
     }
 
+    //Given a type, return the field ty desc for its offset 0.
+    FieldDesc *InstructionUtils::getHeadFieldDesc(Type *ty) {
+        static std::map<Type*,FieldDesc*> hdescs;
+        if (!ty) {
+            return nullptr;
+        }
+        if (hdescs.find(ty) != hdescs.end()) {
+            return hdescs[ty];
+        }
+        FieldDesc *fd = new FieldDesc();
+        fd->bitoff = 0;
+        Type *ety = ty;
+        while (ety) {
+            fd->tys.push_back(ety);
+            if (dyn_cast<CompositeType>(ety)) {
+                //We need to reserve the innermost to outermost host order.
+                fd->host_tys.insert(fd->host_tys.begin(),ety);
+                fd->fid.push_back(0);
+                ety = dyn_cast<CompositeType>(ety)->getTypeAtIndex((unsigned)0);
+            }else {
+                break;
+            }
+        }
+        hdescs[ty] = fd;
+        return fd;
+    }
+
     //We want to analyze a struct type, figuring out all possible fields types at each available offset in bits,
     //this includes the internal fields in (nested) embedded structs which is not supported by original llvm API.
     std::vector<FieldDesc*> *InstructionUtils::getCompTyDesc(DataLayout *dl, CompositeType *ty) {

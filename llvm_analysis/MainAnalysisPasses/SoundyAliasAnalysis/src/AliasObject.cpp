@@ -1313,4 +1313,24 @@ namespace DRCHECKER {
         return i;
     }
 
+    void PointerPointsTo::print(llvm::raw_ostream& OS) {
+        if (this->targetObject) {
+            OS << InstructionUtils::getTypeStr(this->targetObject->targetType) << " | " << this->dstfieldId << " ,is_taint_src: " << this->targetObject->is_taint_src;
+            OS << ", Obj ID: " << (const void*)(this->targetObject) << "\n";
+            Value *tv = this->targetObject->getValue();
+            if (tv){
+                dbgs() << "Inst/Val: " << InstructionUtils::getValueStr(tv) << "\n";
+                /*
+                if (dyn_cast<Instruction>(tv)){
+                    InstructionUtils::printInst(dyn_cast<Instruction>(tv),dbgs());
+                }else{
+                    dbgs() << InstructionUtils::getValueStr(tv) << "\n";
+                }
+                */
+            }
+        }else {
+            OS << "Null targetObject!\n";
+        }
+    }
+
 }
