@@ -1130,12 +1130,16 @@ namespace DRCHECKER {
             //Infer the type from the cast inst of this gep.
             for (User *e : gep->users()) {
                 CastInst *cinst = dyn_cast<CastInst>(e);
-                if (!cinst || cinst->getOperand(0) != dyn_cast<Value>(e)) {
+                if (!cinst || cinst->getOperand(0) != dyn_cast<Value>(gep)) {
                     continue;
                 }
                 Type *t = cinst->getDestTy();
+                //NOTE: the gep itself is a pointer to the file->private, where ->private is also a pointer, so the cast result should be a pointer of a pointer.
                 if (t && t->isPointerTy()) {
-                    retSet.insert(t->getPointerElementType());
+                    t = t->getPointerElementType();
+                    if (t->isPointerTy()) {
+                        retSet.insert(t->getPointerElementType());
+                    }
                 }
             }
         }
@@ -1148,7 +1152,7 @@ namespace DRCHECKER {
         }
         Type *vt = p->getType();
         if (!vt->isPointerTy()) {
-            //Since it's not a pointer, we cannot get the type info of the pointee, so conservatively let's return true.
+            //Since it's not a pointer, we cannot get the type info of the pointee, so conservatively let's return 0.
             return 0;
         }
         Type *pointeeTy = vt->getPointerElementType();
@@ -1192,6 +1196,7 @@ namespace DRCHECKER {
 #endif
             return nullptr;
         }
+        //TODO: we should use InstructionUtils::same_types() to compare types, instead of ==.
         if (DRCHECKER::sharedObjCache.find(ty) == DRCHECKER::sharedObjCache.end()) {
 #ifdef DEBUG_SHARED_OBJ_CACHE
             dbgs() << "getSharedObjFromCache(): No same-typed objs found in the cache.\n";
@@ -1204,13 +1209,18 @@ namespace DRCHECKER {
             if (e.first != DRCHECKER::currEntryFunc) {
                 for (OutsideObject *o : e.second) {
 #ifdef DEBUG_SHARED_OBJ_CACHE
-                    dbgs() << "getSharedObjFromCache(): Ty: " << InstructionUtils::getTypeStr(ty) << " currEntryFunc: " << DRCHECKER::currEntryFunc->getName().str() << " srcEntryFunc: " << e.first->getName().str();
-                    dbgs() << " obj ID: " << (const void*)o << "\n";
+                    dbgs() << "getSharedObjFromCache(): Cand Obj: " << (const void*)o << " srcEntryFunc: " << e.first->getName().str() << "\n";
 #endif
                     if (!v) {
+#ifdef DEBUG_SHARED_OBJ_CACHE
+                        dbgs() << "getSharedObjFromCache(): Null value, just return this obj.\n";
+#endif
                         return o;
                     }else {
                         int t = o->maybeAPointee(v);
+#ifdef DEBUG_SHARED_OBJ_CACHE
+                        dbgs() << "Possibility Score: " << t << "\n";
+#endif
                         if (t > max_s) {
                             max_s = t;
                             ro = o;
@@ -1225,6 +1235,9 @@ namespace DRCHECKER {
 #endif
             }
         }
+#ifdef DEBUG_SHARED_OBJ_CACHE
+        dbgs() << "getSharedObjFromCache(): Return Obj: " << (const void*)ro << "\n";
+#endif
         return ro;
     }
 

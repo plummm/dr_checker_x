@@ -388,21 +388,39 @@ namespace DRCHECKER {
         }
 
         void getAllObjectsPointedByField(long srcfieldID, std::set<AliasObject *> &retSet) {
-            for(ObjectPointsTo *obj:pointsTo) {
-                if(obj->fieldId == srcfieldID) {
-                    if(retSet.find(obj->targetObject) == retSet.end())  {
+            for (ObjectPointsTo *obj:pointsTo) {
+                if (obj->fieldId == srcfieldID) {
+                    if (retSet.find(obj->targetObject) == retSet.end())  {
                         retSet.insert(obj->targetObject);
                     }
                 }
             }
         }
 
+        //We want to get all possible pointee types of a certain field, so we need to inspect the detailed type desc (i.e. embed/parent object hierarchy).
         void getFieldPointeeTy(long fid, std::set<Type*> &retSet) {
-            std::set<AliasObject*> fieldPointee;
-            this->getAllObjectsPointedByField(16,fieldPointee);
-            for (AliasObject *e : fieldPointee) {
-                if (e->targetType) {
-                    retSet.insert(e->targetType);
+            for (ObjectPointsTo *obj : this->pointsTo) {
+                if (obj->fieldId == fid) {
+                    if (!obj->targetObject) {
+                        continue;
+                    }
+                    long dstfield = obj->dstfieldId;
+                    Type *ty = obj->targetObject->targetType;
+                    if (!ty) {
+                        continue;
+                    }
+                    FieldDesc *hd = nullptr;
+                    if (dstfield == 0) {
+                        hd = InstructionUtils::getHeadFieldDesc(ty);
+                    }else if (dyn_cast<CompositeType>(ty) && InstructionUtils::isIndexValid(ty,(unsigned)dstfield)) {
+                        Type *ety = dyn_cast<CompositeType>(ty)->getTypeAtIndex((unsigned)dstfield);
+                        hd = InstructionUtils::getHeadFieldDesc(ety);
+                    }
+                    if (hd) {
+                        for (Type *t : hd->tys) {
+                            retSet.insert(t);
+                        }
+                    }
                 }
             }
             return;
