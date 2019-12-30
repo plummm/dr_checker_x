@@ -130,6 +130,14 @@ namespace DRCHECKER {
             return false;
         }
         srcTy = srcTy->getPointerElementType();
+        return this->matchPtoTy(srcTy,pto);
+    }
+
+    //srcTy is the type we should point to.
+    bool AliasAnalysisVisitor::matchPtoTy(Type *srcTy, PointerPointsTo *pto) {
+        if (!pto || !pto->targetObject) {
+            return false;
+        }
         Type *pTy = pto->targetObject->targetType;
         long dstfieldId = pto->dstfieldId;
         if (dstfieldId == 0 && InstructionUtils::same_types(srcTy,pTy)) {
@@ -139,7 +147,7 @@ namespace DRCHECKER {
         if (!srcTy || !pTy) {
             return false;
         }
-        DataLayout *dl = this->currState.targetDataLayout;
+        //DataLayout *dl = this->currState.targetDataLayout;
         //Ok, first let's see whether srcTy can match the type of any embedded fields in the pto.
         if (dyn_cast<CompositeType>(pTy) && InstructionUtils::isIndexValid(pTy,dstfieldId)) {
             Type *eTy = dyn_cast<CompositeType>(pTy)->getTypeAtIndex(dstfieldId);
@@ -382,13 +390,16 @@ namespace DRCHECKER {
         //call this makePointsToCopy().
         Type *basePointerType = (gep ? gep->getPointerOperand()->getType() : nullptr);
         Type *basePointToType = (basePointerType ? basePointerType->getPointerElementType() : nullptr);
-        for(PointerPointsTo *currPointsToObj:*srcPointsTo) {
-            AliasObject *hostObj = currPointsToObj->targetObject;
+        for(PointerPointsTo *currPointsToObj : *srcPointsTo) {
+            //Try to match the pto w/ the GEP base pointer.
+            PointerPointsTo *pto = currPointsToObj->makeCopyP();
+            this->matchPtoTy(basePointToType,pto);
+            AliasObject *hostObj = pto->targetObject;
             // if the target object is not visited, then add into points to info.
             if(hostObj && visitedObjects.find(hostObj) == visitedObjects.end()) {
                 PointerPointsTo *newPointsToObj = new PointerPointsTo();
                 newPointsToObj->propogatingInstruction = propInstruction;
-                long host_dstFieldId = currPointsToObj->dstfieldId;
+                long host_dstFieldId = pto->dstfieldId;
                 //Get type information about current point-to object.
                 Type *host_type = hostObj->targetType;
                 bool is_emb = false;
@@ -423,7 +434,7 @@ namespace DRCHECKER {
                 if(fieldId >= 0) {
                     newPointsToObj->dstfieldId = fieldId;
                 } else {
-                    newPointsToObj->dstfieldId = currPointsToObj->dstfieldId;
+                    newPointsToObj->dstfieldId = pto->dstfieldId;
                     //NOTE: fieldId < 0 means that we simply want to copy the passed-in points-to information as is.
                     //TODO: is it possible that we have a negative 1st index?
                     goto update;
@@ -514,12 +525,13 @@ update:
                     newPointsToInfo->insert(newPointsToInfo->begin(), newPointsToObj);
                 }
                 visitedObjects.insert(visitedObjects.begin(), hostObj);
-                continue;
+                goto next;
 fail_next:
                 delete newPointsToObj;
                 visitedObjects.insert(visitedObjects.begin(), hostObj);
-                continue;
         }//if in visitedObjects
+next:
+        delete pto;
     }//for
 #ifdef DEBUG_GET_ELEMENT_PTR
     dbgs() << "makePointsToCopy: returned newPointsToInfo size: " << newPointsToInfo->size() << "\n";
