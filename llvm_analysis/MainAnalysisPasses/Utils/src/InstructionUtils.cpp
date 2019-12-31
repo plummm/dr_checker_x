@@ -882,35 +882,37 @@ namespace DRCHECKER {
         std::vector<FieldDesc*> resDesc;
         if (dyn_cast<SequentialType>(ty)) {
             SequentialType *seqTy = dyn_cast<SequentialType>(ty);
-            Type *aty = seqTy->getElementType();
-            if (!aty) {
-                return nullptr;
-            }
-            std::vector<FieldDesc*> edesc, *pdesc = nullptr;
-            //The element is of a primitive type.
-            if (!dyn_cast<CompositeType>(aty)) {
-                FieldDesc *fd = new FieldDesc();
-                fd->tys.push_back(aty);
-                fd->bitoff = 0;
-                edesc.push_back(fd);
-                pdesc = &edesc;
-            }else {
-                pdesc = InstructionUtils::getCompTyDesc(dl,dyn_cast<CompositeType>(aty));
-            }
-            if (!pdesc) {
-                return nullptr;
-            }
-            unsigned step = dl->getTypeAllocSizeInBits(aty);
-            for (unsigned i = 0; i < seqTy->getNumElements(); ++i) {
-                for (unsigned j = 0; j < pdesc->size(); ++j) {
-                    FieldDesc *fd = new FieldDesc((*pdesc)[j]);
-                    if (!i && !j) {
-                        fd->tys.push_back(seqTy);
+            //NOTE: in the kernel we can often see the zero-length array at the end of a struct (i.e. flexible length array).
+            //This is normal so we shouldn't return nullptr, instead we return a null content resDesc in the end of this function.
+            if (seqTy->getNumElements() > 0) {
+                Type *aty = seqTy->getElementType();
+                if (!aty) {
+                    return nullptr;
+                }
+                std::vector<FieldDesc*> edesc, *pdesc = nullptr;
+                if (dyn_cast<CompositeType>(aty)) {
+                    pdesc = InstructionUtils::getCompTyDesc(dl,dyn_cast<CompositeType>(aty));
+                }
+                if (!pdesc) {
+                    //Either non-composite element or failed to get type desc of the composite element, just treat the element as an atom.
+                    FieldDesc *fd = new FieldDesc();
+                    fd->tys.push_back(aty);
+                    fd->bitoff = 0;
+                    edesc.push_back(fd);
+                    pdesc = &edesc;
+                }
+                unsigned step = dl->getTypeAllocSizeInBits(aty);
+                for (unsigned i = 0; i < seqTy->getNumElements(); ++i) {
+                    for (unsigned j = 0; j < pdesc->size(); ++j) {
+                        FieldDesc *fd = new FieldDesc((*pdesc)[j]);
+                        if (!i && !j) {
+                            fd->tys.push_back(seqTy);
+                        }
+                        fd->host_tys.push_back(seqTy);
+                        fd->fid.push_back(i);
+                        fd->bitoff += (step*i);
+                        resDesc.push_back(fd);
                     }
-                    fd->host_tys.push_back(seqTy);
-                    fd->fid.push_back(i);
-                    fd->bitoff += (step*i);
-                    resDesc.push_back(fd);
                 }
             }
         }else if (dyn_cast<StructType>(ty)) {
@@ -928,50 +930,47 @@ namespace DRCHECKER {
                     continue;
                 }
                 unsigned boff = stLayout->getElementOffsetInBits(i); 
-                if (!dyn_cast<CompositeType>(ety)) {
-                    FieldDesc *fd = new FieldDesc();
-                    if (!i) {
-                        fd->tys.push_back(stTy);
-                    }
-                    fd->tys.push_back(ety);
-                    fd->host_tys.push_back(stTy);
-                    fd->fid.push_back(i);
-                    fd->bitoff = boff;
-                    resDesc.push_back(fd);
-                    continue;
-                }
-                //Ok the element is an embedded composite type.
-                std::vector<FieldDesc*> *pdesc = InstructionUtils::getCompTyDesc(dl,dyn_cast<CompositeType>(ety));
-                if (pdesc) {
-                    for (unsigned j = 0; j < pdesc->size(); ++j) {
-                        FieldDesc *fd = new FieldDesc((*pdesc)[j]);
-                        if (!i && !j) {
-                            fd->tys.push_back(stTy);
+                if (dyn_cast<CompositeType>(ety)) {
+                    //Ok the element is an embedded composite type.
+                    std::vector<FieldDesc*> *pdesc = InstructionUtils::getCompTyDesc(dl,dyn_cast<CompositeType>(ety));
+                    if (pdesc) {
+                        for (unsigned j = 0; j < pdesc->size(); ++j) {
+                            FieldDesc *fd = new FieldDesc((*pdesc)[j]);
+                            if (!i && !j) {
+                                fd->tys.push_back(stTy);
+                            }
+                            fd->host_tys.push_back(stTy);
+                            fd->fid.push_back(i);
+                            fd->bitoff += boff;
+                            resDesc.push_back(fd);
                         }
-                        fd->host_tys.push_back(stTy);
-                        fd->fid.push_back(i);
-                        fd->bitoff += boff;
-                        resDesc.push_back(fd);
+                        continue;
                     }
-                }else {
-                    return nullptr;
                 }
+                //Ok, we either have a non-composite field, or we failed to get the detailed type desc of the composite field,
+                //we will just treat the field as an atom.
+                FieldDesc *fd = new FieldDesc();
+                if (!i) {
+                    fd->tys.push_back(stTy);
+                }
+                fd->tys.push_back(ety);
+                fd->host_tys.push_back(stTy);
+                fd->fid.push_back(i);
+                fd->bitoff = boff;
+                resDesc.push_back(fd);
             }
         }else {
             dbgs() << "Cannot recognize the CompositeType: " << InstructionUtils::getTypeStr(ty) << "\n";
             assert(false);
         }
-        if (resDesc.size() > 0) {
 #ifdef DEBUG_GET_TY_DESC
-            dbgs() << ">> The type desc for: " << InstructionUtils::getTypeStr(ty) << "\n";
-            for (FieldDesc *fd : resDesc) {
-                fd->print(dbgs());
-            }
-#endif
-            descs[ty] = resDesc;
-            return &descs[ty];
+        dbgs() << ">> The type desc for: " << InstructionUtils::getTypeStr(ty) << "\n";
+        for (FieldDesc *fd : resDesc) {
+            fd->print(dbgs());
         }
-        return nullptr;
+#endif
+        descs[ty] = resDesc;
+        return &descs[ty];
     }
 
     int InstructionUtils::locateFieldInTyDesc(std::vector<FieldDesc*> *tydesc, unsigned fid) {
