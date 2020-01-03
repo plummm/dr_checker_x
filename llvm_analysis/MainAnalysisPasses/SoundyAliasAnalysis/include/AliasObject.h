@@ -57,21 +57,26 @@ namespace DRCHECKER {
         AliasObject *targetObject;
         // instruction which resulted in this points to information.
         Value* propogatingInstruction;
+        
         ObjectPointsTo() {
 
         }
+        
         ~ObjectPointsTo() {
 
         }
+        
         ObjectPointsTo(ObjectPointsTo *srcObjPointsTo) {
             this->fieldId = srcObjPointsTo->fieldId;
             this->dstfieldId = srcObjPointsTo->dstfieldId;
             this->targetObject = srcObjPointsTo->targetObject;
             this->propogatingInstruction = srcObjPointsTo->propogatingInstruction;
         }
+        
         virtual ObjectPointsTo* makeCopy() {
             return new ObjectPointsTo(this);
         }
+
         virtual bool isIdenticalPointsTo(const ObjectPointsTo *that) const {
             // No default implementation
             assert(false);
@@ -101,6 +106,8 @@ namespace DRCHECKER {
         }
 
         void print(llvm::raw_ostream& OS);
+
+        bool inArray(Type *ety);
     };
 
 

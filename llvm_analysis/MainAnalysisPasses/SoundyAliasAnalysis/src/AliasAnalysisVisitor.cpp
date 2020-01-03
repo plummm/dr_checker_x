@@ -1188,22 +1188,13 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
 #ifdef DEBUG_GET_ELEMENT_PTR
         dbgs() << "AliasAnalysisVisitor::processGEPFirstDimension():: basePointeeTy: " << InstructionUtils::getTypeStr(basePointeeTy) << " 0st index: " << index << "\n";
 #endif
-        //If the index is zero then 0st dimension will change nothing.
-        //Note that this index can be negative.
-        if (index == 0) {
-            return srcPointsTo;
-        }
-        //Ok, basically we want to deal w/ a special case here:
-        //the pointer operand points to some structs, but the "basePointerTy" of this GEP is an integer pointer (e.g. i8*),
-        //this means the struct pointer has been converted to the integer pointer and the struct fields will be accessed in the byte-style...
-        //In this situation, we need to calculate which field will actually be pointed-to by the 1st GEP dimention.
-        //If this is not the case (e.g. the "basePointerTy" is a normal struct pointer), for now we will just ignore the 1st dimention just as the original Dr.Checker does.
         std::set<PointerPointsTo*> *resPointsTo = new std::set<PointerPointsTo*>();
-        if (basePointeeTy && dyn_cast<IntegerType>(basePointeeTy)) {
-            IntegerType *int_ty = dyn_cast<IntegerType>(basePointeeTy);
-            unsigned width = int_ty->getBitWidth();
+        DataLayout *dl = this->currState.targetDataLayout;
+        if (basePointeeTy && dl && index) {
+            bool is_primitive = InstructionUtils::isPrimitiveTy(basePointeeTy);
+            unsigned width = dl->getTypeAllocSizeInBits(basePointeeTy);
 #ifdef DEBUG_GET_ELEMENT_PTR
-            dbgs() << "AliasAnalysisVisitor::processGEPFirstDimension(): basePointeeTy is i" << width <<"\n";
+            dbgs() << "AliasAnalysisVisitor::processGEPFirstDimension(): basePointeeTy size: " << width << ", is_primitive: " << is_primitive << "\n";
 #endif
             for (PointerPointsTo *currPto : *srcPointsTo) {
                 if (!currPto || !currPto->targetObject) {
@@ -1214,22 +1205,31 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
                     continue;
                 }
                 //The "newPto" will be the point-to record after we process the 1st dimension.
-                //By default it will the same as the original point-to since we will ignore 1st dimension in most cases.
+                //By default it will the same as the original point-to.
                 PointerPointsTo *newPto = new PointerPointsTo();
                 newPto->propogatingInstruction = propInst;
                 newPto->fieldId = 0;
                 newPto->targetPointer = I;
                 newPto->targetObject = currPto->targetObject;
                 newPto->dstfieldId = currPto->dstfieldId;
-                //Now we will process the special cases where the integer pointer points to a struct...
+                //Type match in the object parent/embed hierarchy.
+                bool ty_match = matchPtoTy(basePointeeTy,newPto);
+                //We will not invoke bit2Field() to do the pointer arithmetic in one situation: host object is an array of the basePointeeTy (i.e. we are array-insensitive).
+                if (newPto->inArray(basePointeeTy)) {
 #ifdef DEBUG_GET_ELEMENT_PTR
-                dbgs() << "AliasAnalysisVisitor::processGEPFirstDimension(): invoke bit2Field()...\n";
+                    dbgs() << "AliasAnalysisVisitor::processGEPFirstDimension(): ignore the 1st index since we're in an array.\n";
 #endif
-                if(!this->bit2Field(propInst,I,newPto,width,index)) {
                     resPointsTo->insert(newPto);
+                }else {
+#ifdef DEBUG_GET_ELEMENT_PTR
+                    dbgs() << "AliasAnalysisVisitor::processGEPFirstDimension(): invoke bit2Field()...\n";
+#endif
+                    if (!this->bit2Field(propInst,I,newPto,width,index)) {
+                        resPointsTo->insert(newPto);
+                    }
                 }
             }
-        } else {
+        }else {
             return srcPointsTo;
         }
         //release the memory of "srcPointsTo"

@@ -1346,4 +1346,41 @@ namespace DRCHECKER {
         }
     }
 
+    bool ObjectPointsTo::inArray(Type *ty) {
+        if (!ty || !this->targetObject) {
+            return false;
+        }
+        Type *curHostTy = this->targetObject->targetType;
+        if (!curHostTy) {
+            return false;
+        }
+        long fid = this->dstfieldId;
+        Type *ety = nullptr;
+        if (dyn_cast<CompositeType>(curHostTy)) {
+            if (fid) {
+                if (InstructionUtils::isIndexValid(curHostTy,fid)) {
+                    ety = dyn_cast<CompositeType>(curHostTy)->getTypeAtIndex((unsigned)fid);
+                    return (InstructionUtils::same_types(ty,ety) && curHostTy->isArrayTy());
+                }else {
+                    return false;
+                }
+            }else {
+                ety = dyn_cast<CompositeType>(curHostTy)->getTypeAtIndex((unsigned)0);
+                if (InstructionUtils::same_types(ty,curHostTy)) {
+                    return (this->targetObject->parent && this->targetObject->parent->targetType && this->targetObject->parent->targetType->isArrayTy());
+                }else if (InstructionUtils::same_types(ty,ety)) {
+                    return curHostTy->isArrayTy();
+                }else {
+                    return false;
+                }
+            }
+        }else {
+            if (InstructionUtils::same_types(ty,curHostTy)) {
+                return (fid == 0 && this->targetObject->parent && this->targetObject->parent->targetType && this->targetObject->parent->targetType->isArrayTy());
+            }else {
+                return false;
+            }
+        }
+        return false;
+    }
 }
