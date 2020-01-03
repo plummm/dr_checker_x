@@ -1302,4 +1302,8 @@ namespace DRCHECKER {
         return nullptr;
     }
 
+    bool inline InstructionUtils::isOpaueSt(Type *ty) {
+        return (ty && ty->isStructTy() && dyn_cast<StructType>(ty)->isOpaque());
+    }
+
 }

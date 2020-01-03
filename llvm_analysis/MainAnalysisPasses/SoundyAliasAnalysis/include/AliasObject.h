@@ -26,18 +26,18 @@ using namespace llvm;
 #define ENABLE_SUB_OBJ_CACHE
 #define SMART_FUNC_PTR_RESOLVE
 #define DEBUG_SMART_FUNCTION_PTR_RESOLVE
-//#define DEBUG_FETCH_POINTS_TO_OBJECTS
-//#define DEBUG_CHANGE_HEAPLOCATIONTYPE
-//#define DEBUG_UPDATE_FIELD_POINT
-//#define DEBUG_UPDATE_FIELD_TAINT
-//#define DEBUG_CREATE_DUMMY_OBJ_IF_NULL
-//#define DEBUG_CREATE_EMB_OBJ
-//#define DEBUG_CREATE_EMB_OBJ
-//#define DEBUG_CREATE_HOST_OBJ
-//#define DEBUG_CREATE_HOST_OBJ
-//#define DEBUG_INFER_CONTAINER
-//#define DEBUG_SPECIAL_FIELD_POINTTO
-//#define DEBUG_SHARED_OBJ_CACHE
+#define DEBUG_FETCH_POINTS_TO_OBJECTS
+#define DEBUG_CHANGE_HEAPLOCATIONTYPE
+#define DEBUG_UPDATE_FIELD_POINT
+#define DEBUG_UPDATE_FIELD_TAINT
+#define DEBUG_CREATE_DUMMY_OBJ_IF_NULL
+#define DEBUG_CREATE_EMB_OBJ
+#define DEBUG_CREATE_EMB_OBJ
+#define DEBUG_CREATE_HOST_OBJ
+#define DEBUG_CREATE_HOST_OBJ
+#define DEBUG_INFER_CONTAINER
+#define DEBUG_SPECIAL_FIELD_POINTTO
+#define DEBUG_SHARED_OBJ_CACHE
 
 namespace DRCHECKER {
 //#define DEBUG_FUNCTION_ARG_OBJ_CREATION
@@ -57,22 +57,22 @@ namespace DRCHECKER {
         AliasObject *targetObject;
         // instruction which resulted in this points to information.
         Value* propogatingInstruction;
-        
+
         ObjectPointsTo() {
 
         }
-        
+
         ~ObjectPointsTo() {
 
         }
-        
+
         ObjectPointsTo(ObjectPointsTo *srcObjPointsTo) {
             this->fieldId = srcObjPointsTo->fieldId;
             this->dstfieldId = srcObjPointsTo->dstfieldId;
             this->targetObject = srcObjPointsTo->targetObject;
             this->propogatingInstruction = srcObjPointsTo->propogatingInstruction;
         }
-        
+
         virtual ObjectPointsTo* makeCopy() {
             return new ObjectPointsTo(this);
         }

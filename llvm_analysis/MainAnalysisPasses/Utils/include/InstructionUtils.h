@@ -206,6 +206,8 @@ namespace DRCHECKER {
         static bool isPrimitiveTy(Type *ty);
 
         static Type *getStTypeByName(Module *mod, std::string &n);
+
+        static bool isOpaueSt(Type *ty);
     };
 
 }

@@ -5,13 +5,13 @@
 
 namespace DRCHECKER {
 
-//#define DEBUG_GET_ELEMENT_PTR
+#define DEBUG_GET_ELEMENT_PTR
 //#define DEBUG_ALLOCA_INSTR
-//#define DEBUG_CAST_INSTR
+#define DEBUG_CAST_INSTR
 //#define DEBUG_BINARY_INSTR
 //#define DEBUG_PHI_INSTR
 //#define DEBUG_LOAD_INSTR
-//#define DEBUG_STORE_INSTR
+#define DEBUG_STORE_INSTR
 //#define DEBUG_CALL_INSTR
 //#define STRICT_CAST
 //#define DEBUG_RET_INSTR
@@ -19,7 +19,7 @@ namespace DRCHECKER {
 //#define MAX_ALIAS_OBJ 50
 //hz: Enable creating new outside objects on the fly when the pointer points to nothing.
 #define CREATE_DUMMY_OBJ_IF_NULL
-//#define DEBUG_UPDATE_POINTSTO
+#define DEBUG_UPDATE_POINTSTO
 //#define DEBUG_TMP
 
     //hz: A helper method to create and (taint) a new OutsideObject.
@@ -149,7 +149,7 @@ namespace DRCHECKER {
         }
         //DataLayout *dl = this->currState.targetDataLayout;
         //Ok, first let's see whether srcTy can match the type of any embedded fields in the pto.
-        if (dyn_cast<CompositeType>(pTy) && InstructionUtils::isIndexValid(pTy,dstfieldId)) {
+        if (dyn_cast<CompositeType>(pTy) && !InstructionUtils::isOpaueSt(pTy) && InstructionUtils::isIndexValid(pTy,dstfieldId)) {
             Type *eTy = dyn_cast<CompositeType>(pTy)->getTypeAtIndex(dstfieldId);
             //Quick path
             if (InstructionUtils::same_types(eTy,srcTy)) {
@@ -171,7 +171,7 @@ namespace DRCHECKER {
         }
         //Then let's see whether the pto has any parent object (e.g. it's embedded in another object) that can match srcTy.
         //NOTE: different than embedded fields, here we are not obligated to create new container object - we only look up the existing ones.
-        if (dstfieldId == 0 && !InstructionUtils::same_types(srcTy,pTy)) {
+        if (dstfieldId == 0 && dyn_cast<CompositeType>(srcTy) && !InstructionUtils::same_types(srcTy,pTy)) {
             AliasObject *obj = pto->targetObject;
             while (obj && obj->parent && obj->parent_field == 0) {
                 obj = obj->parent;
