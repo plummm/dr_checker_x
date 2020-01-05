@@ -779,7 +779,10 @@ namespace DRCHECKER {
         std::set<Function*> funcs;
         if (insts) {
             for (Instruction *i : *insts) {
-                funcs.insert(i->getFunction());
+                //in case some insts are not inserted into any functions...
+                if (i->getParent()) {
+                    funcs.insert(i->getFunction());
+                }
             }
         }
         for (CandStructInf *c : *cands) {
@@ -963,7 +966,7 @@ namespace DRCHECKER {
             }
             long resOff = bitoff + delta;
 #ifdef DEBUG_INFER_CONTAINER
-            dbgs() << "inferContainerTy(): found one single-constant-index GEP using the same srcPointer: " << InstructionUtils::getValueStr(gep) << "\n";
+            dbgs() << "inferContainerTy(): found one GEP using the same srcPointer: " << InstructionUtils::getValueStr(gep) << "\n";
             dbgs() << "inferContainerTy(): delta: " << delta << " resOff: " << resOff << " current host type size: " << tysz << "\n";
 #endif
             if (resOff >= 0 && resOff < tysz) {
