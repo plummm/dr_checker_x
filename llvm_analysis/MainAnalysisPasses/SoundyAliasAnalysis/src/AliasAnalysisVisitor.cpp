@@ -149,7 +149,7 @@ namespace DRCHECKER {
         }
         //DataLayout *dl = this->currState.targetDataLayout;
         //Ok, first let's see whether srcTy can match the type of any embedded fields in the pto.
-        if (dyn_cast<CompositeType>(pTy) && !InstructionUtils::isOpaueSt(pTy) && InstructionUtils::isIndexValid(pTy,dstfieldId)) {
+        if (dyn_cast<CompositeType>(pTy) && !InstructionUtils::isOpaqueSt(pTy) && InstructionUtils::isIndexValid(pTy,dstfieldId)) {
             Type *eTy = dyn_cast<CompositeType>(pTy)->getTypeAtIndex(dstfieldId);
             //Quick path
             if (InstructionUtils::same_types(eTy,srcTy)) {
@@ -1051,67 +1051,84 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
 #endif
             return;
         }
-        std::set<PointerPointsTo*> *currPointsTo = srcPointsTo;
-        bool update = true;
-        //We process every index (but still ignore the 1st one) in the GEP, instead of the only 2nd one in the original Dr.Checker.
-        for (int i=2; i<I->getNumOperands(); ++i) {
-#ifdef DEBUG_GET_ELEMENT_PTR
-            dbgs() << "About to process index: " << (i-1) << "\n";
-#endif
-            ConstantInt *CI = dyn_cast<ConstantInt>(I->getOperand(i));
-            unsigned long structFieldId = 0;
-            bool is_var_fid = false;
-            if (!CI) {
-                is_var_fid = true;
-            }else {
-                structFieldId = CI->getZExtValue();
+        std::set<PointerPointsTo*> todo_set, *final_set = new std::set<PointerPointsTo*>();
+        for (PointerPointsTo *pto : *srcPointsTo) {
+            if (pto->is_final) {
+                final_set->insert(pto);
+                //one-time use.
+                pto->is_final = false;
+            } else {
+                todo_set.insert(pto);
             }
-#ifdef DEBUG_GET_ELEMENT_PTR
-            dbgs() << "Index value: " << structFieldId << " is_var_fid: " << is_var_fid << "\n";
-#endif
-            //Loop invariant: "currPointsTo" always has contents here.
-            std::set<PointerPointsTo*>* newPointsToInfo = nullptr;
-            if (i > 2) {
-                //More than 2 indices in this GEP, according to the GEP specification, this means the last (i-1) index
-                //must index into an embedded struct, instead of a pointer field.
-                //TODO: operator vs. inst
-                Value *subGEP = InstructionUtils::createSubGEP(I,i-1);
-                Value *resGEP = nullptr;
-                if (i >= I->getNumOperands()-1) {
-                    resGEP = I;
-                }else {
-                    resGEP = InstructionUtils::createSubGEP(I,i);
-                }
-#ifdef DEBUG_GET_ELEMENT_PTR
-                dbgs() << "subGEP: " << InstructionUtils::getValueStr(subGEP) << "\n";
-                dbgs() << "resGEP: " << InstructionUtils::getValueStr(resGEP) << "\n";
-#endif
-                if (subGEP) {
-                    newPointsToInfo = makePointsToCopy_emb(propInst, subGEP, resGEP, currPointsTo, structFieldId, is_var_fid);
-                }
-            }else {
-                //Most GEP should only have 2 indices..
-                newPointsToInfo = makePointsToCopy(propInst, I, currPointsTo, structFieldId, is_var_fid);
-            }
-            if (!newPointsToInfo || newPointsToInfo->empty()) {
-                //Fallback: just update w/ the "currPointsTo" except when this is a 2-dimension GEP.
-                if (i == 2) {
-                    update = false;
-                }
-                break;
-            }
-            currPointsTo = newPointsToInfo;
         }
-        if(update && currPointsTo && !currPointsTo->empty()){
+        if (!todo_set.empty()) {
+            std::set<PointerPointsTo*> *currPointsTo = &todo_set;
+            bool update = true;
+            //We process every index (but still ignore the 1st one) in the GEP, instead of the only 2nd one in the original Dr.Checker.
+            for (int i=2; i<I->getNumOperands(); ++i) {
+#ifdef DEBUG_GET_ELEMENT_PTR
+                dbgs() << "About to process index: " << (i-1) << "\n";
+#endif
+                ConstantInt *CI = dyn_cast<ConstantInt>(I->getOperand(i));
+                unsigned long structFieldId = 0;
+                bool is_var_fid = false;
+                if (!CI) {
+                    is_var_fid = true;
+                }else {
+                    structFieldId = CI->getZExtValue();
+                }
+#ifdef DEBUG_GET_ELEMENT_PTR
+                dbgs() << "Index value: " << structFieldId << " is_var_fid: " << is_var_fid << "\n";
+#endif
+                //Loop invariant: "currPointsTo" always has contents here.
+                std::set<PointerPointsTo*>* newPointsToInfo = nullptr;
+                if (i > 2) {
+                    //More than 2 indices in this GEP, according to the GEP specification, this means the last (i-1) index
+                    //must index into an embedded struct, instead of a pointer field.
+                    //TODO: operator vs. inst
+                    Value *subGEP = InstructionUtils::createSubGEP(I,i-1);
+                    Value *resGEP = nullptr;
+                    if (i >= I->getNumOperands()-1) {
+                        resGEP = I;
+                    }else {
+                        resGEP = InstructionUtils::createSubGEP(I,i);
+                    }
+#ifdef DEBUG_GET_ELEMENT_PTR
+                    dbgs() << "subGEP: " << InstructionUtils::getValueStr(subGEP) << "\n";
+                    dbgs() << "resGEP: " << InstructionUtils::getValueStr(resGEP) << "\n";
+#endif
+                    if (subGEP) {
+                        newPointsToInfo = makePointsToCopy_emb(propInst, subGEP, resGEP, currPointsTo, structFieldId, is_var_fid);
+                    }
+                }else {
+                    //Most GEP should only have 2 indices..
+                    newPointsToInfo = makePointsToCopy(propInst, I, currPointsTo, structFieldId, is_var_fid);
+                }
+                if (!newPointsToInfo || newPointsToInfo->empty()) {
+                    //Fallback: just update w/ the "currPointsTo" except when this is a 2-dimension GEP.
+                    if (i == 2) {
+                        update = false;
+                    }
+                    break;
+                }
+                currPointsTo = newPointsToInfo;
+            }
+            if (update && currPointsTo && !currPointsTo->empty()) {
+                final_set->insert(currPointsTo->begin(),currPointsTo->end());
+            }
+        }
+        if (!final_set->empty()) {
 #ifdef DEBUG_GET_ELEMENT_PTR
             dbgs() << "AliasAnalysisVisitor::processMultiDimensionGEP(): updating the point-to for current GEP...\n";
 #endif
             //make sure the points-to information includes the correct TargetPointer, which is current GEP inst.
             //TODO: is this ok? Since the pointsTo->targetPointer may not be the "I", it may be a GEP with a subset of indices created by us.
-            for (PointerPointsTo *pointsTo : *currPointsTo) {
+            for (PointerPointsTo *pointsTo : *final_set) {
                 pointsTo->targetPointer = I;
             }
-            this->updatePointsToObjects(I, currPointsTo);
+            this->updatePointsToObjects(I, final_set);
+        }else {
+            delete(final_set);
         }
     }
 
@@ -1192,6 +1209,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
         DataLayout *dl = this->currState.targetDataLayout;
         if (basePointeeTy && dl && index) {
             bool is_primitive = InstructionUtils::isPrimitiveTy(basePointeeTy);
+            //NOTE: we use alloc size here since 1st GEP index is intended to index an array of the basePointeeTy (i.e. the basePointeeTy will be stored consecutively so we need its alloc size).
             unsigned width = dl->getTypeAllocSizeInBits(basePointeeTy);
 #ifdef DEBUG_GET_ELEMENT_PTR
             dbgs() << "AliasAnalysisVisitor::processGEPFirstDimension(): basePointeeTy size: " << width << ", is_primitive: " << is_primitive << "\n";
@@ -1214,13 +1232,33 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
                 newPto->dstfieldId = currPto->dstfieldId;
                 //Type match in the object parent/embed hierarchy.
                 bool ty_match = matchPtoTy(basePointeeTy,newPto);
-                //We will not invoke bit2Field() to do the pointer arithmetic in one situation: host object is an array of the basePointeeTy (i.e. we are array-insensitive).
                 if (newPto->inArray(basePointeeTy)) {
+                    //We will not invoke bit2Field() to do the pointer arithmetic in one situation: host object is an array of the basePointeeTy (i.e. we are array-insensitive).
 #ifdef DEBUG_GET_ELEMENT_PTR
                     dbgs() << "AliasAnalysisVisitor::processGEPFirstDimension(): ignore the 1st index since we're in an array.\n";
 #endif
                     resPointsTo->insert(newPto);
-                }else {
+                } else {
+                    if (!is_primitive) {
+                        //The 1st index is not for an array, instead it's for pointer arithmetic, this usually only happens when the GEP base pointee is primitive (e.g. i8)
+                        //in which case the GEP has just one index, but now we have a non-primitive base pointer for pointer arithmetic (and the GEP can have multiple indices)...
+                        //What we do here is we convert this GEP to a one-index GEP w/ primitive base pointee, by calculating the overall bit offset of this multi-index GEP. 
+                        int rc;
+                        index = InstructionUtils::calcGEPTotalOffsetInBits(I,dl,&rc);
+                        if (rc) {
+                            //This means we fail to calculate the total offset of current GEP... No way to handle it then.
+#ifdef DEBUG_GET_ELEMENT_PTR
+                            dbgs() << "AliasAnalysisVisitor::processGEPFirstDimension(): fail to get the total offset of current non-primitive GEP to handle the non-zero 1st index...\n";
+#endif
+                            continue;
+                        }
+#ifdef DEBUG_GET_ELEMENT_PTR
+                        dbgs() << "AliasAnalysisVisitor::processGEPFirstDimension(): calculated offset sum in bits: " << index << "\n";
+#endif
+                        width = 1; //bit unit.
+                        //Tell the visitGEP() that it doesn't need to process the remainig indices (if any) since we have converted this GEP to single-index for this pto.
+                        newPto->is_final = true;
+                    }
 #ifdef DEBUG_GET_ELEMENT_PTR
                     dbgs() << "AliasAnalysisVisitor::processGEPFirstDimension(): invoke bit2Field()...\n";
 #endif
@@ -1229,7 +1267,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
                     }
                 }
             }
-        }else {
+        } else {
             return srcPointsTo;
         }
         //release the memory of "srcPointsTo"
@@ -1255,7 +1293,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
             //We'll lose the point-to in this case.
             return -1;
         }
-        long dstOffset = 0, resOffset = 0, bits = 0;
+        long dstOffset = 0, resOffset = 0, bits = 0, org_bits = (long)bitWidth * index, org_dstOffset = 0;
         std::vector<FieldDesc*> *tydesc = nullptr;
         int i_dstfield = 0;
         AliasObject *targetObj = nullptr;
@@ -1296,10 +1334,12 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
             }
             //NOTE: both "dstOffset" and "bits" can be divided by 8, "bits" can be negative.
             dstOffset = (*tydesc)[i_dstfield]->bitoff;
+            org_dstOffset += dstOffset;
             bits = index * (long)bitWidth;
             resOffset = dstOffset + bits;
 #ifdef DEBUG_GET_ELEMENT_PTR
-            dbgs() << "AliasAnalysisVisitor::bit2Field(): dstOffset: " << dstOffset << " bits: " << bits << " resOffset: " << resOffset << "\n";
+            dbgs() << "AliasAnalysisVisitor::bit2Field(): dstOffset(org_dstOffset): " << dstOffset << "(" << org_dstOffset << ")";
+            dbgs() << " bits(org_bits): " << bits << "(" << org_bits << ")" << " resOffset: " << resOffset << "\n";
 #endif
         	//NOTE: llvm DataLayout class has three kinds of type size:
         	//(1) basic size, for a composite type, this is the sum of the size of each field type.
@@ -1335,7 +1375,8 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
 #ifdef DEBUG_GET_ELEMENT_PTR
             dbgs() << "AliasAnalysisVisitor::bit2Field(): the recorded parent object is not enough, we need to infer the unknown container object...\n";
 #endif
-            CandStructInf *floc = DRCHECKER::inferContainerTy(propInst->getModule(),I->getPointerOperand(),pto->targetObject->targetType,dstOffset);
+            //We cannot use "dstOffset" here, we should use the realDstOffset of the original GEP base pointer...
+            CandStructInf *floc = DRCHECKER::inferContainerTy(propInst->getModule(),I->getPointerOperand(),pto->targetObject->targetType,org_dstOffset);
             if (!floc || !floc->fds || floc->ind[0] < 0 || floc->ind[0] >= floc->fds->size()) {
 #ifdef DEBUG_GET_ELEMENT_PTR
                 dbgs() << "AliasAnalysisVisitor::bit2Field(): failed to infer the container type...\n";
@@ -1346,7 +1387,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
             tydesc = floc->fds;
             i_dstfield = floc->ind[0];
             dstOffset = (*tydesc)[i_dstfield]->bitoff;
-            resOffset = dstOffset + bits;
+            resOffset = dstOffset + org_bits;
             targetObjTy = (*tydesc)[0]->host_tys[(*tydesc)[0]->host_tys.size()-1];
             if (resOffset < 0 || (uint64_t)resOffset >= dl->getTypeStoreSizeInBits(targetObjTy)) {
 #ifdef DEBUG_GET_ELEMENT_PTR
@@ -1357,7 +1398,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
 #ifdef DEBUG_GET_ELEMENT_PTR
             dbgs() << "AliasAnalysisVisitor::bit2Field(): successfully identified the container object, here is the FieldDesc of the original pointee bitoff:\n";
             (*tydesc)[i_dstfield]->print(dbgs());
-            dbgs() << "AliasAnalysisVisitor::bit2Field(): dstOffset: " << dstOffset << " bits: " << bits << " resOffset: " << resOffset << "\n";
+            dbgs() << "AliasAnalysisVisitor::bit2Field(): dstOffset: " << dstOffset << " bits: " << org_bits << " resOffset: " << resOffset << "\n";
 #endif
             //Ok, we may need to create the host object chain for the location pointed to by the GEP base pointer if necessary.
             int limit = (*tydesc)[i_dstfield]->host_tys.size();

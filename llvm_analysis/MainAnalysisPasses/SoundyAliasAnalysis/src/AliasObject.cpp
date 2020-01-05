@@ -925,6 +925,7 @@ namespace DRCHECKER {
     //To find the host obj, what we want to do is to iterate over all struct types in the current module, then find the correct type(s)
     //that has properly distanced field types that matches both the base "ptr" and the pointer type produced by the "GEP" (we need to
     //figure out the true pointer type from the subsequent cast IRs).
+    //ARG: "v" points to the location w/ bit offset "bitoff" in the host type "ty".
     CandStructInf *inferContainerTy(Module *m,Value *v,Type *ty,long bitoff) {
 #ifdef DEBUG_INFER_CONTAINER
         dbgs() << "inferContainerTy(): v: " << InstructionUtils::getValueStr(v) << " ty: " << InstructionUtils::getTypeStr(ty) << " bitoff: " << bitoff << "\n";
@@ -936,6 +937,7 @@ namespace DRCHECKER {
             return nullptr;
         }
         DataLayout dl = m->getDataLayout();
+        //NOTE: use store size here since the host object is on its own (not stored consecutively w/ other same objects).
         long tysz = dl.getTypeStoreSizeInBits(ty);
         //Analyze every single-index GEP w/ the same i8* srcPointer "v".
         std::vector<CandStructInf*> cands;
@@ -946,29 +948,23 @@ namespace DRCHECKER {
                 insts.insert(dyn_cast<Instruction>(u));
             }
             GEPOperator *gep = dyn_cast<GEPOperator>(u);
-            //Make sure it has a single index.
-            if (!gep || gep->getNumOperands() != 2 || gep->getPointerOperand() != v) {
+            //Make sure it's a GEP w/ "v" as the base pointer.
+            if (!gep || gep->getPointerOperand() != v) {
                 continue;
             }
-            //Get the constant index value.
-            ConstantInt *CI = dyn_cast<ConstantInt>(gep->getOperand(1));
-            if (!CI) {
+            int rc;
+            long delta = InstructionUtils::calcGEPTotalOffsetInBits(gep,&dl,&rc);
+            if (rc) {
+                //Cannot calculate the overall offset of this gep.
+#ifdef DEBUG_INFER_CONTAINER
+                dbgs() << "inferContainerTy(): cannot calculate the overall offset for GEP: " << InstructionUtils::getValueStr(gep) << "\n";
+#endif
                 continue;
             }
-            long index = CI->getSExtValue();
-            //Make sure the base pointer is iN*.
-            Type *bty = gep->getPointerOperandType();
-            if (bty->isPointerTy()) {
-                bty = bty->getPointerElementType();
-            }
-            if (!dyn_cast<IntegerType>(bty)) {
-                continue;
-            }
-            unsigned width = dyn_cast<IntegerType>(bty)->getBitWidth();
-            long resOff = bitoff + index * width;
+            long resOff = bitoff + delta;
 #ifdef DEBUG_INFER_CONTAINER
             dbgs() << "inferContainerTy(): found one single-constant-index GEP using the same srcPointer: " << InstructionUtils::getValueStr(gep) << "\n";
-            dbgs() << "inferContainerTy(): index: " << index << " width: " << width << " resOff: " << resOff << " current host type size: " << tysz << "\n";
+            dbgs() << "inferContainerTy(): delta: " << delta << " resOff: " << resOff << " current host type size: " << tysz << "\n";
 #endif
             if (resOff >= 0 && resOff < tysz) {
                 //This means current GEP will not index outside the original object, so useless for container inference.

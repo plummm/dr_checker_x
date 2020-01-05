@@ -901,6 +901,7 @@ namespace DRCHECKER {
                     edesc.push_back(fd);
                     pdesc = &edesc;
                 }
+                //NOTE: we use alloc size here since aty will be consecutively stored in the array, so we consider its alloc size.
                 unsigned step = dl->getTypeAllocSizeInBits(aty);
                 for (unsigned i = 0; i < seqTy->getNumElements(); ++i) {
                     for (unsigned j = 0; j < pdesc->size(); ++j) {
@@ -1302,8 +1303,98 @@ namespace DRCHECKER {
         return nullptr;
     }
 
-    bool inline InstructionUtils::isOpaueSt(Type *ty) {
+    bool InstructionUtils::isOpaqueSt(Type *ty) {
         return (ty && ty->isStructTy() && dyn_cast<StructType>(ty)->isOpaque());
+    }
+
+    long InstructionUtils::calcGEPTotalOffsetInBits(GEPOperator *gep, DataLayout *dl, int *rc) {
+        if (rc) {
+            *rc = -1;
+        }
+        if (!gep || !dl) {
+            return 0;
+        }
+        //Get the original pointer operand used in this GEP and its type info.
+        Value *orgPointer = gep->getPointerOperand();
+        if (!orgPointer) {
+            return 0;
+        }
+        Type *basePointerTy = orgPointer->getType();
+        Type *basePointeeTy = nullptr;
+        if (basePointerTy && basePointerTy->isPointerTy()) {
+            basePointeeTy = basePointerTy->getPointerElementType();
+        }
+        if (!basePointeeTy) {
+            return 0;
+        }
+        Type *curTy = basePointeeTy;
+        long sumoff = 0;
+        //Scan each index and calculate the total offset.
+        int i;
+        for (i = 1; i < gep->getNumOperands(); ++i) {
+            ConstantInt *CI = dyn_cast<ConstantInt>(gep->getOperand(i));
+            long fid = 0;
+            bool is_var_fid = false;
+            if (!CI) {
+                //TODO: should we directly return here? We cannot get the accurate total offset anyway.
+                is_var_fid = true;
+            }else {
+                fid = CI->getZExtValue();
+            }
+            if (!curTy) {
+                break;
+            }
+            if (i > 1) {
+                if (fid < 0) {
+                    //TODO: Is it possible that the non-1st index is negative? Seems impossible...
+                    dbgs() << "!!! InstructionUtils::calcGEPTotalOffsetInBits(): negative non-1st index: " << InstructionUtils::getValueStr(gep) << "\n";
+                    break;
+                }
+                if (dyn_cast<CompositeType>(curTy) && InstructionUtils::isIndexValid(curTy,fid)) {
+                    //Get the bit offset of curent fid in current host type.
+                    std::vector<FieldDesc*> *tyd = InstructionUtils::getCompTyDesc(dl,dyn_cast<CompositeType>(curTy));
+                    int ind = InstructionUtils::locateFieldInTyDesc(tyd,fid);
+                    if (ind < 0) {
+                        break;
+                    }
+                    sumoff += (long)((*tyd)[ind]->bitoff);
+                    //Get the subsequent field type.
+                    curTy = dyn_cast<CompositeType>(curTy)->getTypeAtIndex((unsigned)fid);
+                } else {
+                    break;
+                }
+            } else {
+                //NOTE: use alloc size here since 1st index is for an array of curTy.
+                long width = dl->getTypeAllocSizeInBits(curTy);
+                sumoff += (width*fid);
+            }
+        }
+        if (i >= gep->getNumOperands()) {
+            *rc = 0;
+        }
+        return sumoff;
+    }
+
+    std::string& InstructionUtils::getTypeName(Type *ty) {
+        static std::map<Type*,std::string> cache; 
+        if (cache.find(ty) == cache.end()) {
+            if (!ty) {
+                cache[ty].clear();
+            }else if (!dyn_cast<CompositeType>(ty)) {
+                std::string str;
+                llvm::raw_string_ostream ss(str);
+                ss << *ty;
+                cache[ty] = ss.str();
+            }else if (dyn_cast<StructType>(ty)) {
+                cache[ty] = ty->getStructName().str();
+            }else if (dyn_cast<SequentialType>(ty)) {
+                std::string es = InstructionUtils::getTypeName(dyn_cast<SequentialType>(ty)->getElementType());
+                cache[ty] = "[" + es + "]*" + std::to_string(dyn_cast<SequentialType>(ty)->getNumElements());
+            }else {
+                cache[ty] = "UNK";
+            }
+        }
+        return cache[ty];
     }
 
 }

@@ -207,7 +207,11 @@ namespace DRCHECKER {
 
         static Type *getStTypeByName(Module *mod, std::string &n);
 
-        static bool isOpaueSt(Type *ty);
+        static bool isOpaqueSt(Type *ty);
+
+        static long calcGEPTotalOffsetInBits(GEPOperator *gep, DataLayout *dl, int *rc = nullptr);
+
+        static std::string& getTypeName(Type *ty);
     };
 
 }

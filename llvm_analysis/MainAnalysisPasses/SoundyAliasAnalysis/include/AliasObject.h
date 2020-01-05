@@ -57,9 +57,11 @@ namespace DRCHECKER {
         AliasObject *targetObject;
         // instruction which resulted in this points to information.
         Value* propogatingInstruction;
+        //For customized usage.
+        bool is_final = false;
 
         ObjectPointsTo() {
-
+            this->is_final = false;
         }
 
         ~ObjectPointsTo() {
@@ -71,6 +73,7 @@ namespace DRCHECKER {
             this->dstfieldId = srcObjPointsTo->dstfieldId;
             this->targetObject = srcObjPointsTo->targetObject;
             this->propogatingInstruction = srcObjPointsTo->propogatingInstruction;
+            this->is_final = false;
         }
 
         virtual ObjectPointsTo* makeCopy() {
