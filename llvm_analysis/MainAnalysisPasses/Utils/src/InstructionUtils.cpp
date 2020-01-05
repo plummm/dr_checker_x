@@ -1381,12 +1381,13 @@ namespace DRCHECKER {
             if (!ty) {
                 cache[ty].clear();
             }else if (!dyn_cast<CompositeType>(ty)) {
-                std::string str;
-                llvm::raw_string_ostream ss(str);
-                ss << *ty;
-                cache[ty] = ss.str();
+                cache[ty] = InstructionUtils::getTypeStr(ty);
             }else if (dyn_cast<StructType>(ty)) {
-                cache[ty] = ty->getStructName().str();
+                if (dyn_cast<StructType>(ty)->hasName()) {
+                    cache[ty] = ty->getStructName().str();
+                }else {
+                    cache[ty] = InstructionUtils::getTypeStr(ty);
+                }
             }else if (dyn_cast<SequentialType>(ty)) {
                 std::string es = InstructionUtils::getTypeName(dyn_cast<SequentialType>(ty)->getElementType());
                 cache[ty] = "[" + es + "]*" + std::to_string(dyn_cast<SequentialType>(ty)->getNumElements());
