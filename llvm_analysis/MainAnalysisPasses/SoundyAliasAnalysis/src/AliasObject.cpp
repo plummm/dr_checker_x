@@ -620,16 +620,21 @@ namespace DRCHECKER {
 #endif
                 return targetObj->parent;
             }else {
-                //TODO: what to do in this case... for now let's just re-assign the parent object.
+                //NOTE: we should honor the original parent object, since it's static analysis and we can have multiple pointees for a same pointer
+                //and they may have multiple different parent objects, here we're possibly trying yo create a parent object for a wrong pointee, we should
+                //just skip.
 #ifdef DEBUG_CREATE_HOST_OBJ
                 dbgs() << "!!! createHostObj(): found a previously created parent object but w/ different field or type!\n";
                 dbgs() << "!!! createHostObj(): previous parent: " << InstructionUtils::getTypeStr(targetObj->parent->targetType) << " | " << targetObj->parent_field << ", id: " << (const void*)targetObj->parent << "\n";
 #endif
+                return nullptr;
+                /*
                 if (targetObj->parent->embObjs.find(targetObj->parent_field) != targetObj->parent->embObjs.end()) {
                     targetObj->parent->embObjs[targetObj->parent_field] = nullptr;
                 }
                 targetObj->parent = nullptr;
                 targetObj->parent_field = 0;
+                */
             }
         }
         if (!InstructionUtils::isIndexValid(hostTy,field)) {
