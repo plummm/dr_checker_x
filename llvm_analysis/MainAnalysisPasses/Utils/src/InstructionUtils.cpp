@@ -1199,23 +1199,12 @@ namespace DRCHECKER {
         return 0;
     }
 
-    DICompositeType *getMDNForCompositeTy(DenseMap<MDNode*, unsigned> *mdnmap, std::string& n) {
-        if (!mdnmap) {
-            return nullptr;
-        }
-        for (auto& e : *mdnmap) {
-            DICompositeType *nd = dyn_cast<DICompositeType>(e.first);
-            if (nd && nd->getName() == n) {
-                return nd;
-            }
-        }
-        return nullptr;
-    }
     //////////////////////////////////////////////////////////////////////////////////////////////////////////
  
     //Get the name of a specified field within a struct type, w/ the debug info.
     std::string InstructionUtils::getStFieldName(Module *mod, StructType *ty, unsigned fid) {
         static DenseMap<MDNode*, unsigned> mdncache;
+        static std::map<std::string,DICompositeType*> dicmap;
         static std::map<Type*,std::map<unsigned,std::string>> ncache;
 #ifdef DEBUG_GET_FIELD_NAME
         dbgs() << "InstructionUtils::getStFieldName(): for ty: " << InstructionUtils::getTypeStr(ty) << " | " << fid << "\n";
@@ -1225,6 +1214,13 @@ namespace DRCHECKER {
         }
         if (mdncache.empty()) {
             InstructionUtils::getAllMDNodes(mod,&mdncache);
+            //Convert mdncache to dicmap.
+            for (auto& e : *mdnmap) {
+                DICompositeType *nd = dyn_cast<DICompositeType>(e.first);
+                if (nd && !nd->getName().empty()) {
+                    dicmap[nd->getName().str()] = nd;
+                }
+            }
         }
         if (ncache.find(ty) == ncache.end()) {
             std::string stn = ty->getName().str();
@@ -1235,13 +1231,13 @@ namespace DRCHECKER {
 #ifdef DEBUG_GET_FIELD_NAME
             dbgs() << "InstructionUtils::getStFieldName(): type name: " << stn << "\n";
 #endif
-            DICompositeType *nmd = getMDNForCompositeTy(&mdncache,stn);
-            if (!nmd) {
+            if (dicmap.find(stn) == dicmap.end()) {
 #ifdef DEBUG_GET_FIELD_NAME
                 dbgs() << "InstructionUtils::getStFieldName(): cannot get the DICompositeType MDNode!\n";
 #endif
                 return "";
             }
+            DICompositeType *nmd = dicmap[stn];
             //Ok, got it.
 #ifdef DEBUG_GET_FIELD_NAME
             dbgs() << "InstructionUtils::getStFieldName(): Got the DICompositeType MDNode!\n";
