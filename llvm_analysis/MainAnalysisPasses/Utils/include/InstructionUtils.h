@@ -70,6 +70,26 @@ namespace DRCHECKER {
         }
     };
 
+    class TypeField {
+        public:
+        TypeField() {
+            this->ty = nullptr;
+            this->fid = 0;
+        }
+
+        TypeField(Type *ty, long fid, void *priv = nullptr) {
+            this->ty = ty;
+            this->fid = fid;
+            this->priv = priv;
+        }
+
+        bool is_same_ty(TypeField *tf);
+
+        Type *ty = nullptr;
+        long fid = 0;
+        void *priv = nullptr;
+    };
+
     class InstructionUtils {
         public:
         /***
@@ -212,6 +232,8 @@ namespace DRCHECKER {
         static long calcGEPTotalOffsetInBits(GEPOperator *gep, DataLayout *dl, int *rc = nullptr);
 
         static std::string& getTypeName(Type *ty);
+
+        static void trim_num_suffix(std::string *s);
     };
 
 }

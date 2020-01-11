@@ -499,7 +499,7 @@ namespace DRCHECKER {
         return nullptr;
     }
 
-    void _trim_num_suffix(std::string *s) {
+    void InstructionUtils::trim_num_suffix(std::string *s) {
         if (!s) {
             return;
         }
@@ -570,8 +570,8 @@ namespace DRCHECKER {
                 std::string n0 = st0->getName().str();
                 std::string n1 = st1->getName().str();
                 //trim the numeric suffix if any.
-                _trim_num_suffix(&n0);
-                _trim_num_suffix(&n1);
+                InstructionUtils::trim_num_suffix(&n0);
+                InstructionUtils::trim_num_suffix(&n1);
 #ifdef DEBUG_TYPE_CMP
                 dbgs() << "InstructionUtils::same_types(): cmp struct (suffix): " << (n0==n1) << "\n";
 #endif
@@ -1215,7 +1215,7 @@ namespace DRCHECKER {
         if (mdncache.empty()) {
             InstructionUtils::getAllMDNodes(mod,&mdncache);
             //Convert mdncache to dicmap.
-            for (auto& e : *mdnmap) {
+            for (auto& e : mdncache) {
                 DICompositeType *nd = dyn_cast<DICompositeType>(e.first);
                 if (nd && !nd->getName().empty()) {
                     dicmap[nd->getName().str()] = nd;
@@ -1392,6 +1392,13 @@ namespace DRCHECKER {
             }
         }
         return cache[ty];
+    }
+
+    bool TypeField::is_same_ty(TypeField *tf) {
+        if (!tf) {
+            return false;
+        }
+        return (this->fid == tf->fid && InstructionUtils::same_types(this->ty,tf->ty));
     }
 
 }
