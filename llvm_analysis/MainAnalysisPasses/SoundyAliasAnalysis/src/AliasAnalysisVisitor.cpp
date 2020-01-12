@@ -1024,6 +1024,9 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
          *  This is tricky instruction.
          *  this is where accessing structure fields happen.
          */
+#ifdef TIMING
+         auto t0 = InstructionUtils::getCurTime();
+#endif
 #ifdef DEBUG_GET_ELEMENT_PTR
         dbgs() << "AliasAnalysisVisitor::visitGetElementPtrInst(): " << InstructionUtils::getValueStr(&I) << "\n";
 #endif
@@ -1041,6 +1044,10 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
         std::set<PointerPointsTo*> *initialPointsTo = this->processGEPFirstDimension(&I, dyn_cast<GEPOperator>(&I), srcPointer);
         //Then the remaining indices if any and update the point-to for this GEP.
         this->processMultiDimensionGEP(&I, dyn_cast<GEPOperator>(&I), initialPointsTo);
+#ifdef TIMING
+        dbgs() << "[TIMING] AliasAnalysisVisitor::visitGetElementPtrInst(): ";
+        InstructionUtils::getTimeDuration(t0,&dbgs());
+#endif
     }
 
     void AliasAnalysisVisitor::processMultiDimensionGEP(Instruction *propInst, GEPOperator *I, std::set<PointerPointsTo*> *srcPointsTo) {
@@ -1366,6 +1373,9 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
                     break;
                 }
             }else {
+#ifdef DEBUG_GET_ELEMENT_PTR
+                dbgs() << "AliasAnalysisVisitor::bit2Field(): current container object can satisfy the result offset!\n";
+#endif
                 break;
             }
         }
@@ -1512,6 +1522,9 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
 
     void AliasAnalysisVisitor::visitLoadInst(LoadInst &I) {
 
+#ifdef TIMING
+        auto t0 = InstructionUtils::getCurTime();
+#endif
 #ifdef DEBUG_LOAD_INSTR
         errs() << "AliasAnalysisVisitor::visitLoadInst(): " << InstructionUtils::getValueStr(&I) << "\n";
 #endif
@@ -1621,10 +1634,16 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
                 //assert(!I.getType()->isPointerTy());
             }
         }
-
+#ifdef TIMING
+        dbgs() << "[TIMING] AliasAnalysisVisitor::visitLoadInst(): ";
+        InstructionUtils::getTimeDuration(t0,&dbgs());
+#endif
     }
 
     void AliasAnalysisVisitor::visitStoreInst(StoreInst &I) {
+#ifdef TIMING
+        auto t0 = InstructionUtils::getCurTime();
+#endif
 #ifdef DEBUG_STORE_INSTR
         dbgs() << "AliasAnalysisVisitor::visitStoreInst(): " << InstructionUtils::getValueStr(&I) << "\n";
 #endif
@@ -1796,7 +1815,10 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
             }
             //assert(!I.getPointerOperand()->getType()->getContainedType(0)->isPointerTy());
         }
-
+#ifdef TIMING
+        dbgs() << "[TIMING] AliasAnalysisVisitor::visitStoreInst(): ";
+        InstructionUtils::getTimeDuration(t0,&dbgs());
+#endif
     }
 
     // The following instructions are ignored.

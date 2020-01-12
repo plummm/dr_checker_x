@@ -172,9 +172,12 @@ namespace DRCHECKER {
             // Make sure we have the function definition.
             assert(!currFunc->isDeclaration());
 #ifdef DEBUG_CALL_INSTR
-            dbgs() << "Analyzing new function:" << currFuncName << " Call depth:" << newCallContext->size() << "\n";
+            dbgs() << "Analyzing new function: " << currFuncName << " Call depth: " << newCallContext->size() << "\n";
 #endif
-
+#ifdef TIMING
+            dbgs() << "[TIMING] Start func(" << newCallContext->size() << ") " << currFuncName << ": ";
+            auto t0 = InstructionUtils::getCurTime(&dbgs());
+#endif
             std::vector<std::vector<BasicBlock *> *> *traversalOrder = BBTraversalHelper::getSCCTraversalOrder(
                     *currFunc);
             // Create a GlobalVisitor
@@ -193,6 +196,10 @@ namespace DRCHECKER {
                 delete(childCallback);
             }
             delete(vis);
+#ifdef TIMING
+            dbgs() << "[TIMING] End func(" << newCallContext->size() << ") " << currFuncName << " in: ";
+            InstructionUtils::getTimeDuration(t0,&dbgs());
+#endif
         }
     }
 
@@ -217,18 +224,16 @@ namespace DRCHECKER {
             // check if the call instruction is already processed?
             if (this->visitedCallSites.find(&I) != this->visitedCallSites.end()) {
 #ifdef DEBUG_CALL_INSTR
-                dbgs() << "Function already processed:";
-                I.print(dbgs());
-                dbgs() << "\n";
+                dbgs() << "Function already processed: " << InstructionUtils::getValueStr(&I) << "\n";
 #endif
                 return;
             }
 
+            //TODO: a special case: the first instruction in current host function is a call inst... in this case, the first inst itself will be used as
+            //a context inst (to identify different callees), so we cannot pass the below check, although we haven't processed this call site.
             if(std::find(this->currFuncCallSites->begin(), this->currFuncCallSites->end(), &I) != this->currFuncCallSites->end()) {
 #ifdef DEBUG_CALL_INSTR
-                dbgs() << "Call-graph cycle found.";
-                I.print(dbgs());
-                dbgs() << "\n";
+                dbgs() << "Call-graph cycle found: " << InstructionUtils::getValueStr(&I) << "\n";
 #endif
                 return;
             }

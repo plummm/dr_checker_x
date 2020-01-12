@@ -17,7 +17,11 @@
 #include "llvm/IR/Operator.h"
 #include <string>
 #include <sstream>
+#include <chrono>
+#include <ctime>
 #include "../../SoundyAliasAnalysis/include/ResType.h"
+
+#define TIMING
 
 using namespace llvm;
 
@@ -234,6 +238,10 @@ namespace DRCHECKER {
         static std::string& getTypeName(Type *ty);
 
         static void trim_num_suffix(std::string *s);
+
+        static std::chrono::time_point<std::chrono::system_clock> getCurTime(raw_ostream *OS = nullptr);
+
+        static std::chrono::duration<double> getTimeDuration(std::chrono::time_point<std::chrono::system_clock> prev, raw_ostream *OS = nullptr);
     };
 
 }

@@ -1401,4 +1401,22 @@ namespace DRCHECKER {
         return (this->fid == tf->fid && InstructionUtils::same_types(this->ty,tf->ty));
     }
 
+    std::chrono::time_point<std::chrono::system_clock> InstructionUtils::getCurTime(raw_ostream *OS) {
+        auto t = std::chrono::system_clock::now();
+        if (OS) {
+            std::time_t tt = std::chrono::system_clock::to_time_t(t);
+            (*OS) << std::ctime(&tt) << "\n";
+        }
+        return t;
+    }
+
+    std::chrono::duration<double> InstructionUtils::getTimeDuration(std::chrono::time_point<std::chrono::system_clock> prev, raw_ostream *OS) {
+        auto t = std::chrono::system_clock::now();
+        auto du = t - prev;
+        if (OS) {
+            (*OS) << du.count() << "\n";
+        }
+        return du;
+    }
+
 }

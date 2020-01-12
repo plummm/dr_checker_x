@@ -953,7 +953,12 @@ namespace DRCHECKER {
         std::set<Instruction*> insts;
         for (User *u : v->users()) {
             if (dyn_cast<Instruction>(u)) {
-                insts.insert(dyn_cast<Instruction>(u));
+                //In case this is an instruction artificially created by us.
+                if (dyn_cast<Instruction>(u)->getParent()) {
+                    insts.insert(dyn_cast<Instruction>(u));
+                }else {
+                    continue;
+                }
             }
             GEPOperator *gep = dyn_cast<GEPOperator>(u);
             //Make sure it's a GEP w/ "v" as the base pointer.

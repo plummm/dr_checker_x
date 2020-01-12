@@ -372,10 +372,18 @@ namespace DRCHECKER {
                 GlobalVisitor *vis = new GlobalVisitor(currState, &currFunction, pcallSites, traversalOrder, allCallBacks);
 
                 //SAAVisitor *vis = new SAAVisitor(currState, &currFunction, pcallSites, traversalOrder);
-                dbgs() << "Analyzing new function:" << fi->name << " Call depth:1\n";
+                dbgs() << "Analyzing new function: " << fi->name << " Call depth: 1\n";
+#ifdef TIMING
+                dbgs() << "[TIMING] Start func(1) " << fi->name << ": ";
+                auto t0 = InstructionUtils::getCurTime(&dbgs());
+#endif
                 DRCHECKER::currEntryFunc = &currFunction;
                 vis->analyze();
 
+#ifdef TIMING
+                dbgs() << "[TIMING] End func(1) " << fi->name << " in: ";
+                InstructionUtils::getTimeDuration(t0,&dbgs());
+#endif
                 //Record the timestamp.
                 t_next = std::chrono::system_clock::now();
                 std::chrono::duration<double> elapsed_seconds = t_next - t_prev;
