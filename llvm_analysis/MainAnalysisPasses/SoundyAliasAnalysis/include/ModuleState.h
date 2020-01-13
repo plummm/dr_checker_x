@@ -808,10 +808,29 @@ namespace DRCHECKER {
             }
             //If the last node in hty0 is the same as any *inner* node in hty1, we say it's a prefix of hty1.
             for (auto &ty1 : *hty1) {
-                for (int i = 0; i < ty1->size() - 1; ++i) {
-                    TypeField *tf1 = (*ty1)[i];
-                    if (tf0->is_same_ty(tf1)) {
-                        return true;
+                if (ty1) {
+                    for (int i = 0; i < ty1->size() - 1; ++i) {
+                        TypeField *tf1 = (*ty1)[i];
+                        if (tf1 && tf0->is_same_ty(tf1)) {
+                            return true;
+                        }
+                    }
+                }
+            }
+            return false;
+        }
+
+        //Simply see whether "ty" matches any node in hty.
+        bool in_hierarchy_ty(Type *ty, std::set<std::vector<TypeField*>*> *hty) {
+            if (!ty || !hty) {
+                return false;
+            }
+            for (auto &tv : *hty) {
+                if (tv) {
+                    for (TypeField *tf : *tv) {
+                        if (tf && InstructionUtils::same_types(ty,tf->ty)) {
+                            return true;
+                        }
                     }
                 }
             }
@@ -832,8 +851,6 @@ namespace DRCHECKER {
                 Type *ty0 = tag->getFieldTy();
                 if (ty0 && ty0->isPointerTy()) {
                     ty0 = ty0->getPointerElementType();
-                }else {
-                    ty0 = nullptr;
                 }
                 //See whether its hierarchy is any other tag's prefix.
                 bool is_prefix = false;
@@ -851,10 +868,8 @@ namespace DRCHECKER {
                         is_prefix = true;
                         break;
                     }
-                    Type *ty1 = t->getTy();
-                    //Sometimes it may not be the simple string prefix due to our obj hierarchy is not perfect,
-                    //but we may still be able to infer the prefix by the tag type (e.g. tag1 is a pointer to tag2).
-                    if (ty1 && InstructionUtils::same_types(ty0,ty1)) {
+                    //A complementary filtering to the above, see whether the final resulting type of tag 0 matches any node in tag 1's type hierarchy.
+                    if (ty0 && dyn_cast<CompositeType>(ty0) && in_hierarchy_ty(ty0,hty1)) {
                         is_prefix = true;
                         break;
                     }
