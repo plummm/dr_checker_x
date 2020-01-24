@@ -145,7 +145,7 @@ namespace DRCHECKER {
             return PointerPointsTo::TYPE_CONST;
         }
         bool isIdenticalPointsTo(const ObjectPointsTo *that) const {
-            if(that != nullptr && that->getTargetType() == PointerPointsTo::TYPE_CONST) {
+            if (that != nullptr && that->getTargetType() == PointerPointsTo::TYPE_CONST) {
                 PointerPointsTo* actualObj = (PointerPointsTo*)that;
                 /*
                 //hz: a simple hacking here to avoid duplicated outside objects.

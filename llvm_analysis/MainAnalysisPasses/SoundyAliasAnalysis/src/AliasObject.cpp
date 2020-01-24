@@ -345,6 +345,7 @@ namespace DRCHECKER {
         //Add all objects that are in the provided set by changing the field id.
         for (PointerPointsTo *currPointsTo: *dstPointsTo) {
             // insert points to information only, if it is not present.
+            //TODO: point to different fields in a same object?
             if(currObjects.find(currPointsTo->targetObject) == currObjects.end()) {
                 ObjectPointsTo *newPointsTo = currPointsTo->makeCopy();
                 newPointsTo->fieldId = srcfieldId;
@@ -537,13 +538,13 @@ namespace DRCHECKER {
             }
         }
         if (hostObj->embObjs.find(host_dstFieldId) != hostObj->embObjs.end()){
-#ifdef DEBUG_CREATE_EMB_OBJ
-            dbgs() << "createEmbObj(): find the previosuly created embed object!\n";
-#endif
             //We have created that embedded object previously.
             newObj = hostObj->embObjs[host_dstFieldId];
+#ifdef DEBUG_CREATE_EMB_OBJ
+            dbgs() << "createEmbObj(): find the previosuly created embed object: " << (const void*)newObj << "\n";
+#endif
         }
-        if (!newObj || !InstructionUtils::same_types(newObj->targetType,ety)){
+        if (!newObj || !InstructionUtils::same_types(newObj->targetType,ety)) {
 #ifdef DEBUG_CREATE_EMB_OBJ
             dbgs() << "createEmbObj(): try to create a new embed object because ";
             if (!newObj) {
@@ -616,7 +617,7 @@ namespace DRCHECKER {
         if (targetObj->parent) {
             if (InstructionUtils::same_types(targetObj->parent->targetType,hostTy) && targetObj->parent_field == field) {
 #ifdef DEBUG_CREATE_HOST_OBJ
-                dbgs() << "createHostObj(): we have created this parent object before!\n";
+                dbgs() << "createHostObj(): we have created this parent object before: " << (const void*)(targetObj->parent) << "\n";
 #endif
                 return targetObj->parent;
             }else {
@@ -934,20 +935,32 @@ namespace DRCHECKER {
     //that has properly distanced field types that matches both the base "ptr" and the pointer type produced by the "GEP" (we need to
     //figure out the true pointer type from the subsequent cast IRs).
     //ARG: "v" points to the location w/ bit offset "bitoff" in the host type "ty".
+    //NOTE: this function is time-consuming!
     CandStructInf *inferContainerTy(Module *m,Value *v,Type *ty,long bitoff) {
 #ifdef DEBUG_INFER_CONTAINER
         dbgs() << "inferContainerTy(): v: " << InstructionUtils::getValueStr(v) << " ty: " << InstructionUtils::getTypeStr(ty) << " bitoff: " << bitoff << "\n";
 #endif
+        //We record all failure cases (i.e. cannot find any container objects) in this cache to accelerate future processing,
+        //note that we don't set up a 'success' cache because as soon as we find a container, the parent object will be created, thus later
+        //bit2Field() has no need to invoke this function again, but failed cases may be queryed again and again.
+        static std::map<Value*,std::map<Type*,std::set<long>>> fail_cache;
         if (!m || !v || !ty) {
 #ifdef DEBUG_INFER_CONTAINER
             dbgs() << "inferContainerTy(): !m || !v || !ty\n";
 #endif
             return nullptr;
         }
+        if (fail_cache.find(v) != fail_cache.end() && fail_cache[v].find(ty) != fail_cache[v].end() &&
+            fail_cache[v][ty].find(bitoff) != fail_cache[v][ty].end()) {
+#ifdef DEBUG_INFER_CONTAINER
+            dbgs() << "This is a failed case!\n";
+#endif
+            return nullptr;
+        }
         DataLayout dl = m->getDataLayout();
         //NOTE: use store size here since the host object is on its own (not stored consecutively w/ other same objects).
         long tysz = dl.getTypeStoreSizeInBits(ty);
-        //Analyze every single-index GEP w/ the same i8* srcPointer "v".
+        //Analyze every OOB GEP w/ the same base pointer "v".
         std::vector<CandStructInf*> cands;
         bool init = true;
         std::set<Instruction*> insts;
@@ -1063,6 +1076,8 @@ namespace DRCHECKER {
         dbgs() << "inferContainerTy(): all GEPs analyzed, #cand containers: " << cands.size() << "\n";
 #endif
         if (cands.size() == 0) {
+            //Add to the fail cache.
+            fail_cache[v][ty].insert(bitoff);
             return nullptr;
         }
         //Ok now we have got a candidate container list.
@@ -1093,6 +1108,8 @@ namespace DRCHECKER {
         //note that currently ind[0] is the location of "ty" in the container.
         int idst = InstructionUtils::locateBitsoffInTyDesc(cands[0]->fds,(*cands[0]->fds)[cands[0]->ind[0]]->bitoff + bitoff);
         if (idst < 0 || idst >= cands[0]->fds->size()) {
+            //Add to the fail cache.
+            fail_cache[v][ty].insert(bitoff);
             return nullptr;
         }
         cands[0]->ind[0] = idst;

@@ -1412,9 +1412,9 @@ namespace DRCHECKER {
 
     std::chrono::duration<double> InstructionUtils::getTimeDuration(std::chrono::time_point<std::chrono::system_clock> prev, raw_ostream *OS) {
         auto t = std::chrono::system_clock::now();
-        auto du = t - prev;
+        std::chrono::duration<double> du = t - prev;
         if (OS) {
-            (*OS) << du.count() << "\n";
+            (*OS) << du.count() << "s\n";
         }
         return du;
     }

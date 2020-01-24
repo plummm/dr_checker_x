@@ -387,11 +387,11 @@ namespace DRCHECKER {
                 //Record the timestamp.
                 t_next = std::chrono::system_clock::now();
                 std::chrono::duration<double> elapsed_seconds = t_next - t_prev;
-                dbgs() << "Anlysis of " << fi->name << " done in : " << elapsed_seconds.count() << "s\n";
+                dbgs() << "[TIMING] Anlysis of " << fi->name << " done in : " << elapsed_seconds.count() << "s\n";
                 t_prev = t_next;
 
                 //clean up
-                dbgs() << "Clean up GlobalVisitor at: ";
+                dbgs() << "[TIMING] Clean up GlobalVisitor at: ";
                 this->printCurTime();
                 delete(vis);
             }
@@ -399,14 +399,14 @@ namespace DRCHECKER {
             std::string rid = (checkFunctionName.size() > 0 ? checkFunctionName : entryConfig);
             auto t_now = std::chrono::system_clock::now();
             std::chrono::duration<double> elapsed_seconds = t_now - t_start;
-            dbgs() << "All anlysis done in : " << elapsed_seconds.count() << "s\n";
+            dbgs() << "[TIMING] All anlysis done in : " << elapsed_seconds.count() << "s\n";
 
             dbgs() << "Now start to serialize the taint information...\n";
             currState.serializeTaintInfo("taint_info_" + rid + "_serialize");
 
             auto t_end0 = std::chrono::system_clock::now();
             elapsed_seconds = t_end0 - t_now;
-            dbgs() << "Taint info serialized in : " << elapsed_seconds.count() << "s\n";
+            dbgs() << "[TIMING] Taint info serialized in : " << elapsed_seconds.count() << "s\n";
                         
             dbgs() << "Now start to dump the taint information...\n";
             std::error_code EC;
@@ -429,7 +429,7 @@ namespace DRCHECKER {
 
             auto t_end1 = std::chrono::system_clock::now();
             elapsed_seconds = t_end1 - t_end0;
-            dbgs() << "Taint info dumped in : " << elapsed_seconds.count() << "s\n";
+            dbgs() << "[TIMING] Taint info dumped in : " << elapsed_seconds.count() << "s\n";
 
             /*
             if(outputFile == "") {

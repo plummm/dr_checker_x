@@ -20,6 +20,7 @@ namespace DRCHECKER {
 //hz: Enable creating new outside objects on the fly when the pointer points to nothing.
 #define CREATE_DUMMY_OBJ_IF_NULL
 #define DEBUG_UPDATE_POINTSTO
+//#define AGGRESSIVE_PTO_DUP_FILTER
 //#define DEBUG_TMP
 
     //hz: A helper method to create and (taint) a new OutsideObject.
@@ -74,7 +75,7 @@ namespace DRCHECKER {
         if(dbg){
             dbgs() << "----------------------------\n";
         }
-        if(p0->dstfieldId != p1->dstfieldId){
+        if (p0->dstfieldId != p1->dstfieldId){
             if(dbg){
                 dbgs() << "dstField mismatch: " << p0->dstfieldId << "|" << p1->dstfieldId << "\n";
             }
@@ -85,34 +86,37 @@ namespace DRCHECKER {
         if(dbg){
             dbgs() << (o0?"t":"f") << (o1?"t":"f") << (o0?(o0->isOutsideObject()?"t":"f"):"n") << (o1?(o1->isOutsideObject()?"t":"f"):"n") << "\n";
         }
-        if(o0 && o1){
-            if(dbg){
-                dbgs() << "Ty0: " << InstructionUtils::getTypeStr(o0->targetType) << " Ty1: " << InstructionUtils::getTypeStr(o1->targetType) << "\n";
-            }
-            if(o0->targetType != o1->targetType){
+        if (o0 == o1) {
+            return true;
+        }else {
+            //In theory we should return false, except we use a more strict filtering (in order to reduce more points-to records.)
+#ifdef AGGRESSIVE_PTO_DUP_FILTER
+            if(o0 && o1){
                 if(dbg){
-                    dbgs() << "Target obj type mismatch!\n";
+                    dbgs() << "Ty0: " << InstructionUtils::getTypeStr(o0->targetType) << " Ty1: " << InstructionUtils::getTypeStr(o1->targetType) << "\n";
                 }
-                return false;
+                if(o0->targetType != o1->targetType){
+                    if(dbg){
+                        dbgs() << "Target obj type mismatch!\n";
+                    }
+                    return false;
+                }
+                //Ok, now these two points-to have the same target obj type and dst field, what then?
+                //We will further look at the object ptr of the target AliasObject, if they are also the same, we regard these 2 objs the same.
+                Value *v0 = o0->getObjectPtr();
+                Value *v1 = o1->getObjectPtr();
+                if(dbg){
+                    dbgs() << "Ptr0: " << InstructionUtils::getValueStr(v0) << " Ptr1: " << InstructionUtils::getValueStr(v1) << "RES: " << (v0==v1?"T":"F") << "\n";
+                }
+                if(v0 || v1){
+                    return (v0 == v1);
+                }
             }
-            //Ok, now these two points-to have the same target obj type and dst field, what then?
-            //We will further look at the object ptr of the target AliasObject, if they are also the same, we regard these 2 objs the same.
-            Value *v0 = o0->getObjectPtr();
-            Value *v1 = o1->getObjectPtr();
-            if(dbg){
-                dbgs() << "Ptr0: " << InstructionUtils::getValueStr(v0) << " Ptr1: " << InstructionUtils::getValueStr(v1) << "RES: " << (v0==v1?"T":"F") << "\n";
-            }
-            if(v0 || v1){
-                return (v0 == v1);
-            }
-        }else if(o0 || o1){
-            //One is null but the other is not, obviously not the same.
-            if(dbg){
-                dbgs() << "One of the 2 objs is null\n";
-            }
+#else
             return false;
+#endif
         }
-        if(dbg){
+        if (dbg) {
             dbgs() << "Default Cmp\n";;
         }
         return  p0->isIdenticalPointsTo(p1);
@@ -1684,6 +1688,9 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
             dbgs() << "After strip, the targetValue is: " << InstructionUtils::getValueStr(targetValue) << "\n";
 #endif
         }
+        //Let's not create dummy objs for the targetValue when processing the store inst to avoid the pointee explosion, if the targetValue
+        //really deserves a pointee dummy obj it should has already been created by other inst visitors.
+        /*
 #ifdef CREATE_DUMMY_OBJ_IF_NULL
         //hz: try to create dummy objects if there is no point-to information about the pointer variable,
         //since it can be an outside global variable. (e.g. platform_device).
@@ -1699,6 +1706,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
             }
         }
 #endif
+        */
         if(hasPointsToObjects(targetValue)) {
 
             // Get the src points to information.
