@@ -351,7 +351,7 @@ namespace DRCHECKER {
                 newPointsTo->fieldId = srcfieldId;
                 newPointsTo->propogatingInstruction = propogatingInstr;
 #ifdef DEBUG_UPDATE_FIELD_POINT
-                dbgs() << "updateFieldPointsTo(), add point-to: ";
+                dbgs() << "updateFieldPointsTo(): add point-to: ";
                 newPointsTo->print(dbgs());
 #endif
                 this->pointsTo.push_back(newPointsTo);
@@ -359,6 +359,9 @@ namespace DRCHECKER {
                 //this->addToPointsFrom(newPointsTo->targetObject);
             }
         }
+#ifdef DEBUG_UPDATE_FIELD_POINT
+        dbgs() << "updateFieldPointsTo(): After updates: " << this->countObjectPointsTo(srcfieldId) << "\n"; 
+#endif
     }
 
     Type *ObjectPointsTo::getPointeeTy() {
