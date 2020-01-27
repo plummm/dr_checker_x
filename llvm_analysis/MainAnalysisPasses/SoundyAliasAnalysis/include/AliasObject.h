@@ -389,8 +389,15 @@ namespace DRCHECKER {
              * Update the pointto information of the field pointed by srcfieldId
              */
 
+            //Array collapse
+            if (this->targetType && dyn_cast<SequentialType>(this->targetType)) {
+#ifdef DEBUG_UPDATE_FIELD_POINT
+                dbgs() << "performUpdate(): sequential host, set srcfieldId to 0.\n";
+#endif
+                srcfieldId = 0;
+            }
             // check if we can perform strong update
-            if(this->countObjectPointsTo(srcfieldId) <= 1) {
+            if (this->countObjectPointsTo(srcfieldId) <= 1) {
                 this->performStrongUpdate(srcfieldId, dstPointsTo, propogatingInstr);
             } else {
                 this->performWeakUpdate(srcfieldId, dstPointsTo, propogatingInstr);

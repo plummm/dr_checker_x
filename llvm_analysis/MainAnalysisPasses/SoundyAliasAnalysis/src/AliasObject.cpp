@@ -135,15 +135,18 @@ namespace DRCHECKER {
                     //Do the taint accordingly.
                     this->taintSubObj(obj->targetObject,srcfieldId,targetInstr);
                 }
+                //Anyway here we're sure that we have the point-to record and we don't need to create dummy pointees any more,
+                //although the recorded pointee may have already been included in the "dstObjects" (e.g. load src pointer can have
+                //other target objects whose pointee set has already included this recorded pointee).
+                hasObjects = true;
                 auto p = std::make_pair(obj->dstfieldId, obj->targetObject);
                 if (std::find(dstObjects.begin(), dstObjects.end(), p) == dstObjects.end()) {
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-                    dbgs() << "Found an obj in |pointsTo| records:\n";
+                    dbgs() << "Found a new obj in |pointsTo| records, insert it to the dstObjects.\n";
                     dbgs() << "Type: " << InstructionUtils::getTypeStr(obj->targetObject->targetType) << " | " << obj->dstfieldId << " | is_taint_src:" << obj->targetObject->is_taint_src << "\n";
                     dbgs() << "Val: " << InstructionUtils::getValueStr(obj->targetObject->getValue()) << " ID: " << (const void*)(obj->targetObject) << "\n";
 #endif
                     dstObjects.insert(dstObjects.end(), p);
-                    hasObjects = true;
                 }
             }
         }
@@ -201,9 +204,9 @@ namespace DRCHECKER {
             ety = dyn_cast<CompositeType>(ety)->getTypeAtIndex((unsigned)fid);
         }
         //It's possible that the embedded object already has the point-to record for field 0, if not, we may need to create the dummy pointee objects.
-        if (hostObj != this && hostObj->countObjectPointsTo(fid) > 0) {
+        if (hostObj != this) {
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-            dbgs() << "fetchPointsToObjects(): recursively get the point-to from the embedded composite field.\n"; 
+            dbgs() << "fetchPointsToObjects(): recursively fetch the point-to from the embedded composite field.\n"; 
 #endif
             return hostObj->fetchPointsToObjects(fid,dstObjects,targetInstr,create_arg_obj);
         }
