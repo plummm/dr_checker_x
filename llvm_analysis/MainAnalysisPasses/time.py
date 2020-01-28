@@ -5,10 +5,11 @@ import sys,os
 def ext_time_sec(l):
     l = l.strip()
     tks = l.split(" ")
-    if len(tks) < 1 or not tks[-1].isdigit():
+    try:
+        return float(tks[-1][:-1])
+    except:
         print 'Invalid line to extract time duration: ' + l;
         return None
-    return float(tks[-1])/1000000000.0
 
 def print_array_info(arr,detail=False):
     arr.sort(reverse=True)
