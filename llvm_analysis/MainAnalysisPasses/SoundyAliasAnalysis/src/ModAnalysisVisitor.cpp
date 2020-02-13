@@ -577,9 +577,7 @@ namespace DRCHECKER {
                                                          std::vector<Instruction *> *oldFuncCallSites,
                                                          std::vector<Instruction *> *callSiteContext) {
 #ifdef DEBUG_CALL_INST
-       dbgs() << "---------\nMod analysis visits call instruction: ";
-       I.print(dbgs());
-       dbgs() << "\n";
+       dbgs() << "ModAnalysisVisitor::visitCallInst(): " << InstructionUtils::getValueStr(&I) << "\n";
 #endif
        std::string n = InstructionUtils::getCalleeName(&I,true);
        if (n.size() > 0) {

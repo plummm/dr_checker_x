@@ -229,6 +229,10 @@ namespace DRCHECKER {
 
         static bool isPrimitiveTy(Type *ty);
 
+        static bool isNullCompPtr(Type *ty);
+
+        static bool isNullCompTy(Type *ty);
+
         static Type *getStTypeByName(Module *mod, std::string &n);
 
         static bool isOpaqueSt(Type *ty);

@@ -1113,13 +1113,13 @@ namespace DRCHECKER {
         if (!ty) {
             return false;
         }
-        if (ty->isStructTy() && fid >= 0 && fid < ty->getStructNumElements()) {
-            return true;
-        }else if (ty->isArrayTy() && fid >= 0 && fid < ty->getArrayNumElements()) {
-            return true;
-        }else if (ty->isVectorTy() && fid >= 0) {
+        if (ty->isStructTy()) {
+            return (fid >= 0 && fid < ty->getStructNumElements());
+        }else if (ty->isArrayTy()) {
+            return (fid >= 0 && fid < ty->getArrayNumElements());
+        }else if (ty->isVectorTy()) {
             //The vector can be extended at desire.
-            return true;
+            return (fid >= 0);
         }
         //We have already covered all composite types. 
         return (fid == 0);
@@ -1276,6 +1276,20 @@ namespace DRCHECKER {
             return (ty->isVoidTy() || ty->isIntegerTy());
         }
         return true;
+    }
+
+    bool InstructionUtils::isNullCompTy(Type *ty) {
+        if (ty && dyn_cast<CompositeType>(ty)) {
+            return (InstructionUtils::isOpaqueSt(ty) || !InstructionUtils::isIndexValid(ty,0));
+        }
+        return false;
+    }
+
+    bool InstructionUtils::isNullCompPtr(Type *ty)  {
+        if (!ty || !ty->isPointerTy()) {
+            return false;
+        }
+        return InstructionUtils::isNullCompTy(ty->getPointerElementType());
     }
 
     bool InstructionUtils::isPrimitivePtr(Type *ty) {

@@ -15,9 +15,9 @@ namespace DRCHECKER {
 #endif
             return false;
         }
-        if (dyn_cast<StructType>(ty) && dyn_cast<StructType>(ty)->isOpaque()) {
+        if (InstructionUtils::isNullCompTy(ty)) {
 #ifdef DEBUG_CREATE_DUMMY_OBJ_IF_NULL
-            dbgs() << "validTyForOutsideObj(): it's an opaque struct type, cannot create the outside obj!\n";
+            dbgs() << "validTyForOutsideObj(): it's an opaque struct type or null composite type, cannot create the outside obj!\n";
 #endif
             return false;
         }
@@ -213,7 +213,7 @@ namespace DRCHECKER {
         //We need to decide the type of the dummy object we want to create..
         //NOTE: a non-pointer field can also be converted to a pointer and thus have pointees... 
         Type *real_ty = nullptr;
-        if (ety->isPointerTy() && !InstructionUtils::isPrimitivePtr(ety)) {
+        if (ety->isPointerTy() && !InstructionUtils::isPrimitivePtr(ety) && !InstructionUtils::isNullCompPtr(ety)) {
             real_ty = ety->getPointerElementType();
         }else if (expObjTy && !InstructionUtils::isPrimitiveTy(expObjTy)) {
             //NOTE: we handle a special case here, sometimes the field type in the struct can be "void*" or "char*" ("i8*"), but it can be converted to "struct*" in the load,
