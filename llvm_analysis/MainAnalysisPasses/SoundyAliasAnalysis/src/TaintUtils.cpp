@@ -90,4 +90,39 @@ namespace DRCHECKER {
         }
         return 0;
     }
+
+    unsigned TaintUtils::getTaintState(GlobalState &currState,
+                                       std::vector<Instruction *> *currFuncCallSites,
+                                       Value *targetVal,
+                                       std::set<std::pair<long, Value*>> *taintSrc = nullptr) {
+        unsigned ret = TAINT_NONE;
+        std::set<TaintFlag*>* taintFlags = TaintUtils::getTaintInfo(currState, currFuncCallSites, targetVal);
+        if (!taintFlags || taintFlags->empty()) {
+            return ret;
+        }
+        for(auto tf : *taintFlags) {
+            if (!tf || !tf->tag) {
+                continue;
+            }
+            TaintTag *tag = tf->tag;
+            if (tag->is_global) {
+                ret |= TAINT_GLOBAL;
+            } else {
+                ret |= TAINT_UARG;
+            }
+            //Check whether it's tainted by the specific taint source as in "taintSrc" if present.
+            if (taintSrc) {
+                for (auto to : *taintSrc) {
+                    if (tag->v && tag->v == to.second && tag->fieldId == to.first) {
+                        ret |= TAINT_SPECIFIED;
+                        break;
+                    }
+                }
+            }
+        }
+        if (ret == TAINT_NONE) {
+            ret = TAINT_UNK;
+        }
+        return ret;
+    }
 }

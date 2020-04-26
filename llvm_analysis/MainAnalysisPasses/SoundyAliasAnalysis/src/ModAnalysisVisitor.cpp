@@ -6,7 +6,6 @@
 #include "PointsToUtils.h"
 #include "TaintUtils.h"
 #include "TaintInfo.h"
-#include "../../Utils/include/InstructionUtils.h"
 
 using namespace llvm;
 namespace DRCHECKER {
@@ -21,9 +20,7 @@ namespace DRCHECKER {
 
     void ModAnalysisVisitor::visitStoreInst(StoreInst &I) {
 #ifdef DEBUG_TMP
-        dbgs() << "ModAnalysisVisitor::visitStoreInst(): ";
-        I.print(dbgs());
-        dbgs() << "\n";
+        dbgs() << "ModAnalysisVisitor::visitStoreInst(): " << InstructionUtils::getValueStr(&I) << "\n";
 #endif
         //Get the dst pointer of the "store".
         Value *dstPointer = I.getPointerOperand();
@@ -37,9 +34,7 @@ namespace DRCHECKER {
                                                                                     dstPointer);
         if(dstPointsTo == nullptr) {
 #ifdef DEBUG_STORE_INST
-            dbgs() << "ModAnalysisVisitor::visitStoreInst(): No points-to info: ";
-            I.print(dbgs());
-            dbgs() << "\n";
+            dbgs() << "ModAnalysisVisitor::visitStoreInst(): No points-to info for: " << InstructionUtils::getValueStr(&I) << "\n";
 #endif
             return;
         }
@@ -49,14 +44,14 @@ namespace DRCHECKER {
 #endif
         //Does it point to any taint-src objects (e.g. global objects and outside objects) ?
         //Target global states to modify.
-        std::set<std::pair<long, AliasObject*>> targetObjects;
+        std::set<std::pair<long, Value*>> targetObjects;
         for (PointerPointsTo *currPointsToObj:*dstPointsTo) {
             long target_field = currPointsToObj->dstfieldId;
             AliasObject *dstObj = currPointsToObj->targetObject;
-            if (!dstObj || !dstObj->is_taint_src){
+            if (!dstObj || !dstObj->is_taint_src || !dstObj->getValue()) {
                 continue;
             }
-            auto to_check = std::make_pair(target_field, dstObj);
+            auto to_check = std::make_pair(target_field, dstObj->getValue());
             if(std::find(targetObjects.begin(), targetObjects.end(), to_check) == targetObjects.end()) {
                 targetObjects.insert(targetObjects.end(), to_check);
             }
@@ -77,9 +72,7 @@ namespace DRCHECKER {
                         }
                         //Record current instruction in the tag mod inst list.
 #ifdef DEBUG_STORE_INST
-                        dbgs() << "Add to mod_inst_list (fieldTaint): ";
-                        I.print(dbgs());
-                        dbgs() << "\n";
+                        dbgs() << "Add to mod_inst_list (fieldTaint): " << InstructionUtils::getValueStr(&I) << "\n";
                         tag->dumpInfo(dbgs());
 #endif
                         tag->insertModInst(&I,this->actx->callSites);
@@ -103,9 +96,7 @@ namespace DRCHECKER {
                         continue;
                     }
 #ifdef DEBUG_STORE_INST
-                    dbgs() << "Add to mod_inst_list (all_contents_taint_flag): ";
-                    I.print(dbgs());
-                    dbgs() << "\n";
+                    dbgs() << "Add to mod_inst_list (all_contents_taint_flag): " << InstructionUtils::getValueStr(&I) << "\n";
 #endif
                     dstObj->all_contents_taint_flag->tag->insertModInst(&I,this->actx->callSites);
                 }
@@ -119,11 +110,9 @@ namespace DRCHECKER {
     }
 
     //Analyze the modification pattern of current "store", e.g., a = 1 or a++?
-    void ModAnalysisVisitor::analyzeModPattern(StoreInst &I, std::set<std::pair<long, AliasObject*>> *targetObjects) {
+    void ModAnalysisVisitor::analyzeModPattern(StoreInst &I, std::set<std::pair<long, Value*>> *targetObjects) {
 #ifdef DEBUG_MOD_TRAIT
-        dbgs() << "ModAnalysisVisitor::analyzeModPattern: ";
-        I.print(dbgs());
-        dbgs() << "\n";
+        dbgs() << "ModAnalysisVisitor::analyzeModPattern: " << InstructionUtils::getValueStr(&I) << "\n";
 #endif
         if ( this->currState.modTraitMap.find(&I) != this->currState.modTraitMap.end() &&
              this->currState.modTraitMap[&I].find(this->actx->callSites) != this->currState.modTraitMap[&I].end() ) 
@@ -146,7 +135,10 @@ namespace DRCHECKER {
 #endif
             return;
         }
-        //For now let's only consider the scalar values to store.
+        //If the srcValue is not a constant, then we will first figure out whether it's affected by another global state (i.e. recursive data taint) or not,
+        //then we further identify its update pattern (e.g. i++ or i=j) if it's a scalar type.
+        unsigned ts = TaintUtils::getTaintState(this->currState, this->currFuncCallSites, srcValue, targetObjects);
+        //TODO: encode the taint states into the key strings of "modTraitMap", e.g., TGV_XXX means tainted by another gv.
         if (!InstructionUtils::isScalar(srcValue)) {
 #ifdef DEBUG_MOD_TRAIT
             dbgs() << "ModAnalysisVisitor::analyzeModPattern: The value to store is not a scalar\n";
@@ -155,9 +147,9 @@ namespace DRCHECKER {
         }
         //Ok, it's not an const value, then how is it derived?
         //Note that in this situation, there can be two cases:
-        //(1) the variable to store is derived from some other non-relavent (to the global state) variables (e.g. func arg),
+        //(1) the variable to store is derived from some other variables (e.g. func arg),
         //so basically we cannot get the exact value to store, we rely on fuzzing to hit the proper value here.
-        //(2) the modification is based on the global state itself, e.g., a self addition.
+        //(2) the modification is based on the destination global state itself, e.g., a self addition.
         //We only try to match (2) here, which needs the "targetObjects" information.
         if ((!targetObjects) || targetObjects->empty()) {
             return;
@@ -176,7 +168,7 @@ namespace DRCHECKER {
         int64_t cn, cn_o;
         //TODO: the analysis should be per-taint-tag, but now we consider all "targetObjects" together 
         //(i.e. load & store may both belong to "targetObjects" but not the same one)
-        if (!this->verifyPatternExistence(srcValue,targetObjects,&cn,&cn_o)) {
+        if (!this->verifyPatternExistence(srcValue, targetObjects, &cn, &cn_o)) {
             //No recognizable patterns.
 #ifdef DEBUG_MOD_TRAIT
             dbgs() << "ModAnalysisVisitor::analyzeModPattern: unrecognized pattern!\n";
@@ -194,15 +186,16 @@ namespace DRCHECKER {
 #endif
         return;
     }
-    
-    int ModAnalysisVisitor::verifyPatternExistence(Value* v, std::set<std::pair<long, AliasObject*>> *targetObjects, int64_t *cn, int64_t *cn_o) {
+
+    //Verify whether the store is a "self modification" (e.g. i++, i+=2), basically "v" is the value to store, this function will verify
+    //whether "v" is actually loaded from the targetObjects and then undergoes some calculations w/ some constants.
+    //"cn" will store this constant if any, "cn_o" is the operator order of this constant in the arithmetic instruction.
+    int ModAnalysisVisitor::verifyPatternExistence(Value* v, std::set<std::pair<long, Value*>> *targetObjects, int64_t *cn, int64_t *cn_o) {
         if (!v || !dyn_cast<llvm::User>(v)) {
             return 0;
         }
 #ifdef DEBUG_MOD_TRAIT
-        dbgs() << "ModAnalysisVisitor::verifyPatternExistence: ";
-        v->print(dbgs());
-        dbgs() << "\n";
+        dbgs() << "ModAnalysisVisitor::verifyPatternExistence: " << InstructionUtils::getValueStr(v) << "\n";
 #endif
         llvm::User *u = dyn_cast<llvm::User>(v);
         //We currently match the pattern "x op C" where C is a contant and x is the global state.
@@ -238,32 +231,14 @@ namespace DRCHECKER {
                     return 0;
                 }
             } /*constant op*/ else {
-                //Decide whether the varible is indeed the global state, otherwise we cannot match the pattern.
+                //Decide whether the variable is indeed the global state, otherwise we cannot match the pattern.
                 //We can do this in two ways:
-                //(1) Simply see whether the variable is tainted by any combination in "targetObjects".
-                //(2) Trace back the IR and match the pattern "load x, obj->f; [cast...] ; arithmeticis"
-                //TODO: we now use (1)
-                std::set<TaintFlag*>* taintFlags = TaintUtils::getTaintInfo(this->currState, this->currFuncCallSites, op[i]);
-                if (!taintFlags) {
-#ifdef DEBUG_MOD_TRAIT
-                    dbgs() << "ModAnalysisVisitor::verifyPatternExistence: the variable is not tainted.\n";
-#endif
-                    return 0;
-                }
-                for(auto tf : *taintFlags) {
-                    if (!tf || !tf->tag) {
-                        continue;
-                    }
-                    TaintTag *tag = tf->tag;
-                    for (auto to : *targetObjects) {
-                        if (tag->v == to.second->getValue() && tag->fieldId == to.first) {
-                            tainted_by_target = 1;
-                            break;
-                        }
-                    }//Check whether it's in "targetObjects"
-                    if (tainted_by_target) {
-                        break;
-                    }
+                //(1) Simply see whether the variable is tainted by any "targetObjects".
+                //(2) Trace back the IR and match the pattern "load x, obj->f ("obj" and "f" is an entry from "targetObjects"); [cast...] ; arithmeticis"
+                //TODO: we now use (1), any issues?
+                unsigned r = TaintUtils::getTaintState(this->currState, this->currFuncCallSites, op[i], targetObjects);
+                if (r & TAINT_SPECIFIED) {
+                    tainted_by_target = 1;
                 }
             } //variable op
         }//for

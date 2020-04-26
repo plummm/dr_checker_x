@@ -9,6 +9,7 @@
 #include "VisitorCallback.h"
 #include "TaintInfo.h"
 #include "TaintUtils.h"
+#include "../../Utils/include/InstructionUtils.h"
 
 using namespace llvm;
 
@@ -44,9 +45,7 @@ namespace DRCHECKER {
 
         virtual void visit(Instruction &I) {
 #ifdef DEBUG_MOD_INSTR_VISIT
-            dbgs() << "Visiting instruction(In ModAnalysis):";
-            I.print(dbgs());
-            dbgs() << "\n";
+            dbgs() << "Visiting instruction(In ModAnalysis): " << InstructionUtils::getValueStr(&I) << "\n";
 #endif
         }
 
@@ -56,13 +55,13 @@ namespace DRCHECKER {
                                                std::vector<Instruction *> *oldFuncCallSites,
                                                std::vector<Instruction *> *currFuncCallSites);
 
-        void analyzeModPattern(StoreInst &I, std::set<std::pair<long, AliasObject*>> *targetObjects);
+        void analyzeModPattern(StoreInst &I, std::set<std::pair<long, Value*>> *targetObjects);
 
         virtual void visitBranchInst(BranchInst &I);
 
         virtual void visitICmpInst(ICmpInst &I);
 
-        int verifyPatternExistence(Value* v, std::set<std::pair<long, AliasObject*>> *targetObjects, int64_t *cn, int64_t *cn_o);
+        int verifyPatternExistence(Value* v, std::set<std::pair<long, Value*>> *targetObjects, int64_t *cn, int64_t *cn_o);
 
         int getArithmeticsInf(Value*,TRAIT*,int64_t,int64_t);
 
