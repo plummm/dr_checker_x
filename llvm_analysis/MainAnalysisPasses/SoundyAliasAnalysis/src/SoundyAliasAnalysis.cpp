@@ -166,6 +166,10 @@ namespace DRCHECKER {
                 ifile.open(entryConfig);
                 std::string l;
                 while (std::getline(ifile, l)) {
+                    //Skip the comment line
+                    if (l.find("#") == 0) {
+                        continue;
+                    }
                     std::vector<std::string> tks = split(l," ");
                     if (tks.size() < 2) {
                         dbgs() << "Invalid line in the entry config file: " << l << "\n";
@@ -700,7 +704,7 @@ namespace DRCHECKER {
             unsigned long arg_no=0;
             for(Function::arg_iterator arg_begin = fi->func->arg_begin(), arg_end = fi->func->arg_end(); arg_begin != arg_end; arg_begin++) {
                 Value *currArgVal = &(*arg_begin);
-                if(taintedArgs.find(arg_no) != taintedArgs.end()) {
+                if (taintedArgs.find(arg_no) != taintedArgs.end()) {
                     //hz: Add a taint tag indicating that the taint is from user-provided arg, instead of global states.
                     //This tag represents the "arg", at the function entry its point-to object hasn't been created yet, so no "pobjs" for the tag.
                     TaintTag *currTag = new TaintTag(0,currArgVal,false);
@@ -711,7 +715,7 @@ namespace DRCHECKER {
                     currTaintInfo->insert(currFlag);
                     TaintUtils::updateTaintInfo(targetState, callSites, currArgVal, currTaintInfo);
                 }
-                if(pointerArgs.find(arg_no) != pointerArgs.end()) {
+                if (pointerArgs.find(arg_no) != pointerArgs.end()) {
                     AliasObject *obj = new FunctionArgument(currArgVal, currArgVal->getType(), fi->func,
                                                             callSites);
                     PointerPointsTo *newPointsTo = new PointerPointsTo();
