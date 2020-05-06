@@ -15,6 +15,7 @@
 #include "llvm/IR/DebugInfo.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/IR/Operator.h"
+#include "llvm/Analysis/CFGPrinter.h"
 #include <string>
 #include <sstream>
 #include <chrono>
@@ -27,6 +28,7 @@ using namespace llvm;
 
 namespace DRCHECKER {
     
+    //Encode the information of a field (at a certain bit offset) in a (nested) structure
     class FieldDesc {
         public:
         int bitoff = 0;
@@ -92,6 +94,21 @@ namespace DRCHECKER {
         Type *ty = nullptr;
         long fid = 0;
         void *priv = nullptr;
+    };
+
+    // This encodes the information to locate an instruction within a certain call context,
+    // it also provides some utilities like reachability test w/ another instruction.
+    class InstLoc {
+        public:
+        //The llvm inst itself.
+        Value *inst;
+        //The calling context of this inst.
+        std::vector<Instruction*> *ctx;
+
+        InstLoc(Value *inst, std::vector<Instruction*> *ctx) {
+            this->inst = inst;
+            this->ctx = ctx;
+        }
     };
 
     class InstructionUtils {
@@ -246,6 +263,8 @@ namespace DRCHECKER {
         static std::chrono::time_point<std::chrono::system_clock> getCurTime(raw_ostream *OS = nullptr);
 
         static std::chrono::duration<double> getTimeDuration(std::chrono::time_point<std::chrono::system_clock> prev, raw_ostream *OS = nullptr);
+
+        static int dumpFuncGraph(Function *f);
     };
 
 }

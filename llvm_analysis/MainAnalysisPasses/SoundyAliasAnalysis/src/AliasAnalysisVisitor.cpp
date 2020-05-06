@@ -291,7 +291,7 @@ namespace DRCHECKER {
         dbgs() << "AliasAnalysisVisitor::makePointsToCopy_emb(): elements in *srcPointsTo: " << srcPointsTo->size() << " \n";
 #endif
         std::set<PointerPointsTo*>* newPointsToInfo = new std::set<PointerPointsTo*>();
-        for(PointerPointsTo *currPointsToObj : *srcPointsTo) {
+        for (PointerPointsTo *currPointsToObj : *srcPointsTo) {
             AliasObject *hostObj = currPointsToObj->targetObject;
             if (!hostObj) {
                 continue;
@@ -343,16 +343,16 @@ namespace DRCHECKER {
 #endif
                 continue;
             }
-            PointerPointsTo *newPointsToObj = new PointerPointsTo();
-            newPointsToObj->propogatingInstruction = propInstruction;
-            newPointsToObj->fieldId = 0;
             //Ok, it's an emb struct/array, create new emb object if necessary.
 #ifdef DEBUG_GET_ELEMENT_PTR
             dbgs() << "AliasAnalysisVisitor::makePointsToCopy_emb(): trying to get/create an object for the embedded struct/array..\n";
 #endif
-            newPointsToObj->targetPointer = resPointer;
             AliasObject *newObj = this->createEmbObj(hostObj,dstField,srcPointer);
             if(newObj){
+                PointerPointsTo *newPointsToObj = new PointerPointsTo();
+                newPointsToObj->propogatingInst = new InstLoc(propInstruction,this->currFuncCallSites);
+                newPointsToObj->fieldId = 0;
+                newPointsToObj->targetPointer = resPointer;
                 newPointsToObj->targetObject = newObj;
                 newPointsToObj->dstfieldId = fieldId;
                 newPointsToInfo->insert(newPointsToInfo->begin(), newPointsToObj);
@@ -360,7 +360,6 @@ namespace DRCHECKER {
 #ifdef DEBUG_GET_ELEMENT_PTR
                 errs() << "AliasAnalysisVisitor::makePointsToCopy_emb(): cannot get or create embedded object.\n";
 #endif
-                delete(newPointsToObj);
             }
         }
         return newPointsToInfo;
@@ -402,7 +401,7 @@ namespace DRCHECKER {
             // if the target object is not visited, then add into points to info.
             if(hostObj && visitedObjects.find(hostObj) == visitedObjects.end()) {
                 PointerPointsTo *newPointsToObj = new PointerPointsTo();
-                newPointsToObj->propogatingInstruction = propInstruction;
+                newPointsToObj->propogatingInst = new InstLoc(propInstruction,this->currFuncCallSites);
                 long host_dstFieldId = pto->dstfieldId;
                 //Get type information about current point-to object.
                 Type *host_type = hostObj->targetType;
@@ -570,7 +569,7 @@ std::set<PointerPointsTo*>* AliasAnalysisVisitor::mergePointsTo(std::set<Value*>
         }
     }
     // if there are any objects?
-    if(targetObjects.size() > 0) {
+    if (targetObjects.size() > 0) {
         std::set<PointerPointsTo*>* toRetPointsTo = new std::set<PointerPointsTo*>();
         for(auto currItem: targetObjects) {
             PointerPointsTo* currPointsToObj = new PointerPointsTo();
@@ -581,7 +580,7 @@ std::set<PointerPointsTo*>* AliasAnalysisVisitor::mergePointsTo(std::set<Value*>
             currPointsToObj->targetObject = currItem.second;
             currPointsToObj->dstfieldId = currItem.first;
             currPointsToObj->fieldId = 0;
-            currPointsToObj->propogatingInstruction = targetInstruction;
+            currPointsToObj->propogatingInst = new InstLoc(targetInstruction,this->currFuncCallSites);
             toRetPointsTo->insert(toRetPointsTo->begin(), currPointsToObj);
         }
         return toRetPointsTo;
@@ -613,7 +612,7 @@ std::set<PointerPointsTo*>* AliasAnalysisVisitor::copyPointsToInfo(Instruction *
             currPointsToObj->targetObject = currItem.second;
             currPointsToObj->dstfieldId = currItem.first;
             currPointsToObj->fieldId = 0;
-            currPointsToObj->propogatingInstruction = srcInstruction;
+            currPointsToObj->propogatingInst = new InstLoc(srcInstruction,this->currFuncCallSites);
             toRetPointsTo->insert(toRetPointsTo->begin(), currPointsToObj);
         }
         return toRetPointsTo;
@@ -647,7 +646,7 @@ void AliasAnalysisVisitor::visitAllocaInst(AllocaInst &I) {
     PointerPointsTo *newPointsTo = new PointerPointsTo();
     newPointsTo->fieldId = 0;
     newPointsTo->dstfieldId = 0;
-    newPointsTo->propogatingInstruction = &I;
+    newPointsTo->propogatingInst = new InstLoc(&I,this->currFuncCallSites);
     newPointsTo->targetObject = targetObj;
     newPointsTo->targetPointer = &I;
     std::set<PointerPointsTo*>* newPointsToInfo = new std::set<PointerPointsTo*>();
@@ -706,7 +705,8 @@ void AliasAnalysisVisitor::visitCastInst(CastInst &I) {
             }
             //NOTE: the "targetObject" will not be copied (only the pointer to it will be copied).
             PointerPointsTo *newPointsToObj = (PointerPointsTo*)currPointsToObj->makeCopy();
-            newPointsToObj->propogatingInstruction = &I;
+            //TODO: do we need to keep the original InstLoc (i.e. that of the pointer to cast)?
+            newPointsToObj->propogatingInst = new InstLoc(&I,this->currFuncCallSites);
             newPointsToObj->targetPointer = &I;
             //TODO: this may be unnecessary since the "targetObject" will not be copied.
             newPointsToObj->targetObject->is_taint_src = currPointsToObj->targetObject->is_taint_src;
@@ -1179,7 +1179,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
                 continue;
             }
             PointerPointsTo *np = p->makeCopyP();
-            np->propogatingInstruction = propInst;
+            np->propogatingInst = new InstLoc(propInst,this->currFuncCallSites);
             np->targetPointer = I;
             srcPointsTo->insert(np);
         }
@@ -1236,7 +1236,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
                 //The "newPto" will be the point-to record after we process the 1st dimension.
                 //By default it will the same as the original point-to.
                 PointerPointsTo *newPto = new PointerPointsTo();
-                newPto->propogatingInstruction = propInst;
+                newPto->propogatingInst = new InstLoc(propInst,this->currFuncCallSites);
                 newPto->fieldId = 0;
                 newPto->targetPointer = I;
                 newPto->targetObject = currPto->targetObject;
@@ -1599,11 +1599,12 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
         // Now get the list of objects to which the fieldid of the corresponding object points to.
         std::set<std::pair<long,AliasObject*>> finalObjects;
         finalObjects.clear();
+        InstLoc *propInst = new InstLoc(&I,this->currFuncCallSites);
         for(const std::pair<long, AliasObject*> &currObjPair:targetObjects) {
             // fetch objects that could be pointed by the field.
             // if this object is a function argument then
             // dynamically try to create an object, if we do not have any object
-            currObjPair.second->fetchPointsToObjects(currObjPair.first, finalObjects, &I, finalObjects.empty());
+            currObjPair.second->fetchPointsToObjects(currObjPair.first, finalObjects, propInst, finalObjects.empty());
         }
         if(finalObjects.size() > 0) {
 #ifdef FAST_HEURISTIC
@@ -1621,7 +1622,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
             for(auto currPto:finalObjects) {
                 PointerPointsTo *newPointsToObj = new PointerPointsTo();
                 newPointsToObj->targetPointer = &I;
-                newPointsToObj->propogatingInstruction = &I;
+                newPointsToObj->propogatingInst = new InstLoc(&I,this->currFuncCallSites);
                 newPointsToObj->targetObject = currPto.second;
                 newPointsToObj->fieldId = 0;
                 newPointsToObj->dstfieldId = currPto.first;
@@ -1765,8 +1766,9 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
                     // OK, now we got the target object to which the pointer points to.
                     // We are trying to store a pointer(*) into an object field
 
+                    InstLoc *propInst = new InstLoc(&I,this->currFuncCallSites);
                     newDstPointsToObject->targetObject->performUpdate(newDstPointsToObject->dstfieldId,
-                            srcPointsTo, &I);
+                            srcPointsTo, propInst);
 
                     // Now insert
                     newPointsToInfo->clear();
@@ -1789,6 +1791,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
 #ifdef DEBUG_STORE_INSTR
                 dbgs() << "Performing weak update since there are multiple point-to for the targetPointer..\n";
 #endif
+                InstLoc *propInst = new InstLoc(&I,this->currFuncCallSites);
                 newPointsToInfo->clear();
                 for (PointerPointsTo *currPointsTo: *dstPointsTo) {
                     PointerPointsTo *newPointsToObj = (PointerPointsTo *) currPointsTo->makeCopy();
@@ -1803,7 +1806,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
                     }
                     assert(newPointsToObj->targetPointer == targetPointer && newPointsToObj->fieldId == 0);
                     // perform weak update
-                    newPointsToObj->targetObject->performWeakUpdate(newPointsToObj->dstfieldId, srcPointsTo, &I);
+                    newPointsToObj->targetObject->performWeakUpdate(newPointsToObj->dstfieldId, srcPointsTo, propInst);
                     newPointsToInfo->insert(newPointsToInfo->end(), newPointsToObj);
                 }
             }
@@ -1839,6 +1842,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
         assert(false);
     }
 
+    //Propagate the pto records of the actual args to the formal args. 
     void AliasAnalysisVisitor::setupCallContext(CallInst &I, Function *currFunction, std::vector<Instruction *> *newCallContext) {
 
         std::map<Value *, std::set<PointerPointsTo*>*> *currFuncPointsTo = currState.getPointsToInfo(newCallContext);
@@ -1922,8 +1926,9 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
             }
 
             std::set<std::pair<long, AliasObject*>> srcDrefObjects;
+            InstLoc *propInst = new InstLoc(&I,this->currFuncCallSites);
             for(auto a:srcAliasObjects) {
-                a.second->fetchPointsToObjects(a.first, srcDrefObjects);
+                a.second->fetchPointsToObjects(a.first, srcDrefObjects, propInst);
             }
 
             std::set<PointerPointsTo*> targetElements;
@@ -1931,7 +1936,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
                 PointerPointsTo *newRel = new PointerPointsTo();
                 newRel->dstfieldId = a.first;
                 newRel->targetObject = a.second;
-                newRel->propogatingInstruction = &I;
+                newRel->propogatingInst = new InstLoc(&I,this->currFuncCallSites);
                 targetElements.insert(newRel);
             }
 
@@ -1942,7 +1947,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
 #ifdef DEBUG_CALL_INSTR
                 dbgs() << "Adding:" << targetElements.size() << "elements to the fieldid:" << a->dstfieldId << "\n";
 #endif
-                a->targetObject->performWeakUpdate(a->dstfieldId, &targetElements, &I);
+                a->targetObject->performWeakUpdate(a->dstfieldId, &targetElements, propInst);
             }
 
             for(auto a:targetElements) {
@@ -1990,6 +1995,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
         OutsideObject *newObj = DRCHECKER::createOutsideObj(file_ty,true,&existingTaints);
         //Ok, now add it to the global object cache.
         if (newObj) {
+            InstLoc *propInst = new InstLoc(&I,this->currFuncCallSites);
             //Update the field point-to according to the "fdFieldMap".
             for (auto &e : fdFieldMap) {
                 long fid = e.first;
@@ -2001,7 +2007,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
                     pto->targetObject = newObj;
                     pto->fieldId = 0;
                     pto->dstfieldId = 0;
-                    pto->propogatingInstruction = &I;
+                    pto->propogatingInst = propInst;
                     pto->targetPointer = &I;
                     newPointsToInfo->insert(pto);
                     this->updatePointsToObjects(&I, newPointsToInfo);
@@ -2013,7 +2019,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
                 Value *arg = I.getArgOperand(arg_no);
                 if (arg && hasPointsToObjects(arg)) {
                     std::set<PointerPointsTo*>* srcPointsTo = getPointsToObjects(arg);
-                    newObj->performWeakUpdate(fid,srcPointsTo,&I);
+                    newObj->performWeakUpdate(fid,srcPointsTo,propInst);
                 }
             }
             DRCHECKER::addToSharedObjCache(newObj);
@@ -2024,7 +2030,6 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
         }
     }
 
-    // Need to implement these
     VisitorCallback* AliasAnalysisVisitor::visitCallInst(CallInst &I, Function *currFunc,
             std::vector<Instruction *> *oldFuncCallSites,
             std::vector<Instruction *> *callSiteContext) {
@@ -2087,9 +2092,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
         AliasAnalysisVisitor *vis = (AliasAnalysisVisitor *)childCallback;
         if(vis->retValPointsTo.size() > 0 ){
 #ifdef DEBUG_CALL_INSTR
-            dbgs() << "Stitching return value for call instruction:";
-            I.print(dbgs());
-            dbgs() << "\n";
+            dbgs() << "Stitching return value for call instruction: " << InstructionUtils::getValueStr(&I) << "\n";
 #endif
             std::set<PointerPointsTo*>* newPointsToInfo = this->copyPointsToInfo(&I, &(vis->retValPointsTo));
             if(newPointsToInfo != nullptr) {

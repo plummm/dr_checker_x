@@ -1433,4 +1433,22 @@ namespace DRCHECKER {
         return du;
     }
 
+    int dumpFuncGraph(Function *f) {
+        if (!f) {
+            dbgs() << "dumpFuncGraph(): null func ptr!\n";
+            return 1;
+        }
+        std::string Filename = "cfg_dot_files/cfg." + f->getName().str() + ".dot";
+        dbgs() << "dumpFuncGraph(): Writing '" << Filename << "'...\n";
+        std::error_code ErrorInfo;
+        raw_fd_ostream File(Filename, ErrorInfo, sys::fs::F_Text);
+        if (ErrorInfo.value() == 0)
+            WriteGraph(File, f);
+        else
+            dbgs() << "dumpFuncGraph(): error opening file for writing!\n";
+            return 1;
+        dbgs() << "dumpFuncGraph(): done!\n";
+        return 0;
+    }
+
 }

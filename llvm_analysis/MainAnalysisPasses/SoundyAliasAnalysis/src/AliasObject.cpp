@@ -80,13 +80,17 @@ namespace DRCHECKER {
 
     //An improved version of "fetchPointsToObjects", we need to consider the type of each field.
     void AliasObject::fetchPointsToObjects(long srcfieldId, std::set<std::pair<long, AliasObject*>> &dstObjects,
-            Instruction *targetInstr, bool create_arg_obj) {
+            InstLoc *currInst, bool create_arg_obj) {
         /***
          * Get all objects pointed by field identified by srcfieldID
          *
          * i.e if a field does not point to any object.
          * Automatically generate an object and link it with srcFieldId
          */
+        Instruction *targetInstr = nullptr;
+        if (currInst) {
+            targetInstr = dyn_cast<Instruction>(currInst->inst);
+        }
         //What's the expected type of the fetched point-to object?
         Type *expFieldTy = nullptr;
         Type *expObjTy = nullptr;
@@ -208,7 +212,7 @@ namespace DRCHECKER {
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
             dbgs() << "fetchPointsToObjects(): recursively fetch the point-to from the embedded composite field.\n"; 
 #endif
-            return hostObj->fetchPointsToObjects(fid,dstObjects,targetInstr,create_arg_obj);
+            return hostObj->fetchPointsToObjects(fid,dstObjects,currInst,create_arg_obj);
         }
         //We need to decide the type of the dummy object we want to create..
         //NOTE: a non-pointer field can also be converted to a pointer and thus have pointees... 
@@ -242,13 +246,13 @@ namespace DRCHECKER {
                 //Update points-to
                 std::set<PointerPointsTo*> dstPointsTo;
                 PointerPointsTo *newPointsToObj = new PointerPointsTo();
-                newPointsToObj->propogatingInstruction = targetInstr;
+                newPointsToObj->propogatingInst = currInst;
                 newPointsToObj->targetObject = newObj;
                 newPointsToObj->fieldId = fid;
                 newPointsToObj->dstfieldId = 0;
                 //TODO: newPointsToObj->targetPointer may not need be set since "pointsTo" will only contain "ObjectPointsTo" type that doesn't have targetPointer.
                 dstPointsTo.insert(newPointsToObj);
-                hostObj->updateFieldPointsTo(fid,&dstPointsTo,targetInstr);
+                hostObj->updateFieldPointsTo(fid,&dstPointsTo,currInst);
 
                 dstObjects.insert(dstObjects.end(), std::make_pair(0, newObj));
             }
@@ -271,12 +275,12 @@ namespace DRCHECKER {
                 hostObj->addToPointsFrom(newObj);
 
                 //Handle some special cases like mutual point-to in linked list node "list_head".
-                hostObj->handleSpecialFieldPointTo(newObj,fid,targetInstr);
+                hostObj->handleSpecialFieldPointTo(newObj,fid,currInst);
 
                 //Update points-to
                 std::set<PointerPointsTo*> dstPointsTo;
                 PointerPointsTo *newPointsToObj = new PointerPointsTo();
-                newPointsToObj->propogatingInstruction = targetInstr;
+                newPointsToObj->propogatingInst = currInst;
                 newPointsToObj->targetObject = newObj;
                 newPointsToObj->fieldId = fid;
                 // this is the field of the newly created object to which
@@ -285,7 +289,7 @@ namespace DRCHECKER {
                 //TODO: newPointsToObj->targetPointer may not need be set since "pointsTo" will only contain "ObjectPointsTo" type that doesn't have targetPointer.
                 dstPointsTo.insert(newPointsToObj);
                 //NOTE: if we reach here, then there must be no point-to records for this "fid" yet, so we can directly use updateFieldPointsTo to do a strong update.
-                hostObj->updateFieldPointsTo(fid,&dstPointsTo,targetInstr);
+                hostObj->updateFieldPointsTo(fid,&dstPointsTo,currInst);
 
                 dstObjects.insert(dstObjects.end(), std::make_pair(0, newObj));
             }
@@ -296,7 +300,7 @@ namespace DRCHECKER {
         }
     }
 
-    void AliasObject::updateFieldPointsTo(long srcfieldId, std::set<PointerPointsTo*>* dstPointsTo, Instruction *propogatingInstr) {
+    void AliasObject::updateFieldPointsTo(long srcfieldId, std::set<PointerPointsTo*>* dstPointsTo, InstLoc *propogatingInstr) {
         /***
          * Add all objects in the provided pointsTo set to be pointed by the provided srcFieldID
          */
@@ -352,7 +356,7 @@ namespace DRCHECKER {
             if(currObjects.find(currPointsTo->targetObject) == currObjects.end()) {
                 ObjectPointsTo *newPointsTo = currPointsTo->makeCopy();
                 newPointsTo->fieldId = srcfieldId;
-                newPointsTo->propogatingInstruction = propogatingInstr;
+                newPointsTo->propogatingInst = propogatingInstr;
 #ifdef DEBUG_UPDATE_FIELD_POINT
                 dbgs() << "updateFieldPointsTo(): add point-to: ";
                 newPointsTo->print(dbgs());

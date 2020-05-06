@@ -33,6 +33,9 @@ namespace DRCHECKER {
          */
         static std::vector<std::vector<BasicBlock *> *> *getSCCTraversalOrder(Function &currF);
 
+        //print the TraversalOrder to the output stream
+        static void printSCCTraversalOrder(std::vector<std::vector<BasicBlock *>*> *order, raw_ostream *OS);
+
         /***
          * Get number of times all the BBs in the provided strongly connected component need to be analyzed
          * So that all the information is propagated correctly.

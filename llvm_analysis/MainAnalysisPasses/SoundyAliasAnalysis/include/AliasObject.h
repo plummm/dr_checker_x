@@ -56,7 +56,8 @@ namespace DRCHECKER {
         // object to which we point to.
         AliasObject *targetObject;
         // instruction which resulted in this points to information.
-        Value* propogatingInstruction;
+        //Value* propogatingInstruction;
+        InstLoc *propogatingInst;
         //For customized usage.
         bool is_final = false;
 
@@ -65,14 +66,14 @@ namespace DRCHECKER {
         }
 
         ~ObjectPointsTo() {
-
+            delete(this->propogatingInst);
         }
 
         ObjectPointsTo(ObjectPointsTo *srcObjPointsTo) {
             this->fieldId = srcObjPointsTo->fieldId;
             this->dstfieldId = srcObjPointsTo->dstfieldId;
             this->targetObject = srcObjPointsTo->targetObject;
-            this->propogatingInstruction = srcObjPointsTo->propogatingInstruction;
+            this->propogatingInst = srcObjPointsTo->propogatingInst;
             this->is_final = false;
         }
 
@@ -323,7 +324,7 @@ namespace DRCHECKER {
             }
         }
 
-        void performStrongUpdate(long srcfieldId, std::set<PointerPointsTo*>* dstPointsTo, Instruction *propogatingInstr) {
+        void performStrongUpdate(long srcfieldId, std::set<PointerPointsTo*>* dstPointsTo, InstLoc *propogatingInstr) {
             /***
              * Make the field (srcfieldId) of this object point to
              * any of the objects pointed by dstPointsTo
@@ -372,7 +373,7 @@ namespace DRCHECKER {
             this->updateFieldPointsTo(srcfieldId, dstPointsTo, propogatingInstr);
         }
 
-        void performWeakUpdate(long srcfieldId, std::set<PointerPointsTo*>* dstPointsTo, Instruction *propogatingInstr) {
+        void performWeakUpdate(long srcfieldId, std::set<PointerPointsTo*>* dstPointsTo, InstLoc *propogatingInstr) {
             /***
              * Similar to strong update but does weak update.
              * i.e it does not remove existing points to information of the field srcFieldId
@@ -384,7 +385,7 @@ namespace DRCHECKER {
 
         }
 
-        void performUpdate(long srcfieldId, std::set<PointerPointsTo*>* dstPointsTo, Instruction *propogatingInstr) {
+        void performUpdate(long srcfieldId, std::set<PointerPointsTo*>* dstPointsTo, InstLoc *propogatingInstr) {
             /***
              * Update the pointto information of the field pointed by srcfieldId
              */
@@ -443,11 +444,11 @@ namespace DRCHECKER {
             return;
         }
 
+        //HZ: seems no one uses this function?
+        /*
         void updateFieldPointsToFromObjects(std::vector<ObjectPointsTo*>* dstPointsToObject,
-                                            Instruction *propagatingInstr) {
-            /***
-            * Add all objects in the provided pointsTo set to be pointed by the provided srcFieldID
-            */
+                                            InstLoc *propagatingInstr) {
+            // Add all objects in the provided pointsTo set to be pointed by the provided srcFieldID
 #ifdef DEBUG_UPDATE_FIELD_POINT
             dbgs() << "updateFieldPointsToFromObjects() for: " << InstructionUtils::getTypeStr(this->targetType);
             dbgs() << " Host Obj ID: " << (const void*)this << "\n";
@@ -464,7 +465,7 @@ namespace DRCHECKER {
                     // insert points to information only, if it is not present.
                     if (currObjects.find(currPointsTo->targetObject) == currObjects.end()) {
                         ObjectPointsTo *newPointsTo = currPointsTo->makeCopy();
-                        newPointsTo->propogatingInstruction = propagatingInstr;
+                        newPointsTo->propogatingInst = propagatingInstr;
 #ifdef DEBUG_UPDATE_FIELD_POINT
                         dbgs() << "updateFieldPointsToFromObjects(), add point-to:\n";
                         newPointsTo->print(dbgs());
@@ -477,8 +478,11 @@ namespace DRCHECKER {
                 }
             }
         }
+        */
 
-        void addObjectToFieldPointsTo(long fieldId, AliasObject *dstObject, Instruction *propagatingInstr) {
+        //HZ: currently this is only invoked in the initial global object setup phase (e.g. need to make gv0->f0 point to gv1)
+        //so there may be no propgating inst or call context.
+        void addObjectToFieldPointsTo(long fieldId, AliasObject *dstObject, InstLoc *propagatingInstr = nullptr) {
             /***
             * Add provided object into pointsTo set of the provided fieldId
             */
@@ -497,7 +501,7 @@ namespace DRCHECKER {
                 // if the object to be added is not present.
                 if (currObjects.find(dstObject) == currObjects.end()) {
                     ObjectPointsTo *newPointsTo = new ObjectPointsTo();
-                    newPointsTo->propogatingInstruction = propagatingInstr;
+                    newPointsTo->propogatingInst = propagatingInstr;
                     newPointsTo->fieldId = srcfieldId;
                     newPointsTo->dstfieldId = 0;
                     newPointsTo->targetObject = dstObject;
@@ -510,80 +514,6 @@ namespace DRCHECKER {
                     //TODO
                     //this->addToPointsFrom(dstObject);
                 }
-            }
-        }
-
-        //This is the original fetchPointsToObjects used in the Dr.Checker.
-        virtual void fetchPointsToObjects_default(long srcfieldId, std::set<std::pair<long, AliasObject*>> &dstObjects,
-                                  Instruction *targetInstr = nullptr, bool create_arg_obj=false) {
-            //
-            // Get all objects pointed by field identified by srcfieldID
-            //
-            // i.e if a field does not point to any object.
-            // Automatically generate an object and link it with srcFieldId
-            //
-            bool hasObjects = false;
-#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-            dbgs() << "AliasObject::fetchPointsToObjects_default():\n";
-#endif
-            for(ObjectPointsTo *obj:pointsTo) {
-                if(obj->fieldId == srcfieldId && obj->targetObject) {
-                    auto p = std::make_pair(obj->dstfieldId, obj->targetObject);
-                    if(std::find(dstObjects.begin(), dstObjects.end(), p) == dstObjects.end()) {
-#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-                        dbgs() << "Found an obj in |pointsTo| records:\n";
-                        dbgs() << "Type: " << InstructionUtils::getTypeStr(obj->targetObject->targetType) << " | " << obj->dstfieldId << " | is_taint_src:" << obj->targetObject->is_taint_src << "\n";
-                        dbgs() << "Val: " << InstructionUtils::getValueStr(obj->targetObject->getValue()) << " ID: " << (const void*)(obj->targetObject) << "\n";
-#endif
-                        dstObjects.insert(dstObjects.end(), p);
-                        hasObjects = true;
-                    }
-                }
-            }
-            // if there are no objects that this field points to, generate a dummy object.
-            if (!hasObjects && (create_arg_obj || this->isFunctionArg() || this->isOutsideObject())) {
-#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-                dbgs() << "Creating a new dynamic AliasObject at: " << InstructionUtils::getValueStr(targetInstr) << "\n";
-#endif
-                AliasObject *newObj = this->makeCopy();
-                ObjectPointsTo *newPointsToObj = new ObjectPointsTo();
-                newPointsToObj->propogatingInstruction = targetInstr;
-                newPointsToObj->targetObject = newObj;
-                newPointsToObj->fieldId = srcfieldId;
-                // this is the field of the newly created object to which
-                // new points to points to
-                newPointsToObj->dstfieldId = 0;
-                newObj->auto_generated = true;
-
-                // get the taint for the field and add that taint to the newly created object
-                this->taintSubObj(newObj,srcfieldId,targetInstr);
-                //Below are original Dr.Checker's code, which is now modified and wrapped in the "taintSubObj" function.
-                /*
-                std::set<TaintFlag*> *fieldTaint = getFieldTaintInfo(srcfieldId);
-#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-                dbgs() << "Trying to get taint for field:" << srcfieldId << " for object:" << this << "\n";
-#endif
-                if(fieldTaint != nullptr) {
-#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-                    dbgs() << "Adding taint for field:" << srcfieldId << " for object:" << newObj << "\n";
-#endif
-                    for(auto existingTaint:*fieldTaint) {
-                        newObj->taintAllFields(existingTaint);
-                    }
-                } else {
-                    // if all the contents are tainted?
-                    if(this->all_contents_tainted) {
-                        dbgs() << "Trying to get field from an object whose contents are fully tainted\n";
-                        assert(this->all_contents_taint_flag != nullptr);
-                        newObj->taintAllFields(this->all_contents_taint_flag);
-                    }
-                }
-                */
-
-                //insert the newly create object.
-                pointsTo.push_back(newPointsToObj);
-
-                dstObjects.insert(dstObjects.end(), std::make_pair(0, newObj));
             }
         }
 
@@ -830,7 +760,7 @@ namespace DRCHECKER {
         virtual void taintSubObj(AliasObject *newObj, long srcfieldId, Instruction *targetInstr);
 
         virtual void fetchPointsToObjects(long srcfieldId, std::set<std::pair<long, AliasObject*>> &dstObjects,
-            Instruction *targetInstr = nullptr, bool create_arg_obj = false);
+            InstLoc *currInst = nullptr, bool create_arg_obj = false);
 
         virtual void fetchPointsToObjects_log(long srcfieldId, std::set<std::pair<long, AliasObject*>> &dstObjects,
             Instruction *targetInstr, bool create_arg_obj);
@@ -948,7 +878,7 @@ namespace DRCHECKER {
         //(0) This host object A is a "list_head" (i.e. a kernel linked list node) and we created a new "list_head" B pointed to by
         //the A->next, in this case we also need to set B->prev to A.
         //(1) TODO: handle more special cases.
-        int handleSpecialFieldPointTo(AliasObject *pobj, long fid, Instruction *targetInstr) {
+        int handleSpecialFieldPointTo(AliasObject *pobj, long fid, InstLoc *targetInstr) {
             if (!pobj) {
                 return 0;
             }
@@ -972,7 +902,7 @@ namespace DRCHECKER {
 #endif
                 std::set<PointerPointsTo*> dstPointsTo;
                 PointerPointsTo *newPointsToObj = new PointerPointsTo();
-                newPointsToObj->propogatingInstruction = targetInstr;
+                newPointsToObj->propogatingInst = targetInstr;
                 newPointsToObj->targetObject = this;
                 newPointsToObj->fieldId = 1-fid;
                 newPointsToObj->dstfieldId = 0;
@@ -1089,7 +1019,7 @@ namespace DRCHECKER {
         }
 
 
-        void updateFieldPointsTo(long srcfieldId, std::set<PointerPointsTo*>* dstPointsTo, Instruction *propogatingInstr);
+        void updateFieldPointsTo(long srcfieldId, std::set<PointerPointsTo*>* dstPointsTo, InstLoc *propogatingInstr);
 
     protected:
         void printPointsTo(llvm::raw_ostream& os) const {

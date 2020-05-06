@@ -74,7 +74,7 @@ namespace DRCHECKER {
 
     static cl::opt<unsigned> skipInit("skipInit", cl::desc("Skip analyzing init functions."),
                                        cl::value_desc("long, non-zero value indicates, skip initialization function"),
-                                       cl::init(0));
+                                       cl::init(1));
 
     static cl::opt<std::string> outputFile("outputFile",
                                             cl::desc("Path to the output file, where all the warnings should be stored."),
@@ -208,13 +208,16 @@ namespace DRCHECKER {
         }
 
         //For any global variable that is used by our specified function(s), find all ".init" functions that also use the same GV.
+        //************HZ***********
+        //TODO: consider to encode our domain knowledge about the driver interface here, e.g. if the target function is an .ioctl,
+        //we can try to identify its related .open and driver .probe in this function, as these functions will possibly do some
+        //initializations for some internal shared states like file->private.
+        //************HZ***********
         void getAllInterestingInitFunctions(Module &m, std::string currFuncName,
                                             std::set<Function*> &interestingInitFuncs) {
             /***
              * Get all init functions that should be analyzed to analyze provided init function.
              */
-
-
             Module::GlobalListType &currGlobalList = m.getGlobalList();
             std::set<llvm::GlobalVariable*> currFuncGlobals;
             bool is_used_in_main;
@@ -242,6 +245,8 @@ namespace DRCHECKER {
                         }
                     }
                 }
+                //"currFuncs" contains all _init_ functions that have used current gv, "is_used_in_main" indicates whether current gv is used in the target function to analyze.
+                //The assumption here is that we will never use an _init_ function as the target function.
                 if(is_used_in_main && currFuncs.size()) {
                     for(auto cg:currFuncs) {
                         if(interestingInitFuncs.find(cg) != interestingInitFuncs.end()) {
@@ -253,9 +258,6 @@ namespace DRCHECKER {
             }
 
         }
-
-
-
 
         bool runOnModule(Module &m) override {
 
@@ -282,17 +284,24 @@ namespace DRCHECKER {
             getTargetFunctions(m);
 
             auto t_start = std::chrono::system_clock::now();
-            dbgs() << "Anlysis starts at: ";
+            dbgs() << "[TIMING] Analysis starts at: ";
             this->printCurTime();
             // Call init functions.
-            if(!skipInit) {
+            //hz: this is a lightweight (i.e. only includes alias analysis) analysis for the init functions, the goal is to set up
+            //some preliminary point-to records used in the real target functions.
+            if (!skipInit) {
                 std::set<Function*> toAnalyzeInitFunctions;
                 for (FuncInf *fi : targetFuncs) {
                     getAllInterestingInitFunctions(m, fi->name, toAnalyzeInitFunctions);
                 }
                 dbgs() << "Analyzing: " << toAnalyzeInitFunctions.size() << " init functions\n";
                 for(auto currInitFunc : toAnalyzeInitFunctions) {
-                    dbgs() << "Analyzing init function:" << currInitFunc->getName() << "\n";
+                    dbgs() << "Analyzing init function: " << currInitFunc->getName() << "\n";
+#ifdef TIMING
+                    dbgs() << "[TIMING] Start func(1) " << currInitFunc->getName() << ": ";
+                    auto t0 = InstructionUtils::getCurTime(&dbgs());
+#endif
+                    this->printCurTime();
                     std::vector<std::vector<BasicBlock *> *> *traversalOrder =
                             BBTraversalHelper::getSCCTraversalOrder(*currInitFunc);
 
@@ -311,6 +320,10 @@ namespace DRCHECKER {
                     DRCHECKER::currEntryFunc = currInitFunc;
 
                     vis->analyze();
+#ifdef TIMING
+                    dbgs() << "[TIMING] End func(1) " << currInitFunc->getName() << " in: ";
+                    InstructionUtils::getTimeDuration(t0,&dbgs());
+#endif
                 }
             }
 
@@ -325,31 +338,12 @@ namespace DRCHECKER {
 
                 std::vector<std::vector<BasicBlock *> *> *traversalOrder = BBTraversalHelper::getSCCTraversalOrder(currFunction);
 #ifdef DEBUG_TRAVERSAL_ORDER
-                if(currFunction.getName().str() == "n_tty_receive_char_special") {
-                    std::cout << "Got Traversal order For:" << currFunction.getName().str() << "\n";
-                    for (auto m1:*traversalOrder) {
-                        std::cout << "SCC START:" << m1->size() << ":\n";
-                        for (auto m2:*m1) {
-                            std::cout << InstructionUtils::getBBStrID(m2) << " -> ";
-                        }
-                        std::cout << "SCC END\n";
-                    }
-                }
-                continue;
+                std::cout << "Got Traversal order For: " << currFunction.getName().str() << "\n";
+                BBTraversalHelper::printSCCTraversalOrder(traversalOrder,&dbgs());
 #endif
 
 #ifdef DEBUG_SCC_GRAPH
-                std::string Filename = "cfg_dot_files/cfg." + currFunction.getName().str() + ".dot";
-                errs() << "Writing '" << Filename << "'...";
-
-                std::error_code ErrorInfo;
-                raw_fd_ostream File(Filename, ErrorInfo, sys::fs::F_Text);
-
-                if (ErrorInfo.value() == 0)
-                    WriteGraph(File, (const Function*)&currFunction);
-                else
-                    errs() << "  error opening file for writing!";
-                errs() << "\n";
+                InstructionUtils::dumpFuncGraph(&currFunction);
 #endif
 
                 // first instruction of the entry function.
@@ -652,8 +646,10 @@ namespace DRCHECKER {
             if(fi->ty == READ_HDR || fi->ty == WRITE_HDR) {
                 taintedArgs.insert(1);
                 taintedArgs.insert(2);
-                pointerArgs.insert(0);
-                pointerArgs.insert(3);
+                //hz: for now we don't add the args to the "pointerArgs" and create the Arg objects for them, because later in the analysis
+                //we will create the objs on demand.
+                //pointerArgs.insert(0);
+                //pointerArgs.insert(3);
                 is_handled = true;
             }
             if(fi->ty == V4L2_IOCTL_FUNC) {

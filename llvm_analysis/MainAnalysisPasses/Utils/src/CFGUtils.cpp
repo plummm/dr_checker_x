@@ -3,6 +3,7 @@
 //
 
 #include "CFGUtils.h"
+#include "InstructionUtils.h"
 
 namespace DRCHECKER {
 
@@ -34,6 +35,19 @@ namespace DRCHECKER {
             bbTraversalList->insert(bbTraversalList->begin(), newCurrSCC);
         }
         return bbTraversalList;
+    }
+
+    void BBTraversalHelper::printSCCTraversalOrder(std::vector<std::vector<BasicBlock *>*> *order, raw_ostream *OS) {
+        if (!order || !OS) {
+            return;
+        }
+        for (auto m1 : *order) {
+            (*OS) << "SCC START:" << m1->size() << ":\n";
+            for (auto m2 : *m1) {
+                (*OS) << InstructionUtils::getBBStrID(m2) << " -> ";
+            }
+            (*OS) << "SCC END\n";
+        }
     }
 
     unsigned long BBTraversalHelper::getNumTimesToAnalyze(std::vector<BasicBlock *> *currSCC) {

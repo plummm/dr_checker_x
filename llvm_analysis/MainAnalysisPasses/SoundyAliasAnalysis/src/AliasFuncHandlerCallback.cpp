@@ -64,7 +64,7 @@ namespace DRCHECKER {
         PointerPointsTo *newPointsTo = new PointerPointsTo();
         newPointsTo->fieldId = 0;
         newPointsTo->dstfieldId = 0;
-        newPointsTo->propogatingInstruction = &callInst;
+        newPointsTo->propogatingInst = new InstLoc(&callInst,callSitesContext);
         newPointsTo->targetObject = targetObj;
         newPointsTo->targetPointer = &callInst;
         std::set<PointerPointsTo*>* newPointsToInfo = new std::set<PointerPointsTo*>();

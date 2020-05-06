@@ -45,31 +45,18 @@ namespace DRCHECKER {
     public:
         std::vector<Instruction *> *callSites;
         void printContext(llvm::raw_ostream& O) {
-            O << "\"context\":[";
-            bool putComma = false;
-            //std::string str;
-            for(Instruction *currCallSite:*(this->callSites)) {
-                if(putComma) {
-                    O << ",";
+            O << "------------CONTEXT------------\n";
+            if (!callSites) {
+                O << "Null this->callSites!!\n";
+            }else {
+                int no = 0;
+                for(Instruction *currCallSite : *(this->callSites)) {
+                    O << no << " ";
+                    InstructionUtils::printInst(currCallSite,O);
+                    ++no;
                 }
-
-                O << "{\"instr\":\"";
-                //currCallSite->print(O);
-                //DILocation *instrLoc = currCallSite->getDebugLoc().get();
-                DILocation *instrLoc = InstructionUtils::getCorrectInstrLocation(currCallSite);
-                O << InstructionUtils::escapeValueString(currCallSite) << "\",";
-                O << "\"lineno\":";
-                if (instrLoc != nullptr) {
-                    //O << ", src line:" << instrLoc->getLine() << " file:" << instrLoc->getFilename();
-                    O << instrLoc->getLine() << ",\"file\":\"";
-                    O << InstructionUtils::escapeJsonString(instrLoc->getFilename()) << "\"";
-                } else {
-                    O << "-1";
-                }
-                O << "}\n";
-                putComma = true;
             }
-            O << "\n]";
+            O << "-------------------------------\n";
         }
 
     };
@@ -382,7 +369,8 @@ namespace DRCHECKER {
                 PointerPointsTo *pointsToObj = new PointerPointsTo();
                 pointsToObj->targetObject = toRet;
                 pointsToObj->fieldId = pointsToObj->dstfieldId = 0;
-                pointsToObj->propogatingInstruction = globalVariable;
+                //hz: since this is the pre-set pto for gv, there is no calling context. 
+                pointsToObj->propogatingInst = new InstLoc(globalVariable,nullptr);
                 pointsToObj->targetPointer = globalVariable;
                 newPointsTo->insert(newPointsTo->end(), pointsToObj);
                 assert(GlobalState::globalVariables.find(globalVariable) == GlobalState::globalVariables.end());
@@ -414,7 +402,7 @@ namespace DRCHECKER {
                 PointerPointsTo *pointsToObj = new PointerPointsTo();
                 pointsToObj->targetObject = glob;
                 pointsToObj->fieldId = pointsToObj->dstfieldId = 0;
-                pointsToObj->propogatingInstruction = currFunction;
+                pointsToObj->propogatingInst = new InstLoc(currFunction,nullptr);
                 pointsToObj->targetPointer = currFunction;
                 newPointsTo->insert(newPointsTo->end(), pointsToObj);
 
