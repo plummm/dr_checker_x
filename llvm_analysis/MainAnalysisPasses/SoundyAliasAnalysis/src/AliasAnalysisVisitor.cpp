@@ -43,7 +43,8 @@ namespace DRCHECKER {
         if (taint) {
             existingTaints = TaintUtils::getTaintInfo(this->currState,this->currFuncCallSites,p);
         }
-        OutsideObject *robj = DRCHECKER::createOutsideObj(p, currPointsTo, taint, existingTaints);
+        InstLoc *vloc = new InstLoc(p,this->currFuncCallSites);
+        OutsideObject *robj = DRCHECKER::createOutsideObj(vloc, currPointsTo, taint, existingTaints);
         if (robj) {
             DRCHECKER::addToSharedObjCache(robj);
         }
@@ -367,7 +368,7 @@ namespace DRCHECKER {
 
     AliasObject *AliasAnalysisVisitor::createEmbObj(AliasObject *hostObj, long host_dstFieldId, Value *v) {
         std::map<Value *, std::set<PointerPointsTo*>*> *currPointsTo = this->currState.getPointsToInfo(this->currFuncCallSites);
-        return DRCHECKER::createEmbObj(hostObj, host_dstFieldId, v, currPointsTo);
+        return DRCHECKER::createEmbObj(hostObj, host_dstFieldId, new InstLoc(v,this->currFuncCallSites), currPointsTo);
     }
 
     //NOTE: "is_var_fid" indicates whether the target fieldId is a variable instead of a constant.
@@ -1988,14 +1989,14 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
         }
         //Type based object creation.
         //Since this will create a fd, we always treat it as a global taint source.
+        InstLoc *propInst = new InstLoc(&I,this->currFuncCallSites);
         std::set<TaintFlag*> existingTaints;
         TaintTag *tag = new TaintTag(0,file_ty,true);
-        TaintFlag *tf = new TaintFlag(&I,true,tag);
+        TaintFlag *tf = new TaintFlag(propInst,true,tag);
         existingTaints.insert(tf);
         OutsideObject *newObj = DRCHECKER::createOutsideObj(file_ty,true,&existingTaints);
         //Ok, now add it to the global object cache.
         if (newObj) {
-            InstLoc *propInst = new InstLoc(&I,this->currFuncCallSites);
             //Update the field point-to according to the "fdFieldMap".
             for (auto &e : fdFieldMap) {
                 long fid = e.first;

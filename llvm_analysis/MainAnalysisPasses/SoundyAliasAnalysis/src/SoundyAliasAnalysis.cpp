@@ -704,9 +704,9 @@ namespace DRCHECKER {
                     //hz: Add a taint tag indicating that the taint is from user-provided arg, instead of global states.
                     //This tag represents the "arg", at the function entry its point-to object hasn't been created yet, so no "pobjs" for the tag.
                     TaintTag *currTag = new TaintTag(0,currArgVal,false);
-                    TaintFlag *currFlag = new TaintFlag(currArgVal, true);
+                    TaintFlag *currFlag = new TaintFlag(new InstLoc(currArgVal,nullptr), true);
                     currFlag->setTag(currTag);
-                    currFlag->instructionTrace.push_back(fi->func->getEntryBlock().getFirstNonPHIOrDbg());
+                    //currFlag->instructionTrace.push_back(fi->func->getEntryBlock().getFirstNonPHIOrDbg());
                     std::set<TaintFlag*> *currTaintInfo = new std::set<TaintFlag*>();
                     currTaintInfo->insert(currFlag);
                     TaintUtils::updateTaintInfo(targetState, callSites, currArgVal, currTaintInfo);
@@ -720,8 +720,10 @@ namespace DRCHECKER {
                     newPointsTo->dstfieldId = 0;
                     newPointsTo->targetObject = obj;
                     if(taintedArgData.find(arg_no) != taintedArgData.end()) {
-                        TaintFlag *currFlag = new TaintFlag(currArgVal, true);
-                        currFlag->instructionTrace.push_back(fi->func->getEntryBlock().getFirstNonPHIOrDbg());
+                        TaintTag *currTag = new TaintTag(0,currArgVal,false);
+                        TaintFlag *currFlag = new TaintFlag(new InstLoc(currArgVal,nullptr), true);
+                        currFlag->setTag(currTag);
+                        //currFlag->instructionTrace.push_back(fi->func->getEntryBlock().getFirstNonPHIOrDbg());
                         obj->taintAllFields(currFlag);
                     }
                     std::set<PointerPointsTo *> *newPointsToSet = new std::set<PointerPointsTo *>();
@@ -740,7 +742,7 @@ namespace DRCHECKER {
             //Type of globalVariables: std::map<Value *, std::set<PointerPointsTo*>*>
             for(auto const &it : GlobalState::globalVariables){
                 Value *v = it.first;
-                TaintFlag *currFlag = new TaintFlag(v, true);
+                TaintFlag *currFlag = new TaintFlag(new InstLoc(v,nullptr), true);
                 //Add a tag
                 TaintTag *currTag = new TaintTag(0,v);
                 currFlag->setTag(currTag);

@@ -1451,4 +1451,31 @@ namespace DRCHECKER {
         return 0;
     }
 
+    void InstLoc::print(raw_ostream &O) {
+        if (this->inst) {
+            //First print the inst.
+            if (dyn_cast<Instruction>(this->inst)) {
+                InstructionUtils::printInst(dyn_cast<Instruction>(this->inst),O);
+            }else {
+                O << InstructionUtils::getValueStr(this->inst) << "\n";
+            }
+            //Then print the calling context by the function names.
+            if (this->ctx && this->ctx->size() > 0) {
+                O << "[";
+                std::string lastFunc;
+                for (Instruction *inst : *(this->ctx)) {
+                    if (inst && inst->getFunction()) {
+                        std::string func = inst->getFunction()->getName().str();
+                        //TODO: self-recursive invocation
+                        if (func != lastFunc) {
+                            O << func << " -> ";
+                            lastFunc = func;
+                        }
+                    }
+                }
+                O << "]\n";
+            }
+        }
+    }
+
 }

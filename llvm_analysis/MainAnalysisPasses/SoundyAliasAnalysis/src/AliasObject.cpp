@@ -44,7 +44,7 @@ namespace DRCHECKER {
     }
 
     //Taint the point-to object by field "srcfieldId" according to the field taint info.
-    void AliasObject::taintSubObj(AliasObject *newObj, long srcfieldId, Instruction *targetInstr) {
+    void AliasObject::taintSubObj(AliasObject *newObj, long srcfieldId, InstLoc *targetInstr) {
         std::set<TaintFlag*> *fieldTaint = this->getFieldTaintInfo(srcfieldId);
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
         dbgs() << "AliasObject::taintSubObj(): Trying to get taint for field:" << srcfieldId << " of host object: " << (const void*)this << "\n";
@@ -137,7 +137,7 @@ namespace DRCHECKER {
                     //Change type.
                     obj->targetObject->reset(targetInstr,expObjTy);
                     //Do the taint accordingly.
-                    this->taintSubObj(obj->targetObject,srcfieldId,targetInstr);
+                    this->taintSubObj(obj->targetObject,srcfieldId,currInst);
                 }
                 //Anyway here we're sure that we have the point-to record and we don't need to create dummy pointees any more,
                 //although the recorded pointee may have already been included in the "dstObjects" (e.g. load src pointer can have
@@ -269,7 +269,7 @@ namespace DRCHECKER {
 #endif
                 newObj->auto_generated = true;
                 // get the taint for the field and add that taint to the newly created object
-                hostObj->taintSubObj(newObj,fid,targetInstr);
+                hostObj->taintSubObj(newObj,fid,currInst);
 
                 //Update the pointsFrom info in the newly created obj.
                 hostObj->addToPointsFrom(newObj);
@@ -453,7 +453,11 @@ namespace DRCHECKER {
         return 0;
     }
 
-    OutsideObject* createOutsideObj(Value *p, std::map<Value*,std::set<PointerPointsTo*>*> *currPointsTo, bool taint, std::set<TaintFlag*> *existingTaints) {
+    OutsideObject* createOutsideObj(InstLoc *vloc, std::map<Value*,std::set<PointerPointsTo*>*> *currPointsTo, bool taint, std::set<TaintFlag*> *existingTaints) {
+        Value *p = nullptr;
+        if (vloc) {
+            p = vloc->inst;
+        }
 #ifdef DEBUG_CREATE_DUMMY_OBJ_IF_NULL
         dbgs() << "createOutsideObj(): ";
         if(p){
@@ -496,7 +500,7 @@ namespace DRCHECKER {
                 }
             }else {
                 //The original pointer is not tainted, treat it as a global state.
-                TaintFlag *currFlag = new TaintFlag(p, true);
+                TaintFlag *currFlag = new TaintFlag(vloc, true);
                 newObj->taintAllFieldsWithTag(currFlag);
             }
             newObj->is_taint_src = true;
@@ -507,10 +511,11 @@ namespace DRCHECKER {
         return newObj;
     }
 
-    AliasObject *createEmbObj(AliasObject *hostObj, long host_dstFieldId, Value *v, std::map<Value*, std::set<PointerPointsTo*>*> *currPointsTo) {
+    AliasObject *createEmbObj(AliasObject *hostObj, long host_dstFieldId, InstLoc *vloc, std::map<Value*, std::set<PointerPointsTo*>*> *currPointsTo) {
 #ifdef DEBUG_CREATE_EMB_OBJ
         dbgs() << "Start createEmbObj()\n";
 #endif
+        Value *v = vloc ? vloc->inst : nullptr;
         AliasObject *newObj = nullptr;
         if (!hostObj || !hostObj->targetType) {
 #ifdef DEBUG_CREATE_EMB_OBJ
@@ -575,7 +580,7 @@ namespace DRCHECKER {
             }
             //Need to create a new AliasObject for the embedded struct.
             if (v) {
-                newObj = DRCHECKER::createOutsideObj(v, currPointsTo, false, nullptr);
+                newObj = DRCHECKER::createOutsideObj(vloc, currPointsTo, false, nullptr);
             }else {
                 newObj = DRCHECKER::createOutsideObj(ety, false, nullptr);
             }

@@ -109,6 +109,30 @@ namespace DRCHECKER {
             this->inst = inst;
             this->ctx = ctx;
         }
+
+        bool same(InstLoc *other) {
+            if (!other) {
+                return false;
+            }
+            //Compare the llvm inst itself.
+            if (this->inst != other->inst) {
+                return false;
+            }
+            //Compare the calling context of the inst.
+            if (!this->ctx != !other->ctx) {
+                return false;
+            }
+            //shortcut
+            if (this->ctx == other->ctx) {
+                return true;
+            }
+            if (this->ctx && *(this->ctx) != *(other->ctx)) {
+                return false;
+            }
+            return true;
+        }
+
+        void print(raw_ostream &O);
     };
 
     class InstructionUtils {

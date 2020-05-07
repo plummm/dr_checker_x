@@ -757,7 +757,7 @@ namespace DRCHECKER {
 
         inline void setValue(Value*);
 
-        virtual void taintSubObj(AliasObject *newObj, long srcfieldId, Instruction *targetInstr);
+        virtual void taintSubObj(AliasObject *newObj, long srcfieldId, InstLoc *targetInstr);
 
         virtual void fetchPointsToObjects(long srcfieldId, std::set<std::pair<long, AliasObject*>> &dstObjects,
             InstLoc *currInst = nullptr, bool create_arg_obj = false);
@@ -1295,11 +1295,11 @@ namespace DRCHECKER {
 
     //hz: A helper method to create and (taint) a new OutsideObject according to a given pointer value (possibly an IR).
     //The arg "currPointsTo" is the current global point-to state.
-    extern OutsideObject* createOutsideObj(Value *p, std::map<Value*,std::set<PointerPointsTo*>*> *currPointsTo, bool taint, std::set<TaintFlag*> *existingTaints);
+    extern OutsideObject* createOutsideObj(InstLoc *vloc, std::map<Value*,std::set<PointerPointsTo*>*> *currPointsTo, bool taint, std::set<TaintFlag*> *existingTaints);
 
     //hz: A helper method to create and (taint) an embedded struct obj in the host obj.
     //The arg "currPointsTo" is the current global point-to state.
-    extern AliasObject *createEmbObj(AliasObject *hostObj, long host_dstFieldId, Value *v = nullptr, std::map<Value*, std::set<PointerPointsTo*>*> *currPointsTo = nullptr);
+    extern AliasObject *createEmbObj(AliasObject *hostObj, long host_dstFieldId, InstLoc *vloc = nullptr, std::map<Value*, std::set<PointerPointsTo*>*> *currPointsTo = nullptr);
 
     //Given a embedded object and its #field within the host object, and the host type, create the host object
     //and maintain their embedding relationships preperly.

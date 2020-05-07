@@ -252,42 +252,31 @@ namespace DRCHECKER {
 
     public:
         //Constructors
-        TaintFlag(Value *targetInstr, bool is_tainted, TaintTag *tag = nullptr) {
+        TaintFlag(InstLoc *targetInstr, bool is_tainted, TaintTag *tag = nullptr) {
             assert(targetInstr != nullptr && "Target Instruction cannot be NULL");
             this->targetInstr = targetInstr;
-            if (dyn_cast<Instruction>(targetInstr)) {
-                this->instructionTrace.push_back(dyn_cast<Instruction>(targetInstr));
-            }
+            this->instructionTrace.push_back(targetInstr);
             this->is_tainted = is_tainted;
             this->tag = tag;
         }
 
-        TaintFlag(TaintFlag *copyTaint, Value *targetInstr, Value *srcOperand) {
+        TaintFlag(TaintFlag *copyTaint, InstLoc *targetInstr, InstLoc *srcOperand) {
             this->targetInstr = targetInstr;
             this->is_tainted = copyTaint->isTainted();
             // copy the instruction trace from the source taint guy
             this->instructionTrace.insert(instructionTrace.begin(),
                                           copyTaint->instructionTrace.begin(), copyTaint->instructionTrace.end());
-            //hz: in case the instructionTrace is empty
-            Instruction *lastInstr = nullptr;
-            if (!instructionTrace.empty()){
-                lastInstr = this->instructionTrace.back();
-            }
-
             // add the source instruction into the trace.
-            if (srcOperand) {
-                Instruction *srcInstr = dyn_cast<Instruction>(srcOperand);
-                if(srcInstr != nullptr && lastInstr != srcInstr) {
-                    this->instructionTrace.push_back(srcInstr);
-                }
-            }
+            this->addInstructionToTrace(srcOperand);
+            // add target inst to the trace.
+            this->addInstructionToTrace(targetInstr);
             //hz: tag propagation.
             this->tag = copyTaint->tag;
         }
 
         //hz: A copy w/ a different tag.
         TaintFlag(TaintFlag *copyTaint, TaintTag *tag) {
-            this->targetInstr = copyTaint -> targetInstr;
+            this->targetInstr = copyTaint->targetInstr;
             this->is_tainted = copyTaint->isTainted();
             // copy the instruction trace from the source taint guy
             this->instructionTrace.insert(instructionTrace.begin(),
@@ -295,12 +284,12 @@ namespace DRCHECKER {
             this->tag = tag;
         }
 
-        TaintFlag(Value * targetInstr) : TaintFlag(targetInstr, false) {}
+        TaintFlag(InstLoc *targetInstr) : TaintFlag(targetInstr, false) {}
         //Destructors
         ~TaintFlag() {}
 
         void setTag(TaintTag *tag) {
-            this -> tag = tag;
+            this->tag = tag;
         }
 
         bool isTainted() const {
@@ -309,59 +298,57 @@ namespace DRCHECKER {
 
         bool isTaintEquals(const TaintFlag *dstTaint) const {
             if(dstTaint != nullptr) {
-                //hz: we don't care about in which specific paths the targetInst is tainted, what really matters
-                //are below properties:
+                //hz: we consider the below three properties:
                 //(1) the targetInst of this taintFlag
                 //(2) whether it's tainted or not
                 //(3) the taint source, which is wrapped in our TaintTag class.
                 //These are properties we consider when comparing two taint flags.
-                //Property (1) and (2)
-                if(this->targetInstr != dstTaint->targetInstr || this->isTainted() != dstTaint->isTainted()){
+                //Property (1)
+                if (!this->targetInstr != !dstTaint->targetInstr) {
+                    return false;
+                }
+                if (this->targetInstr && !this->targetInstr->same(dstTaint->targetInstr)) {
+                    return false;
+                }
+                //Property (2)
+                if (this->isTainted() != dstTaint->isTainted()){
                     return false;
                 }
                 //Property (3):
-                if(this->tag && dstTaint->tag){
-                    return this->tag->isTagEquals(dstTaint->tag);
-                }else if(this->tag || dstTaint->tag){
-                    //One has tag but the other doesn't.
+                if (!this->tag != !dstTaint->tag) {
                     return false;
+                }
+                if (this->tag) {
+                    return this->tag->isTagEquals(dstTaint->tag);
                 }
                 return true;
             }
             return false;
         }
 
-        void addInstructionToTrace(Instruction *toAdd) {
-            if(this->instructionTrace.size() > 0) {
+        void addInstructionToTrace(InstLoc *toAdd) {
+            if (!toAdd) {
+                return;
+            }
+            if (this->instructionTrace.size() > 0) {
                 // check if last instruction is the current instruction.
-                Instruction *lastInstr = this->instructionTrace.back();
-                if (toAdd == lastInstr) {
+                InstLoc *lastInstr = this->instructionTrace.back();
+                if (toAdd->same(lastInstr)) {
                     return;
                 }
             }
             this->instructionTrace.push_back(toAdd);
         }
 
-        Value *targetInstr;
+        InstLoc *targetInstr;
         // trace of instructions that resulted in this taint.
-        std::vector<Instruction *> instructionTrace;
+        std::vector<InstLoc*> instructionTrace;
         void dumpInfo(raw_ostream &OS) {
-
-            //OS << "Taint Flag for:";
-            //this->targetInstr->print(OS);
-            //OS << ", Tainted=" << this->isTainted() << "\n";
             OS << " Instruction Trace: [\n";
-            for(std::vector<Instruction *>::iterator SI = this->instructionTrace.begin(); SI != this->instructionTrace.end(); ++SI) {
-                OS << (InstructionUtils::getInstructionName((*SI)));
-                DILocation *instrLoc = InstructionUtils::getCorrectInstrLocation(*SI);
-                OS << " ,lineno: ";
-                if (instrLoc != nullptr) {
-                    OS << instrLoc->getLine() << " ,file: ";
-                    OS << InstructionUtils::escapeJsonString(instrLoc->getFilename());
-                } else {
-                    OS << "-1";
+            for (InstLoc *inst : this->instructionTrace) {
+                if (inst) {
+                    inst->print(OS);
                 }
-                OS << "\n";
             }
             OS << "]\n";
             OS << "is_inherent: " << this->is_inherent << "\n";

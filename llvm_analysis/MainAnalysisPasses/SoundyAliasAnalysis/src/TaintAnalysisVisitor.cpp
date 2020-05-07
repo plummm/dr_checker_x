@@ -19,6 +19,10 @@ namespace DRCHECKER {
 #define ENFORCE_TAINT_PATH
 //#define DEBUG_ENFORCE_TAINT_PATH
 
+    InstLoc *TaintAnalysisVisitor::makeInstLoc(Value *v) {
+        return new InstLoc(v,this->currFuncCallSites);
+    }
+
     std::set<TaintFlag*>* TaintAnalysisVisitor::getTaintInfo(Value *targetVal) {
         return TaintUtils::getTaintInfo(this->currState, this->currFuncCallSites, targetVal);
     }
@@ -65,7 +69,7 @@ namespace DRCHECKER {
                 //although stmt0 cannot reach stmt1 in the CFG of this function, so we disable the below reachability check.
 #ifdef ENFORCE_TAINT_PATH
                 if(currTaint->targetInstr != nullptr && !currTaint->is_inherent) {
-                    Instruction *srcInstruction = dyn_cast<Instruction>(currTaint->targetInstr);
+                    Instruction *srcInstruction = dyn_cast<Instruction>(currTaint->targetInstr->inst);
                     if (srcInstruction != nullptr && targetInstruction != nullptr) {
                         add_taint = BBTraversalHelper::isReachable(srcInstruction, targetInstruction,
                                                                    this->currFuncCallSites);
@@ -73,7 +77,7 @@ namespace DRCHECKER {
                 }
 #endif
                 if(add_taint) {
-                    TaintFlag *newTaintFlag = new TaintFlag(currTaint, targetInstruction, srcOperand);
+                    TaintFlag *newTaintFlag = new TaintFlag(currTaint, this->makeInstLoc(targetInstruction), this->makeInstLoc(srcOperand));
                     TaintAnalysisVisitor::addNewTaintFlag(newTaintInfo,newTaintFlag);
                 }else {
 #ifdef DEBUG_ENFORCE_TAINT_PATH
@@ -487,8 +491,8 @@ namespace DRCHECKER {
                 bool is_added = false;
 
                 assert(targetObjects.size() > 0);
-                TaintFlag *newTaintFlag = new TaintFlag(currArg, true);
-                newTaintFlag->addInstructionToTrace(&I);
+                TaintFlag *newTaintFlag = new TaintFlag(this->makeInstLoc(currArg), true);
+                newTaintFlag->addInstructionToTrace(this->makeInstLoc(&I));
 
                 for(auto fieldObject:targetObjects) {
                     // if it is pointing to first field, then taint everything
@@ -541,9 +545,7 @@ namespace DRCHECKER {
             } else {
                 // TODO: raise warning that we do not have any points to information.
 #ifdef DEBUG_CALL_INSTR
-                dbgs() << "TaintAnalysis: Argument does not have points to information:";
-                currArg->print(dbgs());
-                dbgs() << "\n";
+                dbgs() << "TaintAnalysis: Argument does not have points to information: " << InstructionUtils::getValueStr(currArg) << "\n";
 #endif
             }
         }
@@ -740,7 +742,7 @@ namespace DRCHECKER {
             // create new taint info.
             std::set<TaintFlag*>* newTaintInfo = new std::set<TaintFlag*>();
             for(auto currRetTaint:vis->retValTaints) {
-                TaintFlag *newTaintFlag = new TaintFlag(currRetTaint, &I, &I);
+                TaintFlag *newTaintFlag = new TaintFlag(currRetTaint, this->makeInstLoc(&I), this->makeInstLoc(&I));
                 newTaintInfo->insert(newTaintInfo->end(), newTaintFlag);
             }
 

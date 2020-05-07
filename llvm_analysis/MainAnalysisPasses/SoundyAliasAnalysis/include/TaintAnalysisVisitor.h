@@ -186,6 +186,8 @@ namespace DRCHECKER {
                                                 TaintFlag *srcTaintFlag,
                                                 std::set<TaintFlag*> *dstTaintInfo = nullptr);
 
+        InstLoc *makeInstLoc(Value *v);
+
     };
 }
 
