@@ -205,50 +205,6 @@ namespace DRCHECKER {
                             }
                         }
                     }
-                /*
-
-
-                    std::set<AliasObject *> allObjects;
-                    allObjects.clear();
-                    for (auto currVal:toCheck) {
-                        PointsToUtils::getAllAliasObjects(this->currState, oldFuncCallSites, currVal, allObjects);
-                    }
-
-#ifdef DEBUG_KERNEL_MEMORY_LEAK_DETECTOR
-                dbgs() << TAG << ", Got:" << allObjects.size() << " that the src pointer can point to \n";
-#endif
-
-                    // This is a pointer, so get all objects that this can point to
-                    for(auto currObj:allObjects) {
-                        currObj->getAllPointsToObj(allObjects);
-                    }
-
-                    // check if any value in toCheck is tainted, if yes.
-                    // raise a warning.
-
-                    for (AliasObject *currObj:allObjects) {
-                        if (currObj->all_contents_tainted) {
-                            std::string warningMsg = "Tainted Data used in risky function";
-                            std::vector<Instruction *> instructionTrace;
-                            VulnerabilityWarning *currWarning = new ImproperTaintedDataUseWarning(
-                                    currObj->getObjectPtr(),
-                                    this->currFuncCallSites1,
-                                    &instructionTrace,
-                                    warningMsg, &I,
-                                    TAG);
-                            this->currState.addVulnerabilityWarning(currWarning);
-                            if(this->warnedInstructions.find(&I) == this->warnedInstructions.end()) {
-                                this->warnedInstructions.insert(&I);
-                            }
-                        } else {
-#ifdef DEBUG_KERNEL_MEMORY_LEAK_DETECTOR
-                            dbgs() << TAG << "Ignoring object:" << *currObj->getObjectPtr()
-                                            << ", as its contents are not fully tainted\n";
-#endif
-                        }
-                    }
-                    */
-
 
             }
         } else {

@@ -115,42 +115,44 @@ namespace DRCHECKER {
             srcfieldId = 0;
             //}
         }
-        for (ObjectPointsTo *obj : pointsTo) {
-            if (obj->fieldId == srcfieldId && obj->targetObject) {
-                //We handle a special case here:
-                //Many malloc'ed HeapLocation object can be of the type i8*, while only in the later code the pointer will be converted to a certain struct*,
-                //we choose to do this conversion here, specifically we need to:
-                //(1) change the object type to the "expObjTy",
-                //(2) setup the taint information properly.
+        if (this->pointsTo.find(srcfieldId) != this->pointsTo.end()) {
+            for (ObjectPointsTo *obj : this->pointsTo[srcfieldId]) {
+                if (obj->fieldId == srcfieldId && obj->targetObject) {
+                    //We handle a special case here:
+                    //Many malloc'ed HeapLocation object can be of the type i8*, while only in the later code the pointer will be converted to a certain struct*,
+                    //we choose to do this conversion here, specifically we need to:
+                    //(1) change the object type to the "expObjTy",
+                    //(2) setup the taint information properly.
 #ifdef DEBUG_CHANGE_HEAPLOCATIONTYPE
-                //dbgs() << "AliasObject::fetchPointsToObjects: isHeapLocation: " << (obj->targetObject && obj->targetObject->isHeapLocation()) << " dstField: " << obj->dstfieldId;
-                //dbgs() << " expObjTy: " << InstructionUtils::getTypeStr(expObjTy) << "\n";
+                    //dbgs() << "AliasObject::fetchPointsToObjects: isHeapLocation: " << (obj->targetObject && obj->targetObject->isHeapLocation()) << " dstField: " << obj->dstfieldId;
+                    //dbgs() << " expObjTy: " << InstructionUtils::getTypeStr(expObjTy) << "\n";
 #endif
-                if (obj->dstfieldId == 0 && obj->targetObject && obj->targetObject->isHeapLocation() && 
-                    expObjTy && dyn_cast<CompositeType>(expObjTy) && obj->targetObject->targetType != expObjTy) 
-                {
+                    if (obj->dstfieldId == 0 && obj->targetObject && obj->targetObject->isHeapLocation() && 
+                        expObjTy && dyn_cast<CompositeType>(expObjTy) && obj->targetObject->targetType != expObjTy) 
+                    {
 #ifdef DEBUG_CHANGE_HEAPLOCATIONTYPE
-                    dbgs() << "AliasObject::fetchPointsToObjects: isHeapLocation: " << (obj->targetObject && obj->targetObject->isHeapLocation()) << " dstField: " << obj->dstfieldId;
-                    dbgs() << " expObjTy: " << InstructionUtils::getTypeStr(expObjTy) << "\n";
-                    dbgs() << "AliasObject::fetchPointsToObjects: Change type of the HeapLocation.\n";
+                        dbgs() << "AliasObject::fetchPointsToObjects: isHeapLocation: " << (obj->targetObject && obj->targetObject->isHeapLocation()) << " dstField: " << obj->dstfieldId;
+                        dbgs() << " expObjTy: " << InstructionUtils::getTypeStr(expObjTy) << "\n";
+                        dbgs() << "AliasObject::fetchPointsToObjects: Change type of the HeapLocation.\n";
 #endif
-                    //Change type.
-                    obj->targetObject->reset(targetInstr,expObjTy);
-                    //Do the taint accordingly.
-                    this->taintSubObj(obj->targetObject,srcfieldId,currInst);
-                }
-                //Anyway here we're sure that we have the point-to record and we don't need to create dummy pointees any more,
-                //although the recorded pointee may have already been included in the "dstObjects" (e.g. load src pointer can have
-                //other target objects whose pointee set has already included this recorded pointee).
-                hasObjects = true;
-                auto p = std::make_pair(obj->dstfieldId, obj->targetObject);
-                if (std::find(dstObjects.begin(), dstObjects.end(), p) == dstObjects.end()) {
+                        //Change type.
+                        obj->targetObject->reset(targetInstr,expObjTy);
+                        //Do the taint accordingly.
+                        this->taintSubObj(obj->targetObject,srcfieldId,currInst);
+                    }
+                    //Anyway here we're sure that we have the point-to record and we don't need to create dummy pointees any more,
+                    //although the recorded pointee may have already been included in the "dstObjects" (e.g. load src pointer can have
+                    //other target objects whose pointee set has already included this recorded pointee).
+                    hasObjects = true;
+                    auto p = std::make_pair(obj->dstfieldId, obj->targetObject);
+                    if (std::find(dstObjects.begin(), dstObjects.end(), p) == dstObjects.end()) {
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-                    dbgs() << "Found a new obj in |pointsTo| records, insert it to the dstObjects.\n";
-                    dbgs() << "Type: " << InstructionUtils::getTypeStr(obj->targetObject->targetType) << " | " << obj->dstfieldId << " | is_taint_src:" << obj->targetObject->is_taint_src << "\n";
-                    dbgs() << "Val: " << InstructionUtils::getValueStr(obj->targetObject->getValue()) << " ID: " << (const void*)(obj->targetObject) << "\n";
+                        dbgs() << "Found a new obj in |pointsTo| records, insert it to the dstObjects.\n";
+                        dbgs() << "Type: " << InstructionUtils::getTypeStr(obj->targetObject->targetType) << " | " << obj->dstfieldId << " | is_taint_src:" << obj->targetObject->is_taint_src << "\n";
+                        dbgs() << "Val: " << InstructionUtils::getValueStr(obj->targetObject->getValue()) << " ID: " << (const void*)(obj->targetObject) << "\n";
 #endif
-                    dstObjects.insert(dstObjects.end(), p);
+                        dstObjects.insert(dstObjects.end(), p);
+                    }
                 }
             }
         }
@@ -240,9 +242,6 @@ namespace DRCHECKER {
             for (Function *func : candidateFuncs) {
                 GlobalObject *newObj = new GlobalObject(func);
 
-                //Update pointsFrom info in the newly created obj.
-                hostObj->addToPointsFrom(newObj);
-
                 //Update points-to
                 std::set<PointerPointsTo*> dstPointsTo;
                 PointerPointsTo *newPointsToObj = new PointerPointsTo();
@@ -270,9 +269,6 @@ namespace DRCHECKER {
                 newObj->auto_generated = true;
                 // get the taint for the field and add that taint to the newly created object
                 hostObj->taintSubObj(newObj,fid,currInst);
-
-                //Update the pointsFrom info in the newly created obj.
-                hostObj->addToPointsFrom(newObj);
 
                 //Handle some special cases like mutual point-to in linked list node "list_head".
                 hostObj->handleSpecialFieldPointTo(newObj,fid,currInst);
@@ -346,6 +342,61 @@ namespace DRCHECKER {
             dbgs() << "updateFieldPointsTo(): null type info for this host obj!\n";
 #endif
         }
+        this->updateFieldPointsTo_do(srcfieldId,dstPointsTo,propogatingInstr);
+    }
+
+    //Do the real job of field pto update.
+    void AliasObject::updateFieldPointsTo_do(long srcfieldId, std::set<PointerPointsTo*> *dstPointsTo, InstLoc *propogatingInstr) {
+        if (!dstPointsTo || !dstPointsTo->size()) {
+            return;
+        }
+        //preprocessing: deduplication and unify "fieldId" and "propInst".
+        std::set<PointerPointsTo*> unique_pto;
+        for (PointerPointsTo *pto : *dstPointsTo) {
+            if (!pto) {
+                continue;
+            }
+            bool unique = true;
+            for (PointerPointsTo *t : unique_pto) {
+                //NOTE: pto in "dstPointsTo" should all share the same "propogatingInstr", so we only need to care about their dst obj and field here.
+                if (t->targetObject != pto->targetObject || t->dstFieldId != pto->dstFieldId) {
+                    //Obviously different.
+                    continue;
+                }
+                //if both pointed object and field are same and only "is_weak" is different, then just make "is_weak = false" (i.e. strong update)
+                //for the existing pto record. 
+                if (t->is_weak != pto->is_weak) {
+                    t->is_weak = false;
+                }
+                //exclude this "pto" since it's duplicated
+                unique = false;
+                break;
+            }
+            if (unique) {
+                //Before inserting the pto to the unique set, force set its "fieldId" and "propInst" to be correct.
+                pto->fieldId = srcfieldId;
+                pto->propogatingInst = propogatingInstr;
+                //Insert
+                unique_pto.insert(pto);
+            }
+        }
+        if (!unique_pto.size()) {
+            return;
+        }
+        //Ok, now try to insert records in "unique_pto" to field points-to.
+        //The pto records we should insert in the end (e.g. we may have duplicated records in existing field pto).
+        std::set<PointerPointsTo*> to_add;
+        //The existing pto records we should remove (e.g. overridden by new pto due to CFG relationship).
+        std::set<ObjectPointsTo*> to_del;
+        for (PointerPointsTo *pto : unique_pto) {
+            for (ObjectPointsTo *e : this->pointsTo[srcfieldId]) {
+                //
+            }
+        }
+        //
+        //
+        //
+        //
         std::set<AliasObject*> currObjects;
         // first get all objects that could be pointed by srcfieldId of the current object.
         this->getAllObjectsPointedByField(srcfieldId, currObjects);
@@ -353,21 +404,21 @@ namespace DRCHECKER {
         for (PointerPointsTo *currPointsTo: *dstPointsTo) {
             // insert points to information only, if it is not present.
             //TODO: point to different fields in a same object?
-            if(currObjects.find(currPointsTo->targetObject) == currObjects.end()) {
+            if(currPointsTo->targetObject && currObjects.find(currPointsTo->targetObject) == currObjects.end()) {
                 ObjectPointsTo *newPointsTo = currPointsTo->makeCopy();
                 newPointsTo->fieldId = srcfieldId;
                 newPointsTo->propogatingInst = propogatingInstr;
 #ifdef DEBUG_UPDATE_FIELD_POINT
-                dbgs() << "updateFieldPointsTo(): add point-to: ";
+                dbgs() << "updateFieldPointsTo_do(): add point-to: ";
                 newPointsTo->print(dbgs());
 #endif
                 this->pointsTo.push_back(newPointsTo);
                 //hz: don't forget the "pointsFrom", it is a double link list...
-                //this->addToPointsFrom(newPointsTo->targetObject);
+                newPointsTo->targetObject->updatePointsFrom(this,newPointsTo);
             }
         }
 #ifdef DEBUG_UPDATE_FIELD_POINT
-        dbgs() << "updateFieldPointsTo(): After updates: " << this->countObjectPointsTo(srcfieldId) << "\n"; 
+        dbgs() << "updateFieldPointsTo_do(): After updates: " << this->countObjectPointsTo(srcfieldId) << "\n"; 
 #endif
     }
 

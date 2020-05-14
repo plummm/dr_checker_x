@@ -63,8 +63,6 @@ namespace DRCHECKER {
         return nullptr;
     }
 
-
-
     bool AliasAnalysisVisitor::isPtoDuplicated(const PointerPointsTo *p0, const PointerPointsTo *p1, bool dbg = false) {
         if (!p0 && !p1) {
             return true;
@@ -637,9 +635,7 @@ void AliasAnalysisVisitor::visitAllocaInst(AllocaInst &I) {
          * We have already visited this instruction before.
          */
 #ifdef DEBUG_ALLOCA_INSTR
-        dbgs() << "The Alloca instruction, already processed:";
-        I.print(dbgs());
-        dbgs() << "\n";
+        dbgs() << "The Alloca instruction, already processed: " << InstructionUtils::getValueStr(&I) << "\n";
 #endif
         return;
     }
@@ -1065,10 +1061,10 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
         }
         std::set<PointerPointsTo*> todo_set, *final_set = new std::set<PointerPointsTo*>();
         for (PointerPointsTo *pto : *srcPointsTo) {
-            if (pto->is_final) {
+            if (pto->flag) {
                 final_set->insert(pto);
                 //one-time use.
-                pto->is_final = false;
+                pto->flag = 0;
             } else {
                 todo_set.insert(pto);
             }
@@ -1269,7 +1265,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
 #endif
                         width = 1; //bit unit.
                         //Tell the visitGEP() that it doesn't need to process the remainig indices (if any) since we have converted this GEP to single-index for this pto.
-                        newPto->is_final = true;
+                        newPto->flag = 1;
                     }
 #ifdef DEBUG_GET_ELEMENT_PTR
                     dbgs() << "AliasAnalysisVisitor::processGEPFirstDimension(): invoke bit2Field()...\n";
@@ -1683,7 +1679,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
         }
         Value *targetValue_pre_strip = targetValue;
         // handle pointer casts
-        if(!hasPointsToObjects(targetValue)) {
+        if (!hasPointsToObjects(targetValue)) {
             targetValue = targetValue->stripPointerCasts();
 #ifdef DEBUG_STORE_INSTR
             dbgs() << "No point-to info for targetValue, try to strip the pointer casts -1.\n";
@@ -1743,8 +1739,6 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
                     dbgs() << "There is only 1 point-to record for the TargetPointer, a strong update will happen if #fieldPointsTo <= 1.\n";
 #endif
                     PointerPointsTo *dstPointsToObject = *(newPointsToInfo->begin());
-                    // we have a pointer which points to only one object.
-                    // Do a strong update
                     // Basic sanity
                     if(!((dstPointsToObject->targetPointer == targetPointer ||
                                 dstPointsToObject->targetPointer == targetPointer->stripPointerCasts()) &&
@@ -1820,9 +1814,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
             // Ensure that we are not storing into pointer to pointer
             if(!this->inside_loop) {
 #ifdef DEBUG_STORE_INSTR
-                errs() << "Source pointer does not point to any thing:";
-                targetValue->print(errs());
-                errs() << "; Ignoring.\n";
+                errs() << "Source pointer does not point to any thing: " << InstructionUtils::getValueStr(targetValue) << "; Ignoring.\n";
 #endif
             }
             //assert(!I.getPointerOperand()->getType()->getContainedType(0)->isPointerTy());

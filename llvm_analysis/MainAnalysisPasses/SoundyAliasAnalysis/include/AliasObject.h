@@ -58,15 +58,18 @@ namespace DRCHECKER {
         // instruction which resulted in this points to information.
         //Value* propogatingInstruction;
         InstLoc *propogatingInst;
+        //Whether this pto record is a weak update (e.g. the original dst pointer points to multiple locations in multiple objects,
+        //so we are not sure whether this pto will be for sure updated for a certain object field at the 'propogatingInst').
+        bool is_weak = true;
         //For customized usage.
-        bool is_final = false;
+        //E.g. when processing GEP, sometimes we may convert all indices into a single offset and skip "processGEPMultiDimension", use this flag to indicate this.
+        int flag = 0;
 
         ObjectPointsTo() {
-            this->is_final = false;
+            this->flag = 0;
         }
 
         ~ObjectPointsTo() {
-            delete(this->propogatingInst);
         }
 
         ObjectPointsTo(ObjectPointsTo *srcObjPointsTo) {
@@ -74,7 +77,8 @@ namespace DRCHECKER {
             this->dstfieldId = srcObjPointsTo->dstfieldId;
             this->targetObject = srcObjPointsTo->targetObject;
             this->propogatingInst = srcObjPointsTo->propogatingInst;
-            this->is_final = false;
+            this->is_weak = srcObjPointsTo->is_weak;
+            this->flag = 0;
         }
 
         virtual ObjectPointsTo* makeCopy() {
@@ -201,9 +205,11 @@ namespace DRCHECKER {
         // All pointer variables that can point to this object.
         std::vector<PointerPointsTo *> pointersPointsTo;
         // This represents points from information, all objects which can point to this.
-        std::vector<AliasObject*> pointsFrom;
+        // The key is the src object, the value is the pto records in src object that point to this obj.
+        std::map<AliasObject*,std::set<ObjectPointsTo*>> pointsFrom;
         // All Objects that could be pointed by this object.
-        std::vector<ObjectPointsTo*> pointsTo;
+        // The key is the field number, the value is all pto records of this field.
+        std::map<long,std::set<ObjectPointsTo*>> pointsTo;
         // The reference instruction of this AliasObject (usually the inst where this obj is created.).
         Instruction *refInst = nullptr;
 
@@ -259,8 +265,8 @@ namespace DRCHECKER {
             this->parent = srcAliasObject->parent;
             this->parent_field = srcAliasObject->parent_field;
             this->refInst = srcAliasObject->refInst;
-
         }
+
         AliasObject() {
             //hz: init some extra fields
             this->id = getCurrID();
@@ -270,9 +276,14 @@ namespace DRCHECKER {
         }
 
         ~AliasObject() {
-            // delete all object points to
-            for(ObjectPointsTo *ob:pointsTo) {
-                delete(ob);
+            // delete all object pointsTo and the related pointsFrom in other objects.
+            for (auto &x : pointsTo) {
+                for (ObjectPointsTo *pto : x.second) {
+                    if (pto->targetObject) {
+                        pto->targetObject->erasePointsFrom(this,pto);
+                    }
+                    delete(pto);
+                }
             }
 
             // delete all field taint.
@@ -283,45 +294,50 @@ namespace DRCHECKER {
 
         unsigned long countObjectPointsTo(long srcfieldId) {
             /***
-             * Count the number of objects that could be pointer by
+             * Count the number of object-field combinations that could be pointed by
              * a field (i.e srcfieldId).
-             */
-            unsigned long numObjects = 0;
-            for(ObjectPointsTo *obj:pointsTo) {
-                if(obj->fieldId == srcfieldId) {
-                    numObjects++;
+            */
+            if (this->pointsTo.find(srcfieldId) == this->pointsTo.end()) {
+                return 0;
+            }
+            return this->pointsTo[srcfieldId].size();
+        }
+
+        //update the "pointsFrom" records.
+        bool addPointsFrom(AliasObject *srcObj, ObjectPointsTo *pto) {
+            if (!srcObj || !pto) {
+                return false;
+            }
+            //validity check
+            if (pto->targetObject != this) {
+                return false;
+            }
+            if (this->pointsFrom.find(srcObj) == this->pointsFrom.end()) {
+                this->pointsFrom[srcObj].insert(pto);
+            }else {
+                //Detect the duplication.
+                if(std::find_if(this->pointsFrom[srcObj].begin(), this->pointsFrom[srcObj].end(), [pto](const ObjectPointsTo *n) {
+                            return  n->fieldId == pto->fieldId && n->dstFieldId == pto->dstFieldId;
+                            }) == this->pointsFrom[srcObj].end()) {
+                    this->pointsFrom[srcObj].insert(pto);
                 }
             }
-            return numObjects;
+            return true;
         }
 
-        void getAllPointsToObj(std::set<AliasObject*> &dstObjects) {
-            /***
-             * Get all objects this object can point to, from all the fields
-             */
-            for(auto currpo:this->pointsTo) {
-                if(dstObjects.find(currpo->targetObject) == dstObjects.end()) {
-                    dstObjects.insert(currpo->targetObject);
+        bool erasePointsFrom(AliasObject *srcObj, ObjectPointsTo *pto) {
+            if (!srcObj || !pto || this->pointsFrom.find(srcObj) == this->pointsFrom.end()) {
+                return true;
+            }
+            for (auto it = this->pointsFrom[srcObj].begin(); it != this->pointsFrom[srcObj].end(); ) {
+                ObjectPointsTo *p = *it;
+                if (p->fieldId == pto->fieldId && p->dstFieldId == pto->dstFieldId) {
+                    it = this->pointsFrom[srcObj].erase(it);
+                }else {
+                    ++it;
                 }
             }
-        }
-
-        //Erase this object from the "pointsFrom" of another object.
-        void eraseFromPointsFrom(AliasObject *obj) {
-            if (!obj) {
-                return;
-            }
-            obj->pointsFrom.erase(std::remove(obj->pointsFrom.begin(), obj->pointsFrom.end(), this), obj->pointsFrom.end());
-        }
-
-        //Add this object to the "pointsFrom" of another object.
-        void addToPointsFrom(AliasObject *obj) {
-            if (!obj) {
-                return;
-            }
-            if (std::find(obj->pointsFrom.begin(),obj->pointsFrom.end(),this) == obj->pointsFrom.end()) {
-                obj->pointsFrom.push_back(this);
-            }
+            return true;
         }
 
         void performStrongUpdate(long srcfieldId, std::set<PointerPointsTo*>* dstPointsTo, InstLoc *propogatingInstr) {
@@ -335,41 +351,21 @@ namespace DRCHECKER {
 #ifdef DEBUG_UPDATE_FIELD_POINT
             dbgs() << "Perform strong update...\n";
 #endif
-            std::vector<ObjectPointsTo*> tmpCopy;
-            tmpCopy.clear();
-            std::vector<ObjectPointsTo*> delCopy;
-            delCopy.clear();
-            // remove all objects, that could be pointed by srcfield id.
-            for(auto a: this->pointsTo) {
-                if(a->fieldId == srcfieldId) {
-                    delCopy.push_back(a);
-                } else {
-                    tmpCopy.push_back(a);
-                }
+            if (!dstPointsTo || dstPointsTo->empty()) {
+                return;
             }
-
-            for (auto& x : delCopy) {
-                AliasObject *obj = x->targetObject;
-                if (obj) {
-                    //hz: we also need to remove current object from the "pointsFrom" vector of the deleted point-to object...
-                    //Can other fields in this object point to "obj"? If not, we need to remove current object from obj->pointsFrom...
-                    bool is_pt = false;
-                    for (auto& y : tmpCopy) {
-                        if (y->targetObject == obj) {
-                            is_pt = true;
-                            break;
-                        }
+            //Before clearing the field pto records, clear all affected pointsFrom first.
+            if (this->pointsTo.find(srcfieldId) != this->pointsTo.end()) {
+                for (ObjectPointsTo *p : this->pointsTo[srcfieldId]) {
+                    if (p && p->targetObject) {
+                        p->targetObject->erasePointsFrom(this,p);
                     }
-                    if (!is_pt) {
-                        this->eraseFromPointsFrom(obj);
-                    }
+                    delete(p);
                 }
-                delete(x);
+                //Empty the field pto.
+                this->pointsTo[srcfieldId].clear();
             }
-
-            this->pointsTo.clear();
-            this->pointsTo.insert(this->pointsTo.end(), tmpCopy.begin(), tmpCopy.end());
-
+            //Do the normal field pto update.
             this->updateFieldPointsTo(srcfieldId, dstPointsTo, propogatingInstr);
         }
 
@@ -405,19 +401,12 @@ namespace DRCHECKER {
             }
         }
 
-        void getAllObjectsPointedByField(long srcfieldID, std::set<AliasObject *> &retSet) {
-            for (ObjectPointsTo *obj:pointsTo) {
-                if (obj->fieldId == srcfieldID) {
-                    if (retSet.find(obj->targetObject) == retSet.end())  {
-                        retSet.insert(obj->targetObject);
-                    }
-                }
-            }
-        }
-
         //We want to get all possible pointee types of a certain field, so we need to inspect the detailed type desc (i.e. embed/parent object hierarchy).
         void getFieldPointeeTy(long fid, std::set<Type*> &retSet) {
-            for (ObjectPointsTo *obj : this->pointsTo) {
+            if (this->pointsTo.find(fid) == this->pointsTo.end()) {
+                return;
+            }
+            for (ObjectPointsTo *obj : this->pointsTo[fid]) {
                 if (obj->fieldId == fid) {
                     if (!obj->targetObject) {
                         continue;
@@ -444,76 +433,26 @@ namespace DRCHECKER {
             return;
         }
 
-        //HZ: seems no one uses this function?
-        /*
-        void updateFieldPointsToFromObjects(std::vector<ObjectPointsTo*>* dstPointsToObject,
-                                            InstLoc *propagatingInstr) {
-            // Add all objects in the provided pointsTo set to be pointed by the provided srcFieldID
-#ifdef DEBUG_UPDATE_FIELD_POINT
-            dbgs() << "updateFieldPointsToFromObjects() for: " << InstructionUtils::getTypeStr(this->targetType);
-            dbgs() << " Host Obj ID: " << (const void*)this << "\n";
-#endif
-            if(dstPointsToObject != nullptr) {
-                std::set<AliasObject *> currObjects;
-                //Add all objects that are in the provided set.
-                for (ObjectPointsTo *currPointsTo: *dstPointsToObject) {
-                    long srcfieldId = currPointsTo->fieldId;
-                    // clear all the objects
-                    currObjects.clear();
-                    // first get all objects that could be pointed by srcfieldId of the current object.
-                    getAllObjectsPointedByField(srcfieldId, currObjects);
-                    // insert points to information only, if it is not present.
-                    if (currObjects.find(currPointsTo->targetObject) == currObjects.end()) {
-                        ObjectPointsTo *newPointsTo = currPointsTo->makeCopy();
-                        newPointsTo->propogatingInst = propagatingInstr;
-#ifdef DEBUG_UPDATE_FIELD_POINT
-                        dbgs() << "updateFieldPointsToFromObjects(), add point-to:\n";
-                        newPointsTo->print(dbgs());
-#endif
-                        this->pointsTo.push_back(newPointsTo);
-                        //hz: update the "pointsFrom" of the pointee object.
-                        //TODO: it seems that enabling the below line will cause many strange point-to relationship...
-                        //this->addToPointsFrom(newPointsTo->targetObject);
-                    }
-                }
-            }
-        }
-        */
-
-        //HZ: currently this is only invoked in the initial global object setup phase (e.g. need to make gv0->f0 point to gv1)
-        //so there may be no propgating inst or call context.
+        //This is a wrapper of "updateFieldPointsTo" for convenience, it assumes that we only have one pto record for the "fieldId" to update,
+        //and this pto points to field 0 of "dstObject".
+        //NOTE: currently this is only invoked in the initial global object setup phase (e.g. need to make gv0->f0 point to gv1)
+        //TODO: consider to replace more "updateFieldPointsTo" invocation to this when applicable, to simplify the codebase.
         void addObjectToFieldPointsTo(long fieldId, AliasObject *dstObject, InstLoc *propagatingInstr = nullptr) {
-            /***
-            * Add provided object into pointsTo set of the provided fieldId
-            */
 #ifdef DEBUG_UPDATE_FIELD_POINT
             dbgs() << "addObjectToFieldPointsTo() for: " << InstructionUtils::getTypeStr(this->targetType) << " | " << fieldId;
             dbgs() << " Host Obj ID: " << (const void*)this << "\n";
 #endif
             if(dstObject != nullptr) {
-                std::set<AliasObject *> currObjects;
-                long srcfieldId = fieldId;
-                // clear all the objects
-                currObjects.clear();
-                // first get all objects that could be pointed by srcfieldId.
-                getAllObjectsPointedByField(srcfieldId, currObjects);
-                // insert points to information only,
-                // if the object to be added is not present.
-                if (currObjects.find(dstObject) == currObjects.end()) {
-                    ObjectPointsTo *newPointsTo = new ObjectPointsTo();
-                    newPointsTo->propogatingInst = propagatingInstr;
-                    newPointsTo->fieldId = srcfieldId;
-                    newPointsTo->dstfieldId = 0;
-                    newPointsTo->targetObject = dstObject;
-#ifdef DEBUG_UPDATE_FIELD_POINT
-                    dbgs() << "addObjectToFieldPointsTo(), add point-to:\n";
-                    newPointsTo->print(dbgs());
-#endif
-                    this->pointsTo.push_back(newPointsTo);
-                    //hz: update the "PointsFrom"...
-                    //TODO
-                    //this->addToPointsFrom(dstObject);
-                }
+                std::set<PointerPointsTo*> dstPointsTo;
+                PointerPointsTo *newPointsTo = new PointerPointsTo();
+                newPointsTo->propogatingInst = propagatingInstr;
+                newPointsTo->fieldId = fieldId;
+                newPointsTo->dstfieldId = 0;
+                newPointsTo->targetObject = dstObject;
+                dstPointsTo.insert(newPointsTo);
+                this->updateFieldPointsTo(fieldId,&dstPointsTo,propagatingInstr);
+                //We can now delete the allocated objects since "updateFieldPointsTo" has made a copy.
+                delete(newPointsTo);
             }
         }
 
@@ -860,8 +799,10 @@ namespace DRCHECKER {
             if (this->pointsTo.size()) {
                 // has some points to?
                 // iterate thru pointsTo and get all fields.
-                for (auto objPoint:this->pointsTo) {
-                    allAvailableFields.insert(objPoint->fieldId);
+                for (auto &x : this->pointsTo) {
+                    if (x.second.size()) {
+                        allAvailableFields.insert(x.first);
+                    }
                 }
             }else {
                 // This must be a scalar type, or null type info.
@@ -908,7 +849,6 @@ namespace DRCHECKER {
                 newPointsToObj->dstfieldId = 0;
                 dstPointsTo.insert(newPointsToObj);
                 pobj->updateFieldPointsTo(1-fid,&dstPointsTo,targetInstr);
-                pobj->addToPointsFrom(this);
                 return 1;
             }
             return 0;
@@ -1007,7 +947,11 @@ namespace DRCHECKER {
             return -1;
         }
 
+        void updateFieldPointsTo(long srcfieldId, std::set<PointerPointsTo*>* dstPointsTo, InstLoc *propogatingInstr);
+
     private:
+
+        void updateFieldPointsTo_do(long srcfieldId, std::set<PointerPointsTo*>* dstPointsTo, InstLoc *propogatingInstr);
 
         FieldTaint* getFieldTaint(long srcfieldId) {
             for(auto currFieldTaint:taintedFields) {
@@ -1019,15 +963,14 @@ namespace DRCHECKER {
         }
 
 
-        void updateFieldPointsTo(long srcfieldId, std::set<PointerPointsTo*>* dstPointsTo, InstLoc *propogatingInstr);
-
     protected:
         void printPointsTo(llvm::raw_ostream& os) const {
             os << "Points To Information:\n";
-            for(ObjectPointsTo *obp: this->pointsTo) {
-                os << "\t";
-                os << (*obp);
-                os << "\n";
+            for (auto &x : this->pointsTo) {
+                os << "Field: " << x.first << ":\n";
+                for (ObjectPointsTo *obp : x.second) {
+                    os << "\t" << (*obp) << "\n";
+                }
             }
         }
     };
