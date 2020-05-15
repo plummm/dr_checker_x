@@ -597,28 +597,21 @@ namespace DRCHECKER {
             }
             if (!obj->pointsFrom.empty()) {
                 //Current obj may be pointed to by a field in another obj.
-                std::set<AliasObject*> visitedObjs;
-                visitedObjs.clear();
-                for (AliasObject *x : obj->pointsFrom) {
-                    if (visitedObjs.find(x) != visitedObjs.end()) {
-                        //has visited before.
+                for (auto &x : obj->pointsFrom) {
+                    AliasObject *srcObj = x.first;
+                    if (!srcObj) {
                         continue;
                     }
-                    visitedObjs.insert(x);
-#ifdef DEBUG_HIERARCHY
-                    dbgs() << layer << " getHierarchyStr(): find a host object that can point to this one...\n";
-#endif
-                    for (ObjectPointsTo *y : x->pointsTo) {
-                        if (y->targetObject != obj || (y->dstfieldId > 0 && y->dstfieldId != field)) {
+                    for (ObjectPointsTo *y : x.second) {
+                        if (!y || y->targetObject != obj || (y->dstfieldId > 0 && y->dstfieldId != field)) {
                             continue;
                         }
-                        std::set<std::string> *rs = getHierarchyStr(x,y->fieldId,layer+1,history);
 #ifdef DEBUG_HIERARCHY
-                        dbgs() << layer << " getHierarchyStr(): host point-to, #rs: ";
-                        if (rs) {
-                            dbgs() << rs->size();
-                        }
-                        dbgs() << "\n";
+                        dbgs() << layer << " getHierarchyStr(): find a host object that can point to this one...\n";
+#endif
+                        std::set<std::string> *rs = getHierarchyStr(srcObj,y->fieldId,layer+1,history);
+#ifdef DEBUG_HIERARCHY
+                        dbgs() << layer << " getHierarchyStr(): host point-to, #rs: " << (rs ? rs->size() : 0) << "\n";
 #endif
                         if (rs) {
                             for (auto& z : *rs) {
@@ -688,22 +681,19 @@ namespace DRCHECKER {
             }
             if (!obj->pointsFrom.empty()) {
                 //Current obj may be pointed to by a field in another obj.
-                std::set<AliasObject*> visitedObjs;
-                visitedObjs.clear();
-                for (AliasObject *x : obj->pointsFrom) {
-                    if (visitedObjs.find(x) != visitedObjs.end()) {
-                        //has visited before.
+                for (auto &x : obj->pointsFrom) {
+                    AliasObject *srcObj = x.first;
+                    if (!srcObj) {
                         continue;
                     }
-                    visitedObjs.insert(x);
-#ifdef DEBUG_HIERARCHY
-                    dbgs() << layer << " getHierarchyTy(): find a host object that can point to this one...\n";
-#endif
-                    for (ObjectPointsTo *y : x->pointsTo) {
-                        if (y->targetObject != obj || (y->dstfieldId > 0 && y->dstfieldId != field)) {
+                    for (ObjectPointsTo *y : x.second) {
+                        if (!y || y->targetObject != obj || (y->dstfieldId > 0 && y->dstfieldId != field)) {
                             continue;
                         }
-                        std::set<std::vector<TypeField*>*> *rty = getHierarchyTy(x,y->fieldId,layer+1,history);
+#ifdef DEBUG_HIERARCHY
+                        dbgs() << layer << " getHierarchyTy(): find a host object that can point to this one...\n";
+#endif
+                        std::set<std::vector<TypeField*>*> *rty = getHierarchyTy(srcObj,y->fieldId,layer+1,history);
 #ifdef DEBUG_HIERARCHY
                         dbgs() << layer << " getHierarchyTy(): host point-to, #rty: " << (rty ? rty->size() : 0) << "\n";
 #endif

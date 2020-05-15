@@ -248,10 +248,8 @@ namespace DRCHECKER {
             this->targetType = srcAliasObject->targetType;
             this->pointersPointsTo.insert(this->pointersPointsTo.end(), srcAliasObject->pointersPointsTo.begin(),
                                           srcAliasObject->pointersPointsTo.end());
-            this->pointsFrom.insert(this->pointsFrom.end(), srcAliasObject->pointsFrom.begin(),
-                                          srcAliasObject->pointsFrom.end());
-            this->pointsTo.insert(this->pointsTo.end(), srcAliasObject->pointsTo.begin(),
-                                          srcAliasObject->pointsTo.end());
+            this->pointsFrom = srcAliasObject->pointsFrom;
+            this->pointsTo = srcAliasObject->pointsTo;
             this->id = getCurrID();
 
             this->is_initialized = srcAliasObject->is_initialized;
@@ -314,7 +312,7 @@ namespace DRCHECKER {
             }else {
                 //Detect the duplication.
                 if(std::find_if(this->pointsFrom[srcObj].begin(), this->pointsFrom[srcObj].end(), [pto](const ObjectPointsTo *n) {
-                            return  n->fieldId == pto->fieldId && n->dstFieldId == pto->dstFieldId;
+                            return  n->fieldId == pto->fieldId && n->dstfieldId == pto->dstfieldId;
                             }) == this->pointsFrom[srcObj].end()) {
                     this->pointsFrom[srcObj].insert(pto);
                 }
@@ -328,7 +326,7 @@ namespace DRCHECKER {
             }
             for (auto it = this->pointsFrom[srcObj].begin(); it != this->pointsFrom[srcObj].end(); ) {
                 ObjectPointsTo *p = *it;
-                if (p->fieldId == pto->fieldId && p->dstFieldId == pto->dstFieldId) {
+                if (p->fieldId == pto->fieldId && p->dstfieldId == pto->dstfieldId) {
                     it = this->pointsFrom[srcObj].erase(it);
                 }else {
                     ++it;
