@@ -359,7 +359,7 @@ namespace DRCHECKER {
             bool unique = true;
             for (PointerPointsTo *t : unique_pto) {
                 //NOTE: pto in "dstPointsTo" should all share the same "propogatingInstr", so we only need to care about their dst obj and field here.
-                if (t->targetObject != pto->targetObject || t->dstFieldId != pto->dstFieldId) {
+                if (!t->pointsToSameObject(pto)) {
                     //Obviously different.
                     continue;
                 }
@@ -386,36 +386,68 @@ namespace DRCHECKER {
         //Ok, now try to insert records in "unique_pto" to field points-to.
         //The pto records we should insert in the end (e.g. we may have duplicated records in existing field pto).
         std::set<PointerPointsTo*> to_add;
-        //The existing pto records we should remove (e.g. overridden by new pto due to CFG relationship).
+        //The existing pto records we should remove (e.g. overridden by new pto due to CFG relationship like post-dominator).
         std::set<ObjectPointsTo*> to_del;
         for (PointerPointsTo *pto : unique_pto) {
+            //Kill every existing pto we can, then decide whether we need to add current new pto.
+            bool is_dup = false;
             for (ObjectPointsTo *e : this->pointsTo[srcfieldId]) {
-                //
+                //The kill criteria: current pto is a strong update and it post-dominates an existing pto.
+                if (!pto->is_weak) {
+                    //TODO: ok, it's a strong update, decide whether it post-dominates "e", if so, delete "e" from existing pto set.
+                }
+                //Is "e" identical to "pto"?
+                //No need to compare if we already decided it's duplicated.
+                if (is_dup) {
+                    continue;
+                }
+                //(1) Basic pto inf should be the same.
+                if (!e->isIdenticalPointsTo(pto)) {
+                    continue;
+                }
+                //(2) Update site should be the same.
+                if (!e->propogatingInst != !pto->propogatingInst) {
+                    continue;
+                }
+                if (e->propogatingInst && !e->propogatingInst->same(pto->propogatingInst)) {
+                    continue;
+                }
+                //Ok, we can already say they are identical pto records and no need to insert "pto".
+                is_dup = true;
+                //But if their "is_weak" are different, we will set the existing pto to a strong update anyway.
+                if (e->is_weak != pto->is_weak) {
+                    e->is_weak = false;
+                }
+            }
+            if (!is_dup) {
+                to_add.insert(pto);
             }
         }
-        //
-        //
-        //
-        //
-        std::set<AliasObject*> currObjects;
-        // first get all objects that could be pointed by srcfieldId of the current object.
-        this->getAllObjectsPointedByField(srcfieldId, currObjects);
-        //Add all objects that are in the provided set by changing the field id.
-        for (PointerPointsTo *currPointsTo: *dstPointsTo) {
-            // insert points to information only, if it is not present.
-            //TODO: point to different fields in a same object?
-            if(currPointsTo->targetObject && currObjects.find(currPointsTo->targetObject) == currObjects.end()) {
-                ObjectPointsTo *newPointsTo = currPointsTo->makeCopy();
-                newPointsTo->fieldId = srcfieldId;
-                newPointsTo->propogatingInst = propogatingInstr;
-#ifdef DEBUG_UPDATE_FIELD_POINT
-                dbgs() << "updateFieldPointsTo_do(): add point-to: ";
-                newPointsTo->print(dbgs());
-#endif
-                this->pointsTo.push_back(newPointsTo);
-                //hz: don't forget the "pointsFrom", it is a double link list...
-                newPointsTo->targetObject->updatePointsFrom(this,newPointsTo);
+        //Do the actual deletion and insertion.
+        for (ObjectPointsTo *x : to_del) {
+            this->pointsTo[srcfieldId].erase(x);
+            //Don't forget to update the "pointsFrom" records of the affected objects.
+            if (x->targetObject) {
+                x->targetObject->erasePointsFrom(this,x);
             }
+#ifdef DEBUG_UPDATE_FIELD_POINT
+            dbgs() << "updateFieldPointsTo_do(): del point-to: ";
+            x->print(dbgs());
+#endif
+            delete(x);
+        }
+        for (PointerPointsTo *x : to_add) {
+            ObjectPointsTo *newPointsTo = x->makeCopy();
+            this->pointsTo[srcfieldId].insert(newPointsTo);
+            //Don't forget to update the "pointsFrom" records of the affected objects.
+            if (x->targetObject) {
+                x->targetObject->addPointsFrom(this,newPointsTo);
+            }
+#ifdef DEBUG_UPDATE_FIELD_POINT
+            dbgs() << "updateFieldPointsTo_do(): add point-to: ";
+            newPointsTo->print(dbgs());
+#endif
+            delete(x);
         }
 #ifdef DEBUG_UPDATE_FIELD_POINT
         dbgs() << "updateFieldPointsTo_do(): After updates: " << this->countObjectPointsTo(srcfieldId) << "\n"; 
@@ -973,7 +1005,8 @@ namespace DRCHECKER {
         //any records regarding B's host object, we can still infer its host object type (same as host A) and create a dummy
         //object.
         if (!obj->pointsFrom.empty()) {
-            for (AliasObject *prev : obj->pointsFrom) {
+            for (auto &x : obj->pointsFrom) {
+                AliasObject *prev = x.first;
                 if (!prev) {
                     continue;
                 }

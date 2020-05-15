@@ -85,9 +85,14 @@ namespace DRCHECKER {
             return new ObjectPointsTo(this);
         }
 
+        //NOTE: this comparison doesn't consider the additional properties including "propogatingInst" and "is_weak"
         virtual bool isIdenticalPointsTo(const ObjectPointsTo *that) const {
-            // No default implementation
-            assert(false);
+            if (!that) {
+                return false;
+            }
+            return this->targetObject == that->targetObject &&
+                   this->fieldId == that->fieldId &&
+                   this->dstfieldId == that->dstfieldId;
         }
 
         virtual bool pointsToSameObject(const ObjectPointsTo *that) const {
@@ -119,7 +124,6 @@ namespace DRCHECKER {
     };
 
 
-    int isSameObj(AliasObject*,AliasObject*);
     /***
      * Handles the pointer point to relation.
      */
@@ -149,20 +153,11 @@ namespace DRCHECKER {
             // Simple polymorphism.
             return PointerPointsTo::TYPE_CONST;
         }
+
+        /*
         bool isIdenticalPointsTo(const ObjectPointsTo *that) const {
-            if (that != nullptr && that->getTargetType() == PointerPointsTo::TYPE_CONST) {
+            if (that && that->getTargetType() == PointerPointsTo::TYPE_CONST) {
                 PointerPointsTo* actualObj = (PointerPointsTo*)that;
-                /*
-                //hz: a simple hacking here to avoid duplicated outside objects.
-                if(this->dstfieldId != actualObj->dstfieldId){
-                    return false;
-                }
-                //negative return value means undecided.
-                int r = isSameObj(this->targetObject,actualObj->targetObject);
-                if(r>=0){
-                    return r;
-                }
-                */
                 return this->targetPointer == actualObj->targetPointer &&
                        this->targetObject == actualObj->targetObject &&
                        this->fieldId == actualObj->fieldId &&
@@ -170,6 +165,7 @@ namespace DRCHECKER {
             }
             return false;
         }
+        */
 
         /*std::ostream& operator<<(std::ostream& os, const ObjectPointsTo& obj) {
             PointerPointsTo* actualObj = (PointerPointsTo*)(&obj);
@@ -178,6 +174,7 @@ namespace DRCHECKER {
             os << " from field:" << fieldId <<" points to field:"<< dstfieldId <<" of the object, with ID:" << this->targetObject;
             return os;
         }*/
+
         friend llvm::raw_ostream& operator<<(llvm::raw_ostream& os, const PointerPointsTo& obj) {
             PointerPointsTo* actualObj = (PointerPointsTo *)(&obj);
             os << "Pointer:";
@@ -974,18 +971,6 @@ namespace DRCHECKER {
             }
         }
     };
-
-    /*
-    //int PointerPointsTo::isSameObj(AliasObject *o0,AliasObject *o1) const{
-    int isSameObj(AliasObject *o0,AliasObject *o1){
-        if(o0 && o1){
-            if(o0->isOutsideObject() && o1->isOutsideObject()){
-                return o0->targetType == o1->targetType ? 1 : 0;
-            }
-        }
-        return -1;
-    }
-    */
 
     class FunctionLocalVariable : public AliasObject {
     public:
