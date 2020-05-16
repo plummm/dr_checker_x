@@ -714,11 +714,7 @@ namespace DRCHECKER {
                 if (pointerArgs.find(arg_no) != pointerArgs.end()) {
                     AliasObject *obj = new FunctionArgument(currArgVal, currArgVal->getType(), fi->func,
                                                             callSites);
-                    PointerPointsTo *newPointsTo = new PointerPointsTo();
-                    newPointsTo->targetPointer = currArgVal;
-                    newPointsTo->fieldId = 0;
-                    newPointsTo->dstfieldId = 0;
-                    newPointsTo->targetObject = obj;
+                    DRCHECKER::updatePointsToRecord(new InstLoc(currArgVal,nullptr),currPointsTo,obj,0,0);
                     if(taintedArgData.find(arg_no) != taintedArgData.end()) {
                         TaintTag *currTag = new TaintTag(0,currArgVal,false);
                         TaintFlag *currFlag = new TaintFlag(new InstLoc(currArgVal,nullptr), true);
@@ -726,9 +722,6 @@ namespace DRCHECKER {
                         //currFlag->instructionTrace.push_back(fi->func->getEntryBlock().getFirstNonPHIOrDbg());
                         obj->taintAllFields(currFlag);
                     }
-                    std::set<PointerPointsTo *> *newPointsToSet = new std::set<PointerPointsTo *>();
-                    newPointsToSet->insert(newPointsToSet->end(), newPointsTo);
-                    (*currPointsTo)[currArgVal] = newPointsToSet;
                 } else {
                     assert(taintedArgData.find(arg_no) == taintedArgData.end());
                 }

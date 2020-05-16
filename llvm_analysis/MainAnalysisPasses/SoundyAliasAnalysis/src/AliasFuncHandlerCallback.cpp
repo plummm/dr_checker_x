@@ -62,13 +62,8 @@ namespace DRCHECKER {
         targetObj->taintAllFieldsWithTag(tf);
         targetObj->is_taint_src = true;
 
-        PointerPointsTo *newPointsTo = new PointerPointsTo();
-        newPointsTo->fieldId = 0;
-        newPointsTo->dstfieldId = 0;
-        newPointsTo->propogatingInst = propInst;
-        newPointsTo->targetObject = targetObj;
-        newPointsTo->targetPointer = &callInst;
-        std::set<PointerPointsTo*>* newPointsToInfo = new std::set<PointerPointsTo*>();
+        PointerPointsTo *newPointsTo = new PointerPointsTo(&callInst,0,targetObj,0,propInst,false);
+        std::set<PointerPointsTo*> *newPointsToInfo = new std::set<PointerPointsTo*>();
         newPointsToInfo->insert(newPointsToInfo->end(), newPointsTo);
         return newPointsToInfo;
 

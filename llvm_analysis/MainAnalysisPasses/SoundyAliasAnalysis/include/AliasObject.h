@@ -60,7 +60,9 @@ namespace DRCHECKER {
         InstLoc *propogatingInst;
         //Whether this pto record is a weak update (e.g. the original dst pointer points to multiple locations in multiple objects,
         //so we are not sure whether this pto will be for sure updated for a certain object field at the 'propogatingInst').
-        bool is_weak = true;
+        //NOTE that this concept is only useful when updating the object fieldPointsTo (i.e. for address-taken llvm objects), while for top-level variables (e.g. %x),
+        //when we update its pto record we always know which top-level variable is to be updated (i.e. always a strong update).
+        bool is_weak = false;
         //For customized usage.
         //E.g. when processing GEP, sometimes we may convert all indices into a single offset and skip "processGEPMultiDimension", use this flag to indicate this.
         int flag = 0;
@@ -79,6 +81,14 @@ namespace DRCHECKER {
             this->propogatingInst = srcObjPointsTo->propogatingInst;
             this->is_weak = srcObjPointsTo->is_weak;
             this->flag = 0;
+        }
+
+        ObjectPointsTo(long fieldId, AliasObject *targetObject, long dstfieldId, InstLoc *propogatingInst = nullptr, bool is_Weak = false) {
+            this->fieldId = fieldId;
+            this->targetObject = targetObject;
+            this->dstfieldId = dstfieldId;
+            this->propogatingInst = propogatingInst;
+            this->is_Weak = is_Weak;
         }
 
         virtual ObjectPointsTo* makeCopy() {
@@ -136,6 +146,12 @@ namespace DRCHECKER {
         PointerPointsTo(PointerPointsTo *srcPointsTo): ObjectPointsTo(srcPointsTo) {
             this->targetPointer = srcPointsTo->targetPointer;
         }
+
+        PointerPointsTo(Value *targetPointer, long fieldId, AliasObject *targetObject, long dstfieldId, 
+                        InstLoc *propogatingInst = nullptr, bool is_Weak = false): 
+                        ObjectPointsTo(fieldId, targetObject, dstfieldId, propogatingInst, is_Weak) {
+                            this->targetPointer = targetPointer;
+                        }
 
         PointerPointsTo() {
 
@@ -432,18 +448,14 @@ namespace DRCHECKER {
         //and this pto points to field 0 of "dstObject".
         //NOTE: currently this is only invoked in the initial global object setup phase (e.g. need to make gv0->f0 point to gv1)
         //TODO: consider to replace more "updateFieldPointsTo" invocation to this when applicable, to simplify the codebase.
-        void addObjectToFieldPointsTo(long fieldId, AliasObject *dstObject, InstLoc *propagatingInstr = nullptr) {
+        void addObjectToFieldPointsTo(long fieldId, AliasObject *dstObject, InstLoc *propagatingInstr = nullptr, bool is_weak = false) {
 #ifdef DEBUG_UPDATE_FIELD_POINT
             dbgs() << "addObjectToFieldPointsTo() for: " << InstructionUtils::getTypeStr(this->targetType) << " | " << fieldId;
             dbgs() << " Host Obj ID: " << (const void*)this << "\n";
 #endif
             if(dstObject != nullptr) {
                 std::set<PointerPointsTo*> dstPointsTo;
-                PointerPointsTo *newPointsTo = new PointerPointsTo();
-                newPointsTo->propogatingInst = propagatingInstr;
-                newPointsTo->fieldId = fieldId;
-                newPointsTo->dstfieldId = 0;
-                newPointsTo->targetObject = dstObject;
+                PointerPointsTo *newPointsTo = new PointerPointsTo(nullptr,fieldId,dstObject,0,propagatingInstr,is_weak);
                 dstPointsTo.insert(newPointsTo);
                 this->updateFieldPointsTo(fieldId,&dstPointsTo,propagatingInstr);
                 //We can now delete the allocated objects since "updateFieldPointsTo" has made a copy.
@@ -836,14 +848,7 @@ namespace DRCHECKER {
                 dbgs() << "AliasObject::handleSpecialFieldPointTo(): Handle the list_head case: set the prev and next properly..\n";
                 dbgs() << "AliasObject::handleSpecialFieldPointTo(): hobj: " << (const void*)this << " pobj: " << (const void*)pobj << " fid: " << fid << "\n";
 #endif
-                std::set<PointerPointsTo*> dstPointsTo;
-                PointerPointsTo *newPointsToObj = new PointerPointsTo();
-                newPointsToObj->propogatingInst = targetInstr;
-                newPointsToObj->targetObject = this;
-                newPointsToObj->fieldId = 1-fid;
-                newPointsToObj->dstfieldId = 0;
-                dstPointsTo.insert(newPointsToObj);
-                pobj->updateFieldPointsTo(1-fid,&dstPointsTo,targetInstr);
+                pobj->addObjectToFieldPointsTo(1-fid,this,targetInstr,false);
                 return 1;
             }
             return 0;
@@ -1217,7 +1222,7 @@ namespace DRCHECKER {
     //thus this method is basically for the internal use (e.g. in multi-dimension GEP, or in fetchPointToObjects()).
     extern OutsideObject* createOutsideObj(Type *ty, bool taint, std::set<TaintFlag*> *existingTaints);
 
-    extern int updatePointsToRecord(Value *p, std::map<Value*,std::set<PointerPointsTo*>*> *currPointsTo, AliasObject *newObj, long fid = 0, long dfid = 0);
+    extern int updatePointsToRecord(InstLoc *vloc, std::map<Value*,std::set<PointerPointsTo*>*> *currPointsTo, AliasObject *newObj, long fid = 0, long dfid = 0);
 
     //hz: A helper method to create and (taint) a new OutsideObject according to a given pointer value (possibly an IR).
     //The arg "currPointsTo" is the current global point-to state.
@@ -1237,11 +1242,6 @@ namespace DRCHECKER {
 
     //Given 2 field types and their distance (in bits), return a list of candidate struct types.
     extern std::vector<CandStructInf*> *getStructFrom2Fields(DataLayout *dl, Type *ty0, std::string& n0, Type *ty1, std::string& n1, long bitoff, Module *mod);
-
-    //hz: this method is mainly designed for the very common "container_of()" usage in the kernel,
-    //we try to infer the host obj (i.e. the container) of the arg "obj" and either get (if it's already embedded in a known host obj)
-    //or create its host object.
-    extern PointerPointsTo *getOrCreateHostObj(AliasObject *obj);
 
     //This function assumes that "v" is a i8* srcPointer of a single-index GEP and it points to the "bitoff" inside an object of "ty",
     //our goal is to find out the possible container objects of the target object of "ty" (the single-index GEP aims to locate a field

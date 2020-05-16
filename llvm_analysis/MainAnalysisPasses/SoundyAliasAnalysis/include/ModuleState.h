@@ -366,12 +366,8 @@ namespace DRCHECKER {
                     toRet = new GlobalObject(globalVariable, baseType->getContainedType(0));
                 }
 
-                PointerPointsTo *pointsToObj = new PointerPointsTo();
-                pointsToObj->targetObject = toRet;
-                pointsToObj->fieldId = pointsToObj->dstfieldId = 0;
                 //hz: since this is the pre-set pto for gv, there is no calling context. 
-                pointsToObj->propogatingInst = new InstLoc(globalVariable,nullptr);
-                pointsToObj->targetPointer = globalVariable;
+                PointerPointsTo *pointsToObj = new PointerPointsTo(globalVariable, 0, toRet, 0, new InstLoc(globalVariable,nullptr), false);
                 newPointsTo->insert(newPointsTo->end(), pointsToObj);
                 assert(GlobalState::globalVariables.find(globalVariable) == GlobalState::globalVariables.end());
                 GlobalState::globalVariables[globalVariable] = newPointsTo;
@@ -399,11 +395,7 @@ namespace DRCHECKER {
             if(!currFunction->isDeclaration()) {
                 std::set<PointerPointsTo *> *newPointsTo = new std::set<PointerPointsTo *>();
                 GlobalObject *glob = new GlobalObject(currFunction);
-                PointerPointsTo *pointsToObj = new PointerPointsTo();
-                pointsToObj->targetObject = glob;
-                pointsToObj->fieldId = pointsToObj->dstfieldId = 0;
-                pointsToObj->propogatingInst = new InstLoc(currFunction,nullptr);
-                pointsToObj->targetPointer = currFunction;
+                PointerPointsTo *pointsToObj = new PointerPointsTo(currFunction, 0, glob, 0, new InstLoc(currFunction,nullptr), false);
                 newPointsTo->insert(newPointsTo->end(), pointsToObj);
 
                 GlobalState::globalVariables[currFunction] = newPointsTo;

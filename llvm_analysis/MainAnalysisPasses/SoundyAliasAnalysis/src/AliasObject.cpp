@@ -101,7 +101,6 @@ namespace DRCHECKER {
                 expObjTy = expFieldTy->getPointerElementType();
             }
         }
-        bool hasObjects = false;
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
         fetchPointsToObjects_log(srcfieldId, dstObjects, targetInstr, create_arg_obj);
 #endif
@@ -115,6 +114,7 @@ namespace DRCHECKER {
             srcfieldId = 0;
             //}
         }
+        bool hasObjects = false;
         if (this->pointsTo.find(srcfieldId) != this->pointsTo.end()) {
             for (ObjectPointsTo *obj : this->pointsTo[srcfieldId]) {
                 if (obj->fieldId == srcfieldId && obj->targetObject) {
@@ -127,7 +127,7 @@ namespace DRCHECKER {
                     //dbgs() << "AliasObject::fetchPointsToObjects: isHeapLocation: " << (obj->targetObject && obj->targetObject->isHeapLocation()) << " dstField: " << obj->dstfieldId;
                     //dbgs() << " expObjTy: " << InstructionUtils::getTypeStr(expObjTy) << "\n";
 #endif
-                    if (obj->dstfieldId == 0 && obj->targetObject && obj->targetObject->isHeapLocation() && 
+                    if (obj->dstfieldId == 0 && obj->targetObject->isHeapLocation() && 
                         expObjTy && dyn_cast<CompositeType>(expObjTy) && obj->targetObject->targetType != expObjTy) 
                     {
 #ifdef DEBUG_CHANGE_HEAPLOCATIONTYPE
@@ -241,18 +241,8 @@ namespace DRCHECKER {
             hostObj->getPossibleMemberFunctions(targetInstr, dyn_cast<FunctionType>(real_ty), hostObj->targetType, fid, candidateFuncs);
             for (Function *func : candidateFuncs) {
                 GlobalObject *newObj = new GlobalObject(func);
-
                 //Update points-to
-                std::set<PointerPointsTo*> dstPointsTo;
-                PointerPointsTo *newPointsToObj = new PointerPointsTo();
-                newPointsToObj->propogatingInst = currInst;
-                newPointsToObj->targetObject = newObj;
-                newPointsToObj->fieldId = fid;
-                newPointsToObj->dstfieldId = 0;
-                //TODO: newPointsToObj->targetPointer may not need be set since "pointsTo" will only contain "ObjectPointsTo" type that doesn't have targetPointer.
-                dstPointsTo.insert(newPointsToObj);
-                hostObj->updateFieldPointsTo(fid,&dstPointsTo,currInst);
-
+                hostObj->addObjectToFieldPointsTo(fid,newObj,currInst,false);
                 dstObjects.insert(dstObjects.end(), std::make_pair(0, newObj));
             }
 #endif
@@ -274,18 +264,7 @@ namespace DRCHECKER {
                 hostObj->handleSpecialFieldPointTo(newObj,fid,currInst);
 
                 //Update points-to
-                std::set<PointerPointsTo*> dstPointsTo;
-                PointerPointsTo *newPointsToObj = new PointerPointsTo();
-                newPointsToObj->propogatingInst = currInst;
-                newPointsToObj->targetObject = newObj;
-                newPointsToObj->fieldId = fid;
-                // this is the field of the newly created object to which
-                // new points to points to
-                newPointsToObj->dstfieldId = 0;
-                //TODO: newPointsToObj->targetPointer may not need be set since "pointsTo" will only contain "ObjectPointsTo" type that doesn't have targetPointer.
-                dstPointsTo.insert(newPointsToObj);
-                //NOTE: if we reach here, then there must be no point-to records for this "fid" yet, so we can directly use updateFieldPointsTo to do a strong update.
-                hostObj->updateFieldPointsTo(fid,&dstPointsTo,currInst);
+                hostObj->addObjectToFieldPointsTo(fid,newObj,currInst,false);
 
                 dstObjects.insert(dstObjects.end(), std::make_pair(0, newObj));
             }
@@ -516,15 +495,18 @@ namespace DRCHECKER {
         return newObj;
     }
 
-    int updatePointsToRecord(Value *p, std::map<Value*,std::set<PointerPointsTo*>*> *currPointsTo, AliasObject *newObj, long fid, long dfid) {
+    //NOTE: this function is used to setup the pto record of a Value to its newly created dummy object, so there must be no existing pto
+    //records for this value before, otherwise we don't need to create dummy obj for it.
+    int updatePointsToRecord(InstLoc *vloc, std::map<Value*,std::set<PointerPointsTo*>*> *currPointsTo, AliasObject *newObj, long fid, long dfid) {
+        Value *p = nullptr;
+        if (vloc) {
+            p = vloc->inst;
+        }
         if (!newObj || !p) {
             return 0;
         }
-        PointerPointsTo *newPointsTo = new PointerPointsTo();
-        newPointsTo->targetPointer = p;
-        newPointsTo->fieldId = fid;
-        newPointsTo->dstfieldId = dfid;
-        newPointsTo->targetObject = newObj;
+        //NOTE: default is_Weak setting (i.e. strong update) is ok for top-level vars.
+        PointerPointsTo *newPointsTo = new PointerPointsTo(p,fid,newObj,dfid,vloc,false);
         newObj->pointersPointsTo.insert(newObj->pointersPointsTo.end(),newPointsTo);
         //Set up point-to records in the global state.
         if (currPointsTo) {
@@ -574,7 +556,7 @@ namespace DRCHECKER {
         //All outside objects are generated automatically.
         newObj->auto_generated = true;
         //Set up point-to records inside the AliasObject.
-        updatePointsToRecord(p,currPointsTo,newObj);
+        updatePointsToRecord(vloc,currPointsTo,newObj);
         //Need taint?
         if (taint) {
             if (existingTaints && !existingTaints->empty()) {
@@ -977,58 +959,7 @@ namespace DRCHECKER {
         return cands;
     }
 
-    PointerPointsTo *getOrCreateHostObj(AliasObject *obj) {
-        if (!obj) {
-            return nullptr;
-        }
-#ifdef DEBUG_CREATE_HOST_OBJ
-        dbgs() << "getOrCreateHostObj(): element obj: " << InstructionUtils::getTypeStr(obj->targetType) << "\n";
-#endif
-        PointerPointsTo *pto = new PointerPointsTo();
-        //Is this an embedded object in a known host object?
-        if (obj->parent) {
-#ifdef DEBUG_CREATE_HOST_OBJ
-            dbgs() << "getOrCreateHostObj(): There exists parent object from the record.\n";
-#endif
-            pto->targetObject = obj->parent;
-            pto->dstfieldId = obj->parent_field;
-            return pto;
-        }
-        Type *ty0 = obj->targetType;
-        if (!ty0) {
-            return nullptr;
-        }
-        /*
-        //It's not embedded in any known object, but we can still do some inferences here, consider a very common case:
-        //the kernel linked list mechanism will embed a "list_head" struct into every host object which needs to be linked,
-        //we may have "list_head" A embedded in host A and "list_head" B pointed from "list_head" A, though we don't have
-        //any records regarding B's host object, we can still infer its host object type (same as host A) and create a dummy
-        //object.
-        if (!obj->pointsFrom.empty()) {
-            for (auto &x : obj->pointsFrom) {
-                AliasObject *prev = x.first;
-                if (!prev) {
-                    continue;
-                }
-                //TODO: currently we only consider one layer's points-from, maybe we need more..
-                if (InstructionUtils::same_types(prev->targetType,obj->targetType)) {
-                    if (prev->parent && prev->parent->targetType) {
-                        AliasObject *hobj = DRCHECKER::createHostObj(obj,prev->parent->targetType,prev->parent_field);
-                        if (!hobj) {
-                            continue;
-                        }
-                        pto->targetObject = hobj;
-                        pto->dstfieldId = prev->parent_field;
-                        return pto;
-                    }
-                }
-            }
-        }
-        */
-        return nullptr;
-    }
-
-    //A typical and common scenario in which we need to call "getOrCreateHostObj()" is that in a "GEP i8 *ptr, index" IR the "ptr" points to
+    //A typical and common scenario in which we need to call this is that in a "GEP i8 *ptr, index" IR the "ptr" points to
     //a certain object but is converted to i8*. then the "index" calculates a pointer pointing outside this object...
     //To find the host obj, what we want to do is to iterate over all struct types in the current module, then find the correct type(s)
     //that has properly distanced field types that matches both the base "ptr" and the pointer type produced by the "GEP" (we need to

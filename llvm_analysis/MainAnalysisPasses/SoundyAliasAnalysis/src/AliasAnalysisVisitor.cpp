@@ -25,6 +25,7 @@ namespace DRCHECKER {
 
     //hz: A helper method to create and (taint) a new OutsideObject.
     OutsideObject* AliasAnalysisVisitor::createOutsideObj(Value *p, bool taint) {
+        InstLoc *vloc = new InstLoc(p,this->currFuncCallSites);
         std::map<Value *, std::set<PointerPointsTo*>*> *currPointsTo = this->currState.getPointsToInfo(this->currFuncCallSites);
         //Can we get a same-typed object from the global cache (generated when analyzing another entry function)?
         //NOTE: there are multiple places in the code that create a new OutsideObject, but we onlyd do this multi-entry cache mechanism here,
@@ -34,7 +35,7 @@ namespace DRCHECKER {
             OutsideObject *obj = DRCHECKER::getSharedObjFromCache(p,p->getType()->getPointerElementType());
             if (obj) {
                 //We need to bind the shared object w/ current inst.
-                DRCHECKER::updatePointsToRecord(p,currPointsTo,obj);
+                DRCHECKER::updatePointsToRecord(vloc,currPointsTo,obj);
                 return obj;
             }
         }
@@ -43,7 +44,6 @@ namespace DRCHECKER {
         if (taint) {
             existingTaints = TaintUtils::getTaintInfo(this->currState,this->currFuncCallSites,p);
         }
-        InstLoc *vloc = new InstLoc(p,this->currFuncCallSites);
         OutsideObject *robj = DRCHECKER::createOutsideObj(vloc, currPointsTo, taint, existingTaints);
         if (robj) {
             DRCHECKER::addToSharedObjCache(robj);
@@ -343,12 +343,7 @@ namespace DRCHECKER {
 #endif
             AliasObject *newObj = this->createEmbObj(hostObj,dstField,srcPointer);
             if(newObj){
-                PointerPointsTo *newPointsToObj = new PointerPointsTo();
-                newPointsToObj->propogatingInst = new InstLoc(propInstruction,this->currFuncCallSites);
-                newPointsToObj->fieldId = 0;
-                newPointsToObj->targetPointer = resPointer;
-                newPointsToObj->targetObject = newObj;
-                newPointsToObj->dstfieldId = fieldId;
+                PointerPointsTo *newPointsToObj = new PointerPointsTo(resPointer,0,newObj,fieldId,new InstLoc(propInstruction,this->currFuncCallSites),false);
                 newPointsToInfo->insert(newPointsToInfo->begin(), newPointsToObj);
             }else{
 #ifdef DEBUG_GET_ELEMENT_PTR
@@ -566,15 +561,7 @@ std::set<PointerPointsTo*>* AliasAnalysisVisitor::mergePointsTo(std::set<Value*>
     if (targetObjects.size() > 0) {
         std::set<PointerPointsTo*>* toRetPointsTo = new std::set<PointerPointsTo*>();
         for(auto currItem: targetObjects) {
-            PointerPointsTo* currPointsToObj = new PointerPointsTo();
-            currPointsToObj->targetPointer = targetInstruction;
-            if(targetPtr != nullptr) {
-                currPointsToObj->targetPointer = targetPtr;
-            }
-            currPointsToObj->targetObject = currItem.second;
-            currPointsToObj->dstfieldId = currItem.first;
-            currPointsToObj->fieldId = 0;
-            currPointsToObj->propogatingInst = new InstLoc(targetInstruction,this->currFuncCallSites);
+            PointerPointsTo* currPointsToObj = new PointerPointsTo(targetPtr ? targetPtr : targetInstruction, 0, currItem.second, currItem.first, new InstLoc(targetInstruction,this->currFuncCallSites), false);
             toRetPointsTo->insert(toRetPointsTo->begin(), currPointsToObj);
         }
         return toRetPointsTo;
@@ -601,12 +588,7 @@ std::set<PointerPointsTo*>* AliasAnalysisVisitor::copyPointsToInfo(Instruction *
     if(targetObjects.size() > 0) {
         std::set<PointerPointsTo*>* toRetPointsTo = new std::set<PointerPointsTo*>();
         for(auto currItem: targetObjects) {
-            PointerPointsTo* currPointsToObj = new PointerPointsTo();
-            currPointsToObj->targetPointer = srcInstruction;
-            currPointsToObj->targetObject = currItem.second;
-            currPointsToObj->dstfieldId = currItem.first;
-            currPointsToObj->fieldId = 0;
-            currPointsToObj->propogatingInst = new InstLoc(srcInstruction,this->currFuncCallSites);
+            PointerPointsTo* currPointsToObj = new PointerPointsTo(srcInstruction, 0, currItem.second, currItem.first, new InstLoc(srcInstruction,this->currFuncCallSites), false);
             toRetPointsTo->insert(toRetPointsTo->begin(), currPointsToObj);
         }
         return toRetPointsTo;
@@ -635,12 +617,7 @@ void AliasAnalysisVisitor::visitAllocaInst(AllocaInst &I) {
         return;
     }
     AliasObject *targetObj = new FunctionLocalVariable(I, this->currFuncCallSites);
-    PointerPointsTo *newPointsTo = new PointerPointsTo();
-    newPointsTo->fieldId = 0;
-    newPointsTo->dstfieldId = 0;
-    newPointsTo->propogatingInst = new InstLoc(&I,this->currFuncCallSites);
-    newPointsTo->targetObject = targetObj;
-    newPointsTo->targetPointer = &I;
+    PointerPointsTo *newPointsTo = new PointerPointsTo(&I, 0, targetObj, 0, new InstLoc(&I,this->currFuncCallSites), false);
     std::set<PointerPointsTo*>* newPointsToInfo = new std::set<PointerPointsTo*>();
     newPointsToInfo->insert(newPointsToInfo->end(), newPointsTo);
 #ifdef DEBUG_ALLOCA_INSTR
@@ -1227,12 +1204,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
                 }
                 //The "newPto" will be the point-to record after we process the 1st dimension.
                 //By default it will the same as the original point-to.
-                PointerPointsTo *newPto = new PointerPointsTo();
-                newPto->propogatingInst = new InstLoc(propInst,this->currFuncCallSites);
-                newPto->fieldId = 0;
-                newPto->targetPointer = I;
-                newPto->targetObject = currPto->targetObject;
-                newPto->dstfieldId = currPto->dstfieldId;
+                PointerPointsTo *newPto = new PointerPointsTo(I, 0, currPto->targetObject, currPto->dstfieldId, new InstLoc(propInst,this->currFuncCallSites), false);
                 //Type match in the object parent/embed hierarchy.
                 bool ty_match = matchPtoTy(basePointeeTy,newPto);
                 if (newPto->inArray(basePointeeTy)) {
@@ -1592,7 +1564,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
         std::set<std::pair<long,AliasObject*>> finalObjects;
         finalObjects.clear();
         InstLoc *propInst = new InstLoc(&I,this->currFuncCallSites);
-        for(const std::pair<long, AliasObject*> &currObjPair:targetObjects) {
+        for(const std::pair<long, AliasObject*> &currObjPair : targetObjects) {
             // fetch objects that could be pointed by the field.
             // if this object is a function argument then
             // dynamically try to create an object, if we do not have any object
@@ -1612,12 +1584,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
             // Create new pointsTo set and add all objects of srcPointsTo
             std::set<PointerPointsTo*>* newPointsToInfo = new std::set<PointerPointsTo*>();
             for(auto currPto:finalObjects) {
-                PointerPointsTo *newPointsToObj = new PointerPointsTo();
-                newPointsToObj->targetPointer = &I;
-                newPointsToObj->propogatingInst = new InstLoc(&I,this->currFuncCallSites);
-                newPointsToObj->targetObject = currPto.second;
-                newPointsToObj->fieldId = 0;
-                newPointsToObj->dstfieldId = currPto.first;
+                PointerPointsTo *newPointsToObj = new PointerPointsTo(&I, 0, currPto.second, currPto.first, new InstLoc(&I,this->currFuncCallSites), false);
                 newPointsToInfo->insert(newPointsToInfo->end(), newPointsToObj);
             }
             // Just save the newly created set as points to set for this instruction.
@@ -1921,10 +1888,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
 
             std::set<PointerPointsTo*> targetElements;
             for(auto a:srcDrefObjects) {
-                PointerPointsTo *newRel = new PointerPointsTo();
-                newRel->dstfieldId = a.first;
-                newRel->targetObject = a.second;
-                newRel->propogatingInst = new InstLoc(&I,this->currFuncCallSites);
+                PointerPointsTo *newRel = new PointerPointsTo(nullptr, 0, a.second, a.first, new InstLoc(&I,this->currFuncCallSites), false);
                 targetElements.insert(newRel);
             }
 
@@ -1991,12 +1955,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
                 if (arg_no == -1) {
                     //this means the function return value should point to the newly created file struct.
                     std::set<PointerPointsTo*> *newPointsToInfo = new std::set<PointerPointsTo*>();
-                    PointerPointsTo *pto = new PointerPointsTo();
-                    pto->targetObject = newObj;
-                    pto->fieldId = 0;
-                    pto->dstfieldId = 0;
-                    pto->propogatingInst = propInst;
-                    pto->targetPointer = &I;
+                    PointerPointsTo *pto = new PointerPointsTo(&I, 0, newObj, 0, propInst, false);
                     newPointsToInfo->insert(pto);
                     this->updatePointsToObjects(&I, newPointsToInfo);
                     continue;
