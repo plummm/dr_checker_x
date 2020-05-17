@@ -88,7 +88,8 @@ namespace DRCHECKER {
             this->targetObject = targetObject;
             this->dstfieldId = dstfieldId;
             this->propogatingInst = propogatingInst;
-            this->is_Weak = is_Weak;
+            this->is_weak = is_weak;
+            this->flag = 0;
         }
 
         virtual ObjectPointsTo* makeCopy() {
@@ -947,11 +948,16 @@ namespace DRCHECKER {
             return -1;
         }
 
-        void updateFieldPointsTo(long srcfieldId, std::set<PointerPointsTo*>* dstPointsTo, InstLoc *propogatingInstr);
+        //NOTE: "is_weak" by default is "-1", this means whether it's a weak update is decided by "is_weak" field of each PointerPointsTo in "dstPointsTo",
+        //in some cases, the arg "is_weak" can be set to 0 (strong update) or 1 (weak update) to override the "is_weak" field in "dstPointsTo".
+        //NOTE: this function will make a copy of "dstPointsTo" and will not do any modifications to "dstPointsTo", the caller is responsible to free
+        //"dstPointsTo" if necessary.
+        void updateFieldPointsTo(long srcfieldId, std::set<PointerPointsTo*>* dstPointsTo, InstLoc *propogatingInstr, int is_weak = -1);
 
     private:
 
-        void updateFieldPointsTo_do(long srcfieldId, std::set<PointerPointsTo*>* dstPointsTo, InstLoc *propogatingInstr);
+        //NOTE: the arg "is_weak" has the same usage as updateFieldPointsTo().
+        void updateFieldPointsTo_do(long srcfieldId, std::set<PointerPointsTo*>* dstPointsTo, InstLoc *propogatingInstr, int is_weak = -1);
 
         FieldTaint* getFieldTaint(long srcfieldId) {
             for(auto currFieldTaint:taintedFields) {

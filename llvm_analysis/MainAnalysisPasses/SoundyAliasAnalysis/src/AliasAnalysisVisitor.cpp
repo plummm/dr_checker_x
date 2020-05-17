@@ -222,8 +222,11 @@ namespace DRCHECKER {
 #ifdef DEBUG_UPDATE_POINTSTO
             dbgs() << " #existingPointsTo: " << existingPointsTo->size() << "\n";
 #endif
-            //Deduplication.
             for(PointerPointsTo *currPointsTo: *newPointsToInfo) {
+                // Some basic sanity check.
+                if (!currPointsTo || !currPointsTo->targetObject) {
+                    continue;
+                }
                 // for each points to, see if we already have that information, if yes, ignore it.
                 if(std::find_if(existingPointsTo->begin(), existingPointsTo->end(), [currPointsTo,dbg,this](const PointerPointsTo *n) {
                     return this->isPtoDuplicated(currPointsTo,n,dbg);
@@ -274,7 +277,9 @@ namespace DRCHECKER {
         std::map<Value *, std::set<PointerPointsTo*>*>* targetPointsToMap = this->currState.getPointsToInfo(this->currFuncCallSites);
         //Value *strippedPtr = srcPointer->stripPointerCasts();
         return targetPointsToMap != nullptr &&
-               targetPointsToMap->find(srcPointer) != targetPointsToMap->end();
+               targetPointsToMap->find(srcPointer) != targetPointsToMap->end() &&
+               (*targetPointsToMap)[srcPointer] &&
+               (*targetPointsToMap)[srcPointer]->size();
     }
 
     //In this version, we assume that "srcPointsTo" points to an embedded struct in a host struct.
@@ -382,7 +387,7 @@ namespace DRCHECKER {
         //call this makePointsToCopy().
         Type *basePointerType = (gep ? gep->getPointerOperand()->getType() : nullptr);
         Type *basePointToType = (basePointerType ? basePointerType->getPointerElementType() : nullptr);
-        for(PointerPointsTo *currPointsToObj : *srcPointsTo) {
+        for (PointerPointsTo *currPointsToObj : *srcPointsTo) {
             //Try to match the pto w/ the GEP base pointer.
             PointerPointsTo *pto = currPointsToObj->makeCopyP();
             this->matchPtoTy(basePointToType,pto);
@@ -1667,119 +1672,52 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
         }
 #endif
         */
-        if(hasPointsToObjects(targetValue)) {
-
-            // Get the src points to information.
-            std::set<PointerPointsTo *> *srcPointsTo = getPointsToObjects(targetValue);
-
-            if(!hasPointsToObjects(targetPointer)) {
-                targetPointer = targetPointer->stripPointerCasts();
-            }
-            // Get the dst points to information.
-            std::set<PointerPointsTo *> *dstPointsTo = getPointsToObjects(targetPointer);
-#ifdef STRICT_STORE
-
-            assert(dstPointsTo != nullptr);
-#endif
-            if(dstPointsTo == nullptr) {
+        // Get the src points to information.
+        std::set<PointerPointsTo*> *srcPointsTo = getPointsToObjects(targetValue);
+        if (!srcPointsTo || srcPointsTo->empty()) {
+            //The src to store doesn't point to anything, maybe this is because the src is a scalar instead of a pointer,
+            //anyway no need to process this store inst any more since what we are doing is a point-to analysis.
 #ifdef DEBUG_STORE_INSTR
-                dbgs() << "Trying to store something into pointer, which does not point to anything\n";
+            dbgs() << "visitStoreInst(): src does not point to anything: " << InstructionUtils::getValueStr(targetValue) << "; Ignoring.\n";
 #endif
-                return;
-            }
-
-
-            // we need to create new points to information.
-            std::set<PointerPointsTo *> *newPointsToInfo = new std::set<PointerPointsTo *>();
-            newPointsToInfo->insert(dstPointsTo->begin(), dstPointsTo->end());
-
-            //hz: "newPointsToInfo: is where we need to store into.
-            if (newPointsToInfo->size() <= 1) {
-                if (newPointsToInfo->size() == 1) {
-                    //TargetPointer only has one point-to record.
+            //TODO: can we ignore the timing info since this is an early return?
+            return;
+        }
+        //Get the dst points-to info.
+        if(!hasPointsToObjects(targetPointer)) {
+            targetPointer = targetPointer->stripPointerCasts();
+        }
+        std::set<PointerPointsTo *> *dstPointsTo = getPointsToObjects(targetPointer);
+        if(dstPointsTo == nullptr || dstPointsTo->empty()) {
 #ifdef DEBUG_STORE_INSTR
-                    dbgs() << "There is only 1 point-to record for the TargetPointer, a strong update will happen if #fieldPointsTo <= 1.\n";
-#endif
-                    PointerPointsTo *dstPointsToObject = *(newPointsToInfo->begin());
-                    // Basic sanity
-                    if(!((dstPointsToObject->targetPointer == targetPointer ||
-                                dstPointsToObject->targetPointer == targetPointer->stripPointerCasts()) &&
-                            dstPointsToObject->fieldId == 0)) {
-                        dbgs() << "We're going to crash in AliasAnalysisVisitor::visitStoreInst() - strong update:( ...\n";
-                        dbgs() << "Inst: " << InstructionUtils::getValueStr(&I) << "\n";
-                        dbgs() << "dstPointsToObject->targetPointer: " << InstructionUtils::getValueStr(dstPointsToObject->targetPointer) << "\n";
-                        dbgs() << "targetPointer: " << InstructionUtils::getValueStr(targetPointer) << "\n";
-                        dbgs() << "targetPointer->stripPointerCasts(): " << InstructionUtils::getValueStr(targetPointer->stripPointerCasts()) << "\n";
-                        dbgs() << (dstPointsToObject->targetPointer == targetPointer) << " | " << (dstPointsToObject->targetPointer == targetPointer->stripPointerCasts()) << "\n";
-                        dbgs() << "dstPointsToObject->fieldId: " << dstPointsToObject->fieldId << "\n";
-                    }
-                    assert((dstPointsToObject->targetPointer == targetPointer ||
-                                dstPointsToObject->targetPointer == targetPointer->stripPointerCasts()) &&
-                            dstPointsToObject->fieldId == 0);
-
-                    //OK, we need to change this points to.
-                    PointerPointsTo *newDstPointsToObject = (PointerPointsTo *) dstPointsToObject->makeCopy();
-
-                    // OK, now we got the target object to which the pointer points to.
-                    // We are trying to store a pointer(*) into an object field
-
-                    InstLoc *propInst = new InstLoc(&I,this->currFuncCallSites);
-                    newDstPointsToObject->targetObject->performUpdate(newDstPointsToObject->dstfieldId,
-                            srcPointsTo, propInst);
-
-                    // Now insert
-                    newPointsToInfo->clear();
-                    newPointsToInfo->insert(newPointsToInfo->begin(), newDstPointsToObject);
-                } else {
-                    // This is impossible.
-                    // we are trying to store a value into pointer and the pointer
-                    // cannot point to any object???
-#ifdef DEBUG_STORE_INSTR
-                    errs() << "Trying to store a value into a pointer, which does not point to any object.\n";
+            dbgs() << "Trying to store something into pointer, which does not point to anything\n";
 #endif
 #ifdef STRICT_STORE
-                    assert(false);
+            assert("Null dstPointsTo set in visitStoreInst()" && false);
 #endif
-                }
-
-            } else {
-                //Ok, this pointer can point to multiple objects
-                //Perform weak update for each of the dst pointer points to
-#ifdef DEBUG_STORE_INSTR
-                dbgs() << "Performing weak update since there are multiple point-to for the targetPointer..\n";
-#endif
-                InstLoc *propInst = new InstLoc(&I,this->currFuncCallSites);
-                newPointsToInfo->clear();
-                for (PointerPointsTo *currPointsTo: *dstPointsTo) {
-                    PointerPointsTo *newPointsToObj = (PointerPointsTo *) currPointsTo->makeCopy();
-                    //Basic Sanity
-                    if(!(newPointsToObj->targetPointer == targetPointer && newPointsToObj->fieldId == 0)) {
-                        dbgs() << "We're going to crash in AliasAnalysisVisitor::visitStoreInst() - weak update:( ...\n";
-                        dbgs() << "Inst: " << InstructionUtils::getValueStr(&I) << "\n";
-                        dbgs() << "newPointsToObj->targetPointer: " << InstructionUtils::getValueStr(newPointsToObj->targetPointer) << "\n";
-                        dbgs() << "targetPointer: " << InstructionUtils::getValueStr(targetPointer) << "\n";
-                        dbgs() << (newPointsToObj->targetPointer == targetPointer) << "\n";
-                        dbgs() << "newPointsToObj->fieldId: " << newPointsToObj->fieldId << "\n";
-                    }
-                    assert(newPointsToObj->targetPointer == targetPointer && newPointsToObj->fieldId == 0);
-                    // perform weak update
-                    newPointsToObj->targetObject->performWeakUpdate(newPointsToObj->dstfieldId, srcPointsTo, propInst);
-                    newPointsToInfo->insert(newPointsToInfo->end(), newPointsToObj);
-                }
+            //TODO: can we ignore the timing info since this is an early return?
+            return;
+        }
+        //NOTE: when processing the store inst we do *not* need to update the pto info for the "targetPointer" - it will
+        //always point to the same location(s). What we really need to update is the pto info of the memory location(s) pointed
+        //to by the "targetPointer" (i.e. "targetPointer" is a 2nd order pointer).
+        int is_weak = dstPointsTo->size() > 1 ? 1 : 0;
+        InstLoc *propInst = new InstLoc(&I,this->currFuncCallSites);
+        for (PointerPointsTo *currPointsTo: *dstPointsTo) {
+            //Basic Sanity
+            if(!((currPointsTo->targetPointer == targetPointer || currPointsTo->targetPointer == targetPointer->stripPointerCasts()) &&
+                currPointsTo->fieldId == 0)) {
+                dbgs() << "We're going to crash in AliasAnalysisVisitor::visitStoreInst() :( ...\n";
+                dbgs() << "Inst: " << InstructionUtils::getValueStr(&I) << "\n";
+                dbgs() << "currPointsTo->targetPointer: " << InstructionUtils::getValueStr(currPointsTo->targetPointer) << "\n";
+                dbgs() << "targetPointer: " << InstructionUtils::getValueStr(targetPointer) << "\n";
+                dbgs() << "targetPointer->stripPointerCasts(): " << InstructionUtils::getValueStr(targetPointer->stripPointerCasts()) << "\n";
+                dbgs() << (currPointsTo->targetPointer == targetPointer) << " | " << (currPointsTo->targetPointer == targetPointer->stripPointerCasts()) << "\n";
+                dbgs() << "currPointsTo->fieldId: " << currPointsTo->fieldId << "\n";
+                assert(false);
             }
-            this->updatePointsToObjects(targetPointer, newPointsToInfo);
-        } else {
-            // OK, we are storing something, which have no points to information.
-            // Check if destination is not a pointer to pointer, which means
-            // src value should have some points to information.
-            // tl;dr This branch should never be entered.
-            // Ensure that we are not storing into pointer to pointer
-            if(!this->inside_loop) {
-#ifdef DEBUG_STORE_INSTR
-                errs() << "Source pointer does not point to any thing: " << InstructionUtils::getValueStr(targetValue) << "; Ignoring.\n";
-#endif
-            }
-            //assert(!I.getPointerOperand()->getType()->getContainedType(0)->isPointerTy());
+            // perform update
+            currPointsTo->targetObject->updateFieldPointsTo(currPointsTo->dstfieldId, srcPointsTo, propInst, is_weak);
         }
 #ifdef TIMING
         dbgs() << "[TIMING] AliasAnalysisVisitor::visitStoreInst(): ";
@@ -1864,12 +1802,11 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
             dstOperand = dstOperand->stripPointerCasts();
         }
 
-
         // get points to information.
         std::set<PointerPointsTo*>* srcPointsTo = getPointsToObjects(srcOperand);
         std::set<PointerPointsTo*>* dstPointsTo = getPointsToObjects(dstOperand);
 
-        if(srcPointsTo != nullptr && dstPointsTo != nullptr) {
+        if(srcPointsTo != nullptr && srcPointsTo->size() && dstPointsTo != nullptr && dstPointsTo->size()) {
             // get all src objects.
 
             std::set<std::pair<long, AliasObject*>> srcAliasObjects;
@@ -1899,7 +1836,8 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
 #ifdef DEBUG_CALL_INSTR
                 dbgs() << "Adding:" << targetElements.size() << "elements to the fieldid:" << a->dstfieldId << "\n";
 #endif
-                a->targetObject->performWeakUpdate(a->dstfieldId, &targetElements, propInst);
+                //If there are multiple destinations we should perform a weak update, otherwise strong.
+                a->targetObject->updateFieldPointsTo(a->dstfieldId, &targetElements, propInst, dstPointsTo->size() > 1 ? 1 : 0);
             }
 
             for(auto a:targetElements) {
@@ -1966,7 +1904,8 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
                 Value *arg = I.getArgOperand(arg_no);
                 if (arg && hasPointsToObjects(arg)) {
                     std::set<PointerPointsTo*>* srcPointsTo = getPointsToObjects(arg);
-                    newObj->performWeakUpdate(fid,srcPointsTo,propInst);
+                    //We're sure that the "newObj" field pto will be updated, so it's a strong update.
+                    newObj->updateFieldPointsTo(fid,srcPointsTo,propInst,0);
                 }
             }
             DRCHECKER::addToSharedObjCache(newObj);

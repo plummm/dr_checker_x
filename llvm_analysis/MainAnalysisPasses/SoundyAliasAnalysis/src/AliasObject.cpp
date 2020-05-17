@@ -275,7 +275,7 @@ namespace DRCHECKER {
         }
     }
 
-    void AliasObject::updateFieldPointsTo(long srcfieldId, std::set<PointerPointsTo*>* dstPointsTo, InstLoc *propogatingInstr) {
+    void AliasObject::updateFieldPointsTo(long srcfieldId, std::set<PointerPointsTo*>* dstPointsTo, InstLoc *propogatingInstr, int is_weak) {
         /***
          * Add all objects in the provided pointsTo set to be pointed by the provided srcFieldID
          */
@@ -306,7 +306,7 @@ namespace DRCHECKER {
                     //NOTE: this is actually getOrCreateEmbObj()
                     AliasObject *eobj = createEmbObj(this,srcfieldId);
                     if (eobj) {
-                        return eobj->updateFieldPointsTo(0,dstPointsTo,propogatingInstr);
+                        return eobj->updateFieldPointsTo(0,dstPointsTo,propogatingInstr,is_weak);
                     }else {
                         //TODO: What should we do here...
 #ifdef DEBUG_UPDATE_FIELD_POINT
@@ -321,22 +321,22 @@ namespace DRCHECKER {
             dbgs() << "updateFieldPointsTo(): null type info for this host obj!\n";
 #endif
         }
-        this->updateFieldPointsTo_do(srcfieldId,dstPointsTo,propogatingInstr);
+        this->updateFieldPointsTo_do(srcfieldId,dstPointsTo,propogatingInstr,is_weak);
     }
 
     //Do the real job of field pto update.
-    void AliasObject::updateFieldPointsTo_do(long srcfieldId, std::set<PointerPointsTo*> *dstPointsTo, InstLoc *propogatingInstr) {
+    void AliasObject::updateFieldPointsTo_do(long srcfieldId, std::set<PointerPointsTo*> *dstPointsTo, InstLoc *propogatingInstr, int is_weak) {
         if (!dstPointsTo || !dstPointsTo->size()) {
             return;
         }
         //preprocessing: deduplication and unify "fieldId" and "propInst".
-        std::set<PointerPointsTo*> unique_pto;
+        std::set<ObjectPointsTo*> unique_pto;
         for (PointerPointsTo *pto : *dstPointsTo) {
             if (!pto) {
                 continue;
             }
             bool unique = true;
-            for (PointerPointsTo *t : unique_pto) {
+            for (ObjectPointsTo *t : unique_pto) {
                 //NOTE: pto in "dstPointsTo" should all share the same "propogatingInstr", so we only need to care about their dst obj and field here.
                 if (!t->pointsToSameObject(pto)) {
                     //Obviously different.
@@ -352,22 +352,28 @@ namespace DRCHECKER {
                 break;
             }
             if (unique) {
+                ObjectPointsTo *npto = pto->makeCopy();
                 //Before inserting the pto to the unique set, force set its "fieldId" and "propInst" to be correct.
-                pto->fieldId = srcfieldId;
-                pto->propogatingInst = propogatingInstr;
+                npto->fieldId = srcfieldId;
+                npto->propogatingInst = propogatingInstr;
                 //Insert
-                unique_pto.insert(pto);
+                unique_pto.insert(npto);
             }
         }
         if (!unique_pto.size()) {
             return;
         }
+        //honor the "is_weak" arg here.
+        if (is_weak >= 0) {
+            for (ObjectPointsTo *pto : unique_pto) {
+                pto->is_weak = !!is_weak;
+            }
+        }
         //Ok, now try to insert records in "unique_pto" to field points-to.
-        //The pto records we should insert in the end (e.g. we may have duplicated records in existing field pto).
-        std::set<PointerPointsTo*> to_add;
-        //The existing pto records we should remove (e.g. overridden by new pto due to CFG relationship like post-dominator).
-        std::set<ObjectPointsTo*> to_del;
-        for (PointerPointsTo *pto : unique_pto) {
+        //to_add: the pto records we should insert in the end (e.g. we may have duplicated records in existing field pto).
+        //to_del: The existing pto records we should remove (e.g. overridden by new pto due to CFG relationship like post-dominator).
+        std::set<ObjectPointsTo*> to_add, to_del;
+        for (ObjectPointsTo *pto : unique_pto) {
             //Kill every existing pto we can, then decide whether we need to add current new pto.
             bool is_dup = false;
             for (ObjectPointsTo *e : this->pointsTo[srcfieldId]) {
@@ -400,6 +406,9 @@ namespace DRCHECKER {
             }
             if (!is_dup) {
                 to_add.insert(pto);
+            }else {
+                //Note that each pto record in "unique_pto" is our newly created copy in this func, so we need to free the memory.
+                delete(pto);
             }
         }
         //Do the actual deletion and insertion.
@@ -415,18 +424,16 @@ namespace DRCHECKER {
 #endif
             delete(x);
         }
-        for (PointerPointsTo *x : to_add) {
-            ObjectPointsTo *newPointsTo = x->makeCopy();
-            this->pointsTo[srcfieldId].insert(newPointsTo);
+        for (ObjectPointsTo *x : to_add) {
+            this->pointsTo[srcfieldId].insert(x);
             //Don't forget to update the "pointsFrom" records of the affected objects.
             if (x->targetObject) {
-                x->targetObject->addPointsFrom(this,newPointsTo);
+                x->targetObject->addPointsFrom(this,x);
             }
 #ifdef DEBUG_UPDATE_FIELD_POINT
             dbgs() << "updateFieldPointsTo_do(): add point-to: ";
-            newPointsTo->print(dbgs());
+            x->print(dbgs());
 #endif
-            delete(x);
         }
 #ifdef DEBUG_UPDATE_FIELD_POINT
         dbgs() << "updateFieldPointsTo_do(): After updates: " << this->countObjectPointsTo(srcfieldId) << "\n"; 
