@@ -3,7 +3,6 @@
 //
 
 #include "CFGUtils.h"
-#include "InstructionUtils.h"
 
 namespace DRCHECKER {
 
@@ -236,6 +235,183 @@ namespace DRCHECKER {
         }
         return false;
 
+    }
+
+    llvm::DominatorTree *BBTraversalHelper::getDomTree(llvm::Function* pfunc) { 
+        //The mapping from one Func to its dominator tree;
+        static std::map<llvm::Function*,llvm::DominatorTree*> domMap;
+        if (!pfunc) {
+            return nullptr;
+        }
+        if (domMap.find(pfunc) == domMap.end()) {
+            llvm::DominatorTree *pdom = new llvm::DominatorTree(*pfunc);
+            domMap[pfunc] = pdom;
+        }
+        return domMap[pfunc];
+    }
+
+    llvm::PostDominatorTree *BBTraversalHelper::getPostDomTree(llvm::Function* pfunc) { 
+        //The mapping from one Func to its post-dominator tree;
+        static std::map<llvm::Function*,llvm::PostDominatorTree*> postDomMap;
+        if (!pfunc) {
+            return nullptr;
+        }
+        if (postDomMap.find(pfunc) == postDomMap.end()) {
+            llvm::PostDominatorTree *pdom = new llvm::PostDominatorTree(*pfunc);
+            postDomMap[pfunc] = pdom;
+        }
+        return postDomMap[pfunc];
+    }
+
+    //Some code are borrowed from llvm 11.0, since lower version llvm may not have "dominates()" for two instructions. 
+    bool BBTraversalHelper::instPostDom(Instruction *src, Instruction *end) {
+        if (!end || !src || end->getFunction() != src->getFunction()) {
+            return false;
+        }
+        BasicBlock *bsrc = src->getParent();
+        BasicBlock *bend = end->getParent();
+        if (bsrc != bend) {
+            //
+            Function *func = end->getFunction();
+            llvm::PostDominatorTree *pdom = BBTraversalHelper::getPostDomTree(func);
+            if (!pdom) {
+                return false;
+            }
+            return pdom->dominates(bend,bsrc);
+        }
+        //Ok they are within the same BB, we simply look at their relative order.
+        // PHINodes in a block are unordered.
+        if (isa<PHINode>(src) && isa<PHINode>(end))
+            return false;
+        // Loop through the basic block until we find I1 or I2.
+        BasicBlock::const_iterator I = bsrc->begin();
+        for (; &*I != src && &*I != end; ++I);
+        //If src comes before end in a same BB, then end post-dom src.
+        return &*I == src;
+    }
+
+    void InstLoc::print(raw_ostream &O) {
+        if (this->inst) {
+            //First print the inst.
+            if (dyn_cast<Instruction>(this->inst)) {
+                InstructionUtils::printInst(dyn_cast<Instruction>(this->inst),O);
+            }else {
+                O << InstructionUtils::getValueStr(this->inst) << "\n";
+            }
+            //Then print the calling context by the function names.
+            if (this->ctx && this->ctx->size() > 0) {
+                O << "[";
+                std::string lastFunc;
+                for (Instruction *inst : *(this->ctx)) {
+                    if (inst && inst->getFunction()) {
+                        std::string func = inst->getFunction()->getName().str();
+                        //TODO: self-recursive invocation
+                        if (func != lastFunc) {
+                            O << func << " -> ";
+                            lastFunc = func;
+                        }
+                    }
+                }
+                O << "]\n";
+            }
+        }
+    }
+
+    //Different from the normal post-dom algorithm for two instructions within a same function, here we consider
+    //the post-dom relationship for two InstLoc (i.e. instructions plus their full calling contexts), so if InstLoc A
+    //post-dom InstLoc B, that means all execution flows from InstLoc B will eventually reach InstLoc A w/ its specific
+    //calling contexts.
+    bool InstLoc::postDom(InstLoc *other) {
+        if (!other) {
+            return false;
+        }
+        //(1) First identify the common prefix of the calling contexts, if none, then obviously no post-dom relationship,
+        //if any, then the question is converted to "whether this inst post-dom the call site of 'other' in the common prefix".
+        if (!this->hasCtx()) {
+            //This means current InstLoc is outside of any functions (e.g. a preset global variable), so no way it can post-dominate "other".
+            return false;
+        }
+        int ip = 0;
+        if (other->hasCtx()) {
+            //Both "this" and "other" has some contexts.
+            //NOTE 1: the structure of the calling context is "entry inst -> call site -> entry inst -> call site -> ...", so odd ctx index indicates
+            //a call inst.
+            //NOTE 2: the total size of a calling context must be odd. (i.e. it must end w/ the entry inst of the callee).
+            assert(this->ctx->size() % 2);
+            assert(other->ctx->size() % 2);
+            while (ip < this->ctx->size() && ip < other->ctx->size() && (*(this->ctx))[ip] == (*(other->ctx))[ip] && ++ip);
+            if (ip == 0) {
+                //Both have calling contexts but no common prefix... This means the top-level entry functions are different, no way to post-dom.
+                return false;
+            }
+            //The two calling contexts diverges at a certain point, here we have different situations:
+            //1. They diverge within a same caller.
+            //1.1. "this" takes callee A while "other" takes callee B.
+            //1.2. "this" is just a normal inst within the caller and "other" takes callee B.
+            //1.3. "this" takes callee A while "other" is a normal inst
+            //1.4. both are normal inst
+            //For 1. we need to first see whether "this" post-doms "other" within the common caller, if not return false immediately, otherwise
+            //we need to further inspect the remaining part of "this" calling context to see whether it *must* end w/ this->inst.
+            //2. They diverge at a same call site and take different callees (e.g. an indirect call), in this case "this" cannot post-dom "other".
+            if (ip >= this->ctx->size()) {
+                //This must be case 1.2. or 1.4., since there are no further context for "this", no need for further inspect.
+                Instruction *end = dyn_cast<Instruction>(this->inst);
+                Instruction *src = dyn_cast<Instruction>(other->inst);
+                if (ip < other->ctx->size()) {
+                    src = (*(other->ctx))[ip];
+                }
+                if (!end || !src || end->getFunction() != src->getFunction()) {
+                    //Is this possible?
+#ifdef DEBUG_INTER_PROC_POSTDOM
+                    dbgs() << "InstLoc::postDom(): !end || !src || end->getFunction() != src->getFunction() - 0\n"; 
+#endif
+                    return false;
+                }
+                return BBTraversalHelper::instPostDom(src,end);
+            }
+            if (ip >= other->ctx->size()) {
+                //This must be case 1.3. We may still need to inspect the remaining "this" context.
+                Instruction *src = dyn_cast<Instruction>(other->inst);
+                Instruction *end = dyn_cast<Instruction>((*(this->ctx))[ip]);
+                if (!end || !src || end->getFunction() != src->getFunction()) {
+                    //Is this possible?
+#ifdef DEBUG_INTER_PROC_POSTDOM
+                    dbgs() << "InstLoc::postDom(): !end || !src || end->getFunction() != src->getFunction() - 1\n"; 
+#endif
+                    return false;
+                }
+                if (!BBTraversalHelper::instPostDom(src,end)) {
+                    return false;
+                }
+            }else {
+                //Ok, the common prefix are well contained in both contexts, it may be case 1.1. or 2., we can differentiate them by index oddness. 
+                if (ip % 2) {
+                    //case 2, return false directly.
+                    return false;
+                }
+                //case 1.1., we may still need further inspect.
+                if (!BBTraversalHelper::instPostDom((*(other->ctx))[ip],(*(this->ctx))[ip])) {
+                    return false;
+                }
+            }
+            ++ip;
+        }
+        //(2) Then we need to decide the post-dom relationship between the caller entrance and callee invocation site of each function
+        //in the remaining calling context (beside the common prefix) of "this".
+        //NOTE: at this point "ip" must be the index of an entry inst in "this" calling context.
+        assert(!(ip % 2));
+        assert(ip < this->ctx->size());
+        while (ip + 1 < this->ctx->size()) {
+            if (!BBTraversalHelper::instPostDom((*(this->ctx))[ip],(*(this->ctx))[ip+1])) {
+                return false;
+            }
+            ++ip;
+        }
+        Instruction *end = dyn_cast<Instruction>(this->inst);
+        if (end && !BBTraversalHelper::instPostDom((*(this->ctx))[ip],end)) {
+            return false;
+        }
+        return true;
     }
 
 }

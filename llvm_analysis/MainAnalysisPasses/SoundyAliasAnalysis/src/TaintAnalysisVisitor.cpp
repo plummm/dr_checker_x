@@ -5,7 +5,6 @@
 #include "TaintAnalysisVisitor.h"
 #include "PointsToUtils.h"
 #include "TaintUtils.h"
-#include "CFGUtils.h"
 
 using namespace llvm;
 namespace DRCHECKER {
@@ -54,7 +53,7 @@ namespace DRCHECKER {
     }
 
     std::set<TaintFlag*>* TaintAnalysisVisitor::makeTaintInfoCopy(Value *srcOperand, Instruction *targetInstruction,
-                                                                  std::set<TaintFlag*>* srcTaintInfo,
+                                                                  std::set<TaintFlag*> *srcTaintInfo,
                                                                   std::set<TaintFlag*> *dstTaintInfo) {
         if(srcTaintInfo != nullptr) {
             std::set<TaintFlag *> *newTaintInfo = new std::set<TaintFlag *>();

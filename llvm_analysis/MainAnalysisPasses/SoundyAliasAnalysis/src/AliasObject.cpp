@@ -379,7 +379,11 @@ namespace DRCHECKER {
             for (ObjectPointsTo *e : this->pointsTo[srcfieldId]) {
                 //The kill criteria: current pto is a strong update and it post-dominates an existing pto.
                 if (!pto->is_weak) {
-                    //TODO: ok, it's a strong update, decide whether it post-dominates "e", if so, delete "e" from existing pto set.
+                    //Ok, it's a strong update, decide whether it post-dominates "e", if so, delete "e" from existing pto set.
+                    if (pto->propogatingInst && pto->propogatingInst->postDom(e->propogatingInst)) {
+                        to_del.insert(e);
+                        continue;
+                    }
                 }
                 //Is "e" identical to "pto"?
                 //No need to compare if we already decided it's duplicated.

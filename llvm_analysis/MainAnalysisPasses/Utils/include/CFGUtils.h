@@ -17,12 +17,63 @@
 #include "llvm/IRReader/IRReader.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/IR/Dominators.h"
+#include "llvm/Analysis/PostDominators.h"
+#include "InstructionUtils.h"
 
 using namespace llvm;
 namespace DRCHECKER {
     /***
      *
      */
+#define DEBUG_INTER_PROC_POSTDOM
+
+    // This encodes the information to locate an instruction within a certain call context,
+    // it also provides some utilities like reachability test w/ another instruction.
+    class InstLoc {
+        public:
+        //The llvm inst itself.
+        Value *inst;
+        //The calling context of this inst.
+        std::vector<Instruction*> *ctx;
+
+        InstLoc(Value *inst, std::vector<Instruction*> *ctx) {
+            this->inst = inst;
+            this->ctx = ctx;
+        }
+
+        bool same(InstLoc *other) {
+            if (!other) {
+                return false;
+            }
+            //Compare the llvm inst itself.
+            if (this->inst != other->inst) {
+                return false;
+            }
+            //Compare the calling context of the inst.
+            if (!this->ctx != !other->ctx) {
+                return false;
+            }
+            //shortcut
+            if (this->ctx == other->ctx) {
+                return true;
+            }
+            if (this->ctx && *(this->ctx) != *(other->ctx)) {
+                return false;
+            }
+            return true;
+        }
+
+        bool hasCtx() {
+            return (this->ctx && !this->ctx->empty());
+        }
+
+        void print(raw_ostream &O);
+
+        //Return true if this InstLoc post-dominates the "other" InstLoc.
+        bool postDom(InstLoc *other);
+    };
+
     class BBTraversalHelper {
     public:
         /***
@@ -54,6 +105,19 @@ namespace DRCHECKER {
          * @return true/false depending on whether a path exists or not.
          */
         static bool isReachable(Instruction *startInstr, Instruction *endInstr, std::vector<Instruction*> *callSites);
+
+        static llvm::DominatorTree *getDomTree(llvm::Function*);
+
+        //NOTE: as long as we have the post-dom tree, we can invoke its member function "->dominates()" to decide the
+        //post-dominance relationship of two Insts:
+        //Prototype from the llvm src file:
+        /// Return true if \p I1 dominates \p I2. This checks if \p I2 comes before
+        /// \p I1 if they belongs to the same basic block.
+        /// bool dominates(const Instruction *I1, const Instruction *I2) const;
+        static llvm::PostDominatorTree *getPostDomTree(llvm::Function*);
+
+        //We assume src and end are within the same function.
+        static bool instPostDom(Instruction *src, Instruction *end);
     };
 }
 #endif //PROJECT_CFGUTILS_H

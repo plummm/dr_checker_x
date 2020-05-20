@@ -96,45 +96,6 @@ namespace DRCHECKER {
         void *priv = nullptr;
     };
 
-    // This encodes the information to locate an instruction within a certain call context,
-    // it also provides some utilities like reachability test w/ another instruction.
-    class InstLoc {
-        public:
-        //The llvm inst itself.
-        Value *inst;
-        //The calling context of this inst.
-        std::vector<Instruction*> *ctx;
-
-        InstLoc(Value *inst, std::vector<Instruction*> *ctx) {
-            this->inst = inst;
-            this->ctx = ctx;
-        }
-
-        bool same(InstLoc *other) {
-            if (!other) {
-                return false;
-            }
-            //Compare the llvm inst itself.
-            if (this->inst != other->inst) {
-                return false;
-            }
-            //Compare the calling context of the inst.
-            if (!this->ctx != !other->ctx) {
-                return false;
-            }
-            //shortcut
-            if (this->ctx == other->ctx) {
-                return true;
-            }
-            if (this->ctx && *(this->ctx) != *(other->ctx)) {
-                return false;
-            }
-            return true;
-        }
-
-        void print(raw_ostream &O);
-    };
-
     class InstructionUtils {
         public:
         /***

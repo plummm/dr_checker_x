@@ -14,7 +14,7 @@
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Type.h"
 #include "TaintInfo.h"
-#include "../../Utils/include/InstructionUtils.h"
+#include "../../Utils/include/CFGUtils.h"
 
 using namespace llvm;
 #ifdef DEBUG

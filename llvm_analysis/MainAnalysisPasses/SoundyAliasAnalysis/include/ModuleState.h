@@ -14,7 +14,8 @@
 #include <chrono>
 #include <ctime>
 #include <fstream>
-#include "../../Utils/include/InstructionUtils.h"
+#include "../../Utils/include/CFGUtils.h"
+
 //for cereal serialization
 /*
 #include "cereal/archives/xml.hpp"

@@ -13,7 +13,7 @@
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/ValueSymbolTable.h"
 #include "llvm/Analysis/AliasAnalysis.h"
-#include "../../Utils/include/InstructionUtils.h"
+#include "../../Utils/include/CFGUtils.h"
 #include <vector>
 
 using namespace llvm;
