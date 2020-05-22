@@ -78,6 +78,36 @@ namespace DRCHECKER {
         }
     }
 
+    Type *getLoadedPointeeTy(Instruction *targetInstr) {
+        if (targetInstr && dyn_cast<LoadInst>(targetInstr)) {
+            Type *ptrTy = targetInstr->getType();
+            if (ptrTy->isPointerTy()) {
+                return expFieldTy->getPointerElementType();
+            }
+        }
+        return nullptr;
+    }
+
+    void getLivePtos(std::set<ObjectPointsTo*> *srcPto, InstLoc *loc, std::set<ObjectPointsTo*> *retPto) {
+        if (!srcPto || !retPto) {
+            return;
+        }
+        //Step 1: reachability test - whether a src pto (updated at a certain InstLoc) can reach current location.
+        if (loc) {
+            for (ObjectPointsTo *pto : *srcPto) {
+                if (pto && loc->reachable(pto->propogatingInst)) {
+                    retPto->insert(pto);
+                }
+            }
+        }
+        //Step 2: post-dom test - some pto records may "kill" others due to post-dom relationship.
+        //TODO: do we really need this test here given that we have already done such a test when updating the field pto.
+        //Step 3: de-duplication test. 
+        //TODO: we may not need to do this as well since it's performed at the update time.
+        return;
+    }
+
+
     //An improved version of "fetchPointsToObjects", we need to consider the type of each field.
     void AliasObject::fetchPointsToObjects(long srcfieldId, std::set<std::pair<long, AliasObject*>> &dstObjects,
             InstLoc *currInst, bool create_arg_obj) {
@@ -87,36 +117,27 @@ namespace DRCHECKER {
          * i.e if a field does not point to any object.
          * Automatically generate an object and link it with srcFieldId
          */
-        Instruction *targetInstr = nullptr;
-        if (currInst) {
-            targetInstr = dyn_cast<Instruction>(currInst->inst);
-        }
+        Instruction *targetInstr = currInst ? dyn_cast<Instruction>(currInst->inst) : nullptr;
         //What's the expected type of the fetched point-to object?
-        Type *expFieldTy = nullptr;
-        Type *expObjTy = nullptr;
         //TODO: deal with other types of insts that can invoke "fetchPointsToObjects" in its handler.
-        if (targetInstr && dyn_cast<LoadInst>(targetInstr)) {
-            expFieldTy = targetInstr->getType();
-            if (expFieldTy->isPointerTy()) {
-                expObjTy = expFieldTy->getPointerElementType();
-            }
-        }
+        Type *expObjTy = getLoadedPointeeTy(targetInstr);
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
         fetchPointsToObjects_log(srcfieldId, dstObjects, targetInstr, create_arg_obj);
 #endif
         //Collapse the array/vector into a single element.
-        long org_srcfieldId = srcfieldId;
+        //TODO: index-sensitive array access.
         if (this->targetType && dyn_cast<SequentialType>(this->targetType)) {
-            //if (this->countObjectPointsTo(srcfieldId) == 0) {
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
             dbgs() << "AliasObject::fetchPointsToObjects: the host is an array/vector, now set srcfieldId to 0.\n";
 #endif
             srcfieldId = 0;
-            //}
         }
         bool hasObjects = false;
         if (this->pointsTo.find(srcfieldId) != this->pointsTo.end()) {
-            for (ObjectPointsTo *obj : this->pointsTo[srcfieldId]) {
+            //Decide which pto records are valid at current load site (i.e. the InstLoc "currInst").
+            std::set<ObjectPointsTo*> livePtos;
+            getLivePtos(this->pointsTo[srcfieldId],currInst,&livePtos);
+            for (ObjectPointsTo *obj : livePtos) {
                 if (obj->fieldId == srcfieldId && obj->targetObject) {
                     //We handle a special case here:
                     //Many malloc'ed HeapLocation object can be of the type i8*, while only in the later code the pointer will be converted to a certain struct*,
@@ -161,25 +182,15 @@ namespace DRCHECKER {
         }
         //Below we try to create a dummy object.
         //Get the type of the field for which we want to get the pointee.
-        Type *ety = nullptr;
-        if (!this->targetType) {
-            return;
-        }else if (dyn_cast<CompositeType>(this->targetType)) {
-            //Boundary check
-            if (!InstructionUtils::isIndexValid(this->targetType,srcfieldId)) {
+        int err = 0;
+        Type *ety = this->getFieldTy(srcfieldId,&err);
+        if (!ety) {
+            if (err == 2) {
+                //The requested field id is OOB, sth bad has happended.
                 dbgs() << "!!! fetchPointsToObjects(): srcfieldId OOB!\n";
                 dbgs() << "Below is the info about current AliasObject...\n";
                 fetchPointsToObjects_log(srcfieldId, dstObjects, targetInstr, create_arg_obj);
-                return;
             }
-            ety = dyn_cast<CompositeType>(this->targetType)->getTypeAtIndex(srcfieldId);
-        }else if (srcfieldId == 0) {
-            ety = this->targetType;
-        }else {
-            return;
-        }
-        if (!ety) {
-            //TODO: What can we do here?
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
             dbgs() << "Cannot decide the type of the dst element!\n";
 #endif
@@ -187,8 +198,8 @@ namespace DRCHECKER {
         }
         //Get the pointee type of the dst field.
         //There will be several cases here:
-        //(1) The dst element is a pointer, then we can try to create a dummy obj for it since there are no related records in "pointsTo";
-        //(2) The dst element is an embedded composite, if this is the case we need to recursively extract the first field of it until we get a non-emb-struct field, then we can decide the type of dummy obj to create.
+        //(1) The dst element is a pointer, then we can try to create a dummy obj for it;
+        //(2) The dst element is an embedded composite, if this is the case we need to recursively extract the first field of it until we get a non-composite field, then we can decide the type of dummy obj to create.
         //(3) No type information for the dst element is available, return directly.
         AliasObject *hostObj = this;
         long fid = srcfieldId;
@@ -209,14 +220,14 @@ namespace DRCHECKER {
             fid = 0;
             ety = dyn_cast<CompositeType>(ety)->getTypeAtIndex((unsigned)fid);
         }
-        //It's possible that the embedded object already has the point-to record for field 0, if not, we may need to create the dummy pointee objects.
+        //It's possible that the embedded object already has the point-to record for field 0, if so, we just return the existing pto records.
         if (hostObj != this) {
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
             dbgs() << "fetchPointsToObjects(): recursively fetch the point-to from the embedded composite field.\n"; 
 #endif
             return hostObj->fetchPointsToObjects(fid,dstObjects,currInst,create_arg_obj);
         }
-        //We need to decide the type of the dummy object we want to create..
+        //Decide the type of the dummy object we want to create..
         //NOTE: a non-pointer field can also be converted to a pointer and thus have pointees... 
         Type *real_ty = nullptr;
         if (ety->isPointerTy() && !InstructionUtils::isPrimitivePtr(ety) && !InstructionUtils::isNullCompPtr(ety)) {
@@ -442,30 +453,6 @@ namespace DRCHECKER {
 #ifdef DEBUG_UPDATE_FIELD_POINT
         dbgs() << "updateFieldPointsTo_do(): After updates: " << this->countObjectPointsTo(srcfieldId) << "\n"; 
 #endif
-    }
-
-    Type *ObjectPointsTo::getPointeeTy() {
-        if (!this->targetObject) {
-            return nullptr;
-        }
-        Type *objTy = this->targetObject->targetType;
-        if (!objTy) {
-            return nullptr;
-        }
-        if (dyn_cast<CompositeType>(objTy)) {
-            if (InstructionUtils::isIndexValid(objTy,this->dstfieldId)) {
-                //TODO: when this->dstfieldId is 0, it will be tricky since we're actually not sure whether it points to the host obj itself, or the field 0 in the obj...
-                //For now we return the type of the field 0.
-                return dyn_cast<CompositeType>(objTy)->getTypeAtIndex(this->dstfieldId);
-            }else {
-                //This is a bug...
-                dbgs() << "!!! ObjectPointsTo::getPointeeTy(): invalid dstfieldId, host obj ty: " << InstructionUtils::getTypeStr(objTy);
-                dbgs() << " dstfieldId: " << this->dstfieldId << "\n";
-                //TODO: return the nullptr or the obj type?
-                return nullptr;
-            }
-        }
-        return objTy;
     }
 
     void ObjectPointsTo::print(llvm::raw_ostream& OS) {

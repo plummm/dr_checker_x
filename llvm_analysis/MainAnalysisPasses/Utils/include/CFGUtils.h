@@ -72,6 +72,9 @@ namespace DRCHECKER {
 
         //Return true if this InstLoc post-dominates the "other" InstLoc.
         bool postDom(InstLoc *other);
+
+        //Return true if this is reachable from the "other" InstLoc.
+        bool reachable(InstLoc *other);
     };
 
     class BBTraversalHelper {

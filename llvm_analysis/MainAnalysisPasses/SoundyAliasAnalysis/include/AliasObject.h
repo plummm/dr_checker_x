@@ -118,8 +118,6 @@ namespace DRCHECKER {
             return 1;
         }
 
-        Type *getPointeeTy();
-
         /*virtual std::ostream& operator<<(std::ostream& os, const ObjectPointsTo& obj) {
             os << "Field :" << fieldId << " points to " << dstfieldId <<" of the object, with ID:" << obj.targetObject;
             return os;
@@ -352,65 +350,45 @@ namespace DRCHECKER {
             return true;
         }
 
-        void performStrongUpdate(long srcfieldId, std::set<PointerPointsTo*>* dstPointsTo, InstLoc *propogatingInstr) {
-            /***
-             * Make the field (srcfieldId) of this object point to
-             * any of the objects pointed by dstPointsTo
-             *
-             * This function does strong update, i.e first it removes all points to information
-             * for the field srcfieldId and then adds the new objects into points to set.
-             */
-#ifdef DEBUG_UPDATE_FIELD_POINT
-            dbgs() << "Perform strong update...\n";
-#endif
-            if (!dstPointsTo || dstPointsTo->empty()) {
-                return;
+        //Get the type of a specific field in this object.
+        Type *getFieldTy(long fid, int *err = nullptr) {
+            int r;
+            if (!err) 
+                err = &r;
+            *err = 0;
+            if (!this->targetType) {
+                *err = 1;
+                return nullptr;
             }
-            //Before clearing the field pto records, clear all affected pointsFrom first.
-            if (this->pointsTo.find(srcfieldId) != this->pointsTo.end()) {
-                for (ObjectPointsTo *p : this->pointsTo[srcfieldId]) {
-                    if (p && p->targetObject) {
-                        p->targetObject->erasePointsFrom(this,p);
-                    }
-                    delete(p);
+            Type *ety = this->targetType;
+            if (dyn_cast<CompositeType>(this->targetType)) {
+                //Boundary check
+                if (!InstructionUtils::isIndexValid(this->targetType,fid)) {
+                    *err = 2;
+                    return nullptr;
                 }
-                //Empty the field pto.
-                this->pointsTo[srcfieldId].clear();
+                //TODO: when fid is 0, we're actually not sure whether it points to the host obj itself, or the field 0 in the obj...
+                ety = dyn_cast<CompositeType>(this->targetType)->getTypeAtIndex(fid);
+            }else if (fid) {
+                //This is not a composite obj, so we don't know the field type at the non-zero fid.
+                *err = 3;
+                return nullptr;
             }
-            //Do the normal field pto update.
-            this->updateFieldPointsTo(srcfieldId, dstPointsTo, propogatingInstr);
+            return ety;
         }
 
-        void performWeakUpdate(long srcfieldId, std::set<PointerPointsTo*>* dstPointsTo, InstLoc *propogatingInstr) {
-            /***
-             * Similar to strong update but does weak update.
-             * i.e it does not remove existing points to information of the field srcFieldId
-             */
-#ifdef DEBUG_UPDATE_FIELD_POINT
-            dbgs() << "Perform weak update...\n";
-#endif
-            this->updateFieldPointsTo(srcfieldId, dstPointsTo, propogatingInstr);
-
-        }
-
-        void performUpdate(long srcfieldId, std::set<PointerPointsTo*>* dstPointsTo, InstLoc *propogatingInstr) {
-            /***
-             * Update the pointto information of the field pointed by srcfieldId
-             */
-
-            //Array collapse
-            if (this->targetType && dyn_cast<SequentialType>(this->targetType)) {
-#ifdef DEBUG_UPDATE_FIELD_POINT
-                dbgs() << "performUpdate(): sequential host, set srcfieldId to 0.\n";
-#endif
-                srcfieldId = 0;
+        //Sometimes the field itself can be another embedded struct, this function intends to return all types at a specific field.
+        void getNestedFieldTy(long fid, std::set<Type*> &retSet) {
+            Type *ety = (fid ? this->getFieldTy(fid) : this->targetType);
+            if (ety) {
+                FieldDesc *fd = InstructionUtils::getHeadFieldDesc(ety);
+                if (fd) {
+                    for (Type *t : fd->tys) {
+                        retSet.insert(t);
+                    }
+                }
             }
-            // check if we can perform strong update
-            if (this->countObjectPointsTo(srcfieldId) <= 1) {
-                this->performStrongUpdate(srcfieldId, dstPointsTo, propogatingInstr);
-            } else {
-                this->performWeakUpdate(srcfieldId, dstPointsTo, propogatingInstr);
-            }
+            return;
         }
 
         //We want to get all possible pointee types of a certain field, so we need to inspect the detailed type desc (i.e. embed/parent object hierarchy).
@@ -423,23 +401,7 @@ namespace DRCHECKER {
                     if (!obj->targetObject) {
                         continue;
                     }
-                    long dstfield = obj->dstfieldId;
-                    Type *ty = obj->targetObject->targetType;
-                    if (!ty) {
-                        continue;
-                    }
-                    FieldDesc *hd = nullptr;
-                    if (dstfield == 0) {
-                        hd = InstructionUtils::getHeadFieldDesc(ty);
-                    }else if (dyn_cast<CompositeType>(ty) && InstructionUtils::isIndexValid(ty,(unsigned)dstfield)) {
-                        Type *ety = dyn_cast<CompositeType>(ty)->getTypeAtIndex((unsigned)dstfield);
-                        hd = InstructionUtils::getHeadFieldDesc(ety);
-                    }
-                    if (hd) {
-                        for (Type *t : hd->tys) {
-                            retSet.insert(t);
-                        }
-                    }
+                    obj->targetObject->getNestedFieldTy(obj->dstfieldId,retSet);
                 }
             }
             return;

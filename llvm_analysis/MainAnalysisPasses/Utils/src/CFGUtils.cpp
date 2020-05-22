@@ -234,7 +234,6 @@ namespace DRCHECKER {
             }
         }
         return false;
-
     }
 
     llvm::DominatorTree *BBTraversalHelper::getDomTree(llvm::Function* pfunc) { 
@@ -414,4 +413,61 @@ namespace DRCHECKER {
         return true;
     }
 
+    //Whether "other" can reach "this".
+    bool InstLoc::reachable(InstLoc *other) {
+        if (!other) {
+            return false;
+        }
+        if (!other->hasCtx()) {
+            //This means the "other" is a global var and can reach every inst inside functions.
+            return true;
+        }
+        if (!this->hasCtx()) {
+            //"this" is a global var but "other" isn't, obviously "other" cannot reach "this" reversally.
+            return false;
+        }
+        assert(this->ctx->size() % 2);
+        assert(other->ctx->size() % 2);
+        //Ok, both contexts exist, decide whether "other" can reach "this" from its current context.
+        int ip = 0;
+        while (ip < this->ctx->size() && ip < other->ctx->size() && (*(this->ctx))[ip] == (*(other->ctx))[ip] && ++ip);
+        if (ip == 0) {
+            //Different top-level entry function, not reachable.
+            return false;
+        }
+        //The two calling contexts diverges at a certain point, here we have different situations:
+        //1. They diverge within a same caller.
+        //1.1. "this" takes callee A while "other" takes callee B.
+        //1.2. "this" is just a normal inst within the caller and "other" takes callee B.
+        //1.3. "this" takes callee A while "other" is a normal inst
+        //1.4. both are normal inst
+        //For 1. we need to see whether "this" is reachable from "other" within the common caller, if so return true, otherwise false.
+        //2. They diverge at a same call site and take different callees (e.g. an indirect call), in this case "this" cannot be reached from "other".
+        Instruction *end = nullptr, *src = nullptr;
+        if (ip >= this->ctx->size()) {
+            //Case 1.2. or 1.4.
+            end = dyn_cast<Instruction>(this->inst);
+            src = dyn_cast<Instruction>(other->inst);
+            if (ip < other->ctx->size()) {
+                src = *(other->ctx)[ip];
+            }
+        }else if (ip >= other->ctx->size()) {
+            //Case 1.3.
+            src = dyn_cast<Instruction>(other->inst);
+            end = *(this->ctx)[ip];
+        }else if (ip % 2) {
+            //Case 1.1.
+            src = *(other->ctx)[ip];
+            end = *(this->ctx)[ip];
+        }else {
+            //Case 2.
+            return false;
+        }
+        if (!end || !src || end->getFunction() != src->getFunction()) {
+            //Is this possible?
+            //assert(false);
+            return false;
+        }
+        return isPotentiallyReachable(src,end);
+    }
 }
