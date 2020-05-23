@@ -82,7 +82,7 @@ namespace DRCHECKER {
         if (targetInstr && dyn_cast<LoadInst>(targetInstr)) {
             Type *ptrTy = targetInstr->getType();
             if (ptrTy->isPointerTy()) {
-                return expFieldTy->getPointerElementType();
+                return ptrTy->getPointerElementType();
             }
         }
         return nullptr;
@@ -136,7 +136,7 @@ namespace DRCHECKER {
         if (this->pointsTo.find(srcfieldId) != this->pointsTo.end()) {
             //Decide which pto records are valid at current load site (i.e. the InstLoc "currInst").
             std::set<ObjectPointsTo*> livePtos;
-            getLivePtos(this->pointsTo[srcfieldId],currInst,&livePtos);
+            getLivePtos(&(this->pointsTo[srcfieldId]),currInst,&livePtos);
             for (ObjectPointsTo *obj : livePtos) {
                 if (obj->fieldId == srcfieldId && obj->targetObject) {
                     //We handle a special case here:

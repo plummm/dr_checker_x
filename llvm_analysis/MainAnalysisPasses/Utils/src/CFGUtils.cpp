@@ -449,16 +449,16 @@ namespace DRCHECKER {
             end = dyn_cast<Instruction>(this->inst);
             src = dyn_cast<Instruction>(other->inst);
             if (ip < other->ctx->size()) {
-                src = *(other->ctx)[ip];
+                src = (*(other->ctx))[ip];
             }
         }else if (ip >= other->ctx->size()) {
             //Case 1.3.
             src = dyn_cast<Instruction>(other->inst);
-            end = *(this->ctx)[ip];
+            end = (*(this->ctx))[ip];
         }else if (ip % 2) {
             //Case 1.1.
-            src = *(other->ctx)[ip];
-            end = *(this->ctx)[ip];
+            src = (*(other->ctx))[ip];
+            end = (*(this->ctx))[ip];
         }else {
             //Case 2.
             return false;
