@@ -287,8 +287,8 @@ namespace DRCHECKER {
             dbgs() << "[TIMING] Analysis starts at: ";
             this->printCurTime();
             // Call init functions.
-            //hz: this is a lightweight (i.e. only includes alias analysis) analysis for the init functions, the goal is to set up
-            //some preliminary point-to records used in the real target functions.
+            //hz: this is a lightweight (i.e. only includes alias analysis) analysis for the init functions (e.g. .open and .probe), 
+            //the goal is to set up some preliminary point-to records used in the real target functions.
             if (!skipInit) {
                 std::set<Function*> toAnalyzeInitFunctions;
                 for (FuncInf *fi : targetFuncs) {
@@ -413,17 +413,6 @@ namespace DRCHECKER {
             o_taint.SetBufferSize(5*1024*1024);
             currState.dumpTaintInfo(o_taint);
             o_taint.close();
-
-            //Write the taint info first to a in-mem string, then save it to the file, might be faster.
-            /*
-            std::string str_taint_inf;
-            llvm::raw_string_ostream o_taint(str_taint_inf);
-            currState.dumpTaintInfo(o_taint);
-            std::ofstream outfile;
-            outfile.open("taint_info_" + checkFunctionName);
-            outfile << o_taint.str();
-            outfile.close();
-            */
 
             auto t_end1 = std::chrono::system_clock::now();
             elapsed_seconds = t_end1 - t_end0;

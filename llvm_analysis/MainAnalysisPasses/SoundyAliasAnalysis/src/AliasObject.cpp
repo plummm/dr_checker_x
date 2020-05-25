@@ -107,7 +107,6 @@ namespace DRCHECKER {
         return;
     }
 
-
     //An improved version of "fetchPointsToObjects", we need to consider the type of each field.
     void AliasObject::fetchPointsToObjects(long srcfieldId, std::set<std::pair<long, AliasObject*>> &dstObjects,
             InstLoc *currInst, bool create_arg_obj) {
