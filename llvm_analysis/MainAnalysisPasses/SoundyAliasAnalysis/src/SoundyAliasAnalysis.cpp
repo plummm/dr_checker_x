@@ -43,6 +43,7 @@ namespace DRCHECKER {
 //#define DEBUG_TRAVERSAL_ORDER
 //#define DEBUG_GLOBAL_VARIABLES
 //#define DEBUG_GLOBAL_TAINT
+//
 
 #define NETDEV_IOCTL "NETDEVIOCTL"
 #define READ_HDR "FileRead"
