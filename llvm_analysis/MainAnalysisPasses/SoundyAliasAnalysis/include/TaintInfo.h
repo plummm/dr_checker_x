@@ -311,7 +311,7 @@ namespace DRCHECKER {
                     return false;
                 }
                 //Property (2)
-                if (this->isTainted() != dstTaint->isTainted()){
+                if (this->isTainted() != dstTaint->isTainted()) {
                     return false;
                 }
                 //Property (3):

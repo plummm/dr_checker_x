@@ -222,6 +222,38 @@ namespace DRCHECKER {
         ROS << OS.str();
     }
 
+    void InstructionUtils::printInstJson(Instruction *I, raw_ostream &OS) {
+        static std::map<Instruction*,std::string> InstPrintJsonMap;
+        if (!I){
+            return;
+        }
+        if (InstPrintJsonMap.find(I) != InstPrintJsonMap.end()) {
+            OS << InstPrintJsonMap[I];
+            return;
+        }
+        std::string str;
+        llvm::raw_string_ostream O(str);
+        //
+        O << "\"instr\":\"";
+        O << InstructionUtils::escapeValueString(I) << "\",";
+        O << "\"at_line\":";
+        DILocation *instrLoc = InstructionUtils::getCorrectInstrLocation(I);
+        if(instrLoc != nullptr) {
+            O << instrLoc->getLine() << ",\"at_file\":\"" << InstructionUtils::escapeJsonString(instrLoc->getFilename()) << "\",";
+        } else {
+            O << "-1,";
+        }
+        O << "\"at_func\":";
+        if (I->getFunction()) {
+            O << "\"" << InstructionUtils::escapeJsonString(I->getFunction()->getName()) << "\"";
+        }else {
+            O << "-1";
+        }
+        //NOTE: we will not output a newline here, giving the caller some flexibilities.
+        InstPrintJsonMap[I] = O.str();
+        OS << O.str();
+    }
+
     void InstructionUtils::stripFuncNameSuffix(std::string *fn) {
         if (!fn) {
             return;

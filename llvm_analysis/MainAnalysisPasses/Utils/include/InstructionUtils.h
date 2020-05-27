@@ -160,6 +160,9 @@ namespace DRCHECKER {
         //Print the instruction with detailed src level debug info (e.g. file, line number).
         static void printInst(Instruction *I, raw_ostream &OS);
 
+        //Print the same information as "printInst", but organize these infos in Json format (i.e. key-value pairs).
+        static void printInstJson(Instruction *I, raw_ostream &OS);
+
         //Get a string representation of the instruction, including the str of the inst,bb,func,and module.
         static LOC_INF* getInstStrRep(Instruction *I);
 

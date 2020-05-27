@@ -1,22 +1,20 @@
+# We don't need the bug detectors, so remove them from the build process and save some port time...
+
 include_directories(include/ ../Utils/include ../Customizations/include ../LinuxKernelCustomizations/include
         ../RangeAnalysis/include)
 
 file(GLOB SAA_SRCS
         "src/*.cpp"
-        "src/bug_detectors/*.cpp"
-        "src/bug_detectors/warnings/*.cpp"
         "include/*.h"
-        "include/bug_detectors/*.h"
-        "include/bug_detectors/warnings/*.h"
         )
 
 add_library(SoundyAliasAnalysis MODULE
         # List your source files here.
-        ${SAA_SRCS} src/bug_detectors/InvalidCastDetector.cpp include/bug_detectors/InvalidCastDetector.h include/bug_detectors/warnings/InvalidCastWarning.h src/bug_detectors/warnings/InvalidCastWarning.cpp include/bug_detectors/ImproperTaintedDataUseDetector.h src/bug_detectors/ImproperTaintedDataUseDetector.cpp include/bug_detectors/warnings/ImproperTaintedDataUseWarning.h src/bug_detectors/warnings/ImproperTaintedDataUseWarning.cpp include/bug_detectors/IntegerOverflowDetector.h src/bug_detectors/IntegerOverflowDetector.cpp include/bug_detectors/TaintedLoopBoundDetector.h src/bug_detectors/TaintedLoopBoundDetector.cpp include/bug_detectors/GlobalVariableRaceDetector.h src/bug_detectors/GlobalVariableRaceDetector.cpp)
+        ${SAA_SRCS}) 
 
 add_library(SoundyAliasAnalysisStatic STATIC
         # List your source files here.
-        ${SAA_SRCS} src/bug_detectors/InvalidCastDetector.cpp include/bug_detectors/InvalidCastDetector.h include/bug_detectors/warnings/InvalidCastWarning.h src/bug_detectors/warnings/InvalidCastWarning.cpp include/bug_detectors/ImproperTaintedDataUseDetector.h src/bug_detectors/ImproperTaintedDataUseDetector.cpp include/bug_detectors/warnings/ImproperTaintedDataUseWarning.h src/bug_detectors/warnings/ImproperTaintedDataUseWarning.cpp include/bug_detectors/IntegerOverflowDetector.h src/bug_detectors/IntegerOverflowDetector.cpp include/bug_detectors/TaintedLoopBoundDetector.h src/bug_detectors/TaintedLoopBoundDetector.cpp include/bug_detectors/GlobalVariableRaceDetector.h src/bug_detectors/GlobalVariableRaceDetector.cpp)
+        ${SAA_SRCS}) 
 
 
 target_link_libraries(SoundyAliasAnalysis Utils Customizations LinuxKernelCustomizations RangeAnalysis)

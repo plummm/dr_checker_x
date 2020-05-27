@@ -470,4 +470,56 @@ namespace DRCHECKER {
         }
         return isPotentiallyReachable(src,end);
     }
+
+    void printInstlocJson(InstLoc *inst, llvm::raw_ostream &O) {
+        if (!inst) {
+            return;
+        }
+        if (inst->inst && dyn_cast<Instruction>(inst->inst)) {
+            InstructionUtils::printInstJson(dyn_cast<Instruction>(inst->inst),O);
+        }else {
+            O << "\"instr\":\"" << InstructionUtils::escapeValueString(inst->inst) << "\"";
+        }
+        //Each inst in the trace also has its own calling context...
+        if (inst->hasCtx()) {
+            O << ",\"ctx\":[";
+            bool comma = false;
+            for (Instruction *ci : *(inst->ctx)) {
+                if (ci) {
+                    if (comma) {
+                        O << ",";
+                    }
+                    O << "{";
+                    InstructionUtils::printInstJson(ci,O);
+                    O << "}";
+                    comma = true;
+                }
+            }
+            O << "]";
+        }
+        return;
+    }
+
+    void printInstlocTraceJson(std::vector<InstLoc*> *instTrace, llvm::raw_ostream &O) {
+        if (!instTrace || !instTrace->size()) {
+            O << "[]";
+            return;
+        }
+        O << "[";
+        bool comma = false;
+        for (InstLoc *inst : *instTrace) {
+            if (!inst) {
+                continue;
+            }
+            if (comma) {
+                O << ",";
+            }
+            O << "{";
+            printInstlocJson(inst,O);
+            O << "}";
+            comma = true;
+        }
+        O << "]";
+        return;
+    }
 }

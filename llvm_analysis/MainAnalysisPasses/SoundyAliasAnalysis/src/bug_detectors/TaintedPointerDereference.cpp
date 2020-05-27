@@ -22,9 +22,7 @@ namespace DRCHECKER {
             return;
         }
 #ifdef DEBUG_LOAD_INSTR
-        dbgs() << TAG << " Visiting Load Instruction:";
-        I.print(dbgs());
-        dbgs() << "\n";
+        dbgs() << TAG << " Visiting Load Instruction: " << InstructionUtils::getValueStr(&I) << "\n";
 #endif
         Value *srcPointer = I.getPointerOperand();
         std::set<TaintFlag*> *srcTaintInfo = TaintUtils::getTaintInfo(this->currState,
@@ -66,9 +64,7 @@ namespace DRCHECKER {
             return;
         }
 #ifdef DEBUG_STORE_INSTR
-        dbgs() << TAG << " Visiting Store Instruction:";
-        I.print(dbgs());
-        dbgs() << "\n";
+        dbgs() << TAG << " Visiting Store Instruction: " << InstructionUtils::getValueStr(&I) << "\n";
 #endif
         Value *srcPointer = I.getPointerOperand();
         std::set<TaintFlag*> *srcTaintInfo = TaintUtils::getTaintInfo(this->currState,
@@ -114,9 +110,7 @@ namespace DRCHECKER {
 
 
 #ifdef DEBUG_STORE_INSTR
-        dbgs() << TAG << " Visiting GetElementPtr Instruction:";
-        I.print(dbgs());
-        dbgs() << "\n";
+        dbgs() << TAG << " Visiting GetElementPtr Instruction: " << InstructionUtils::getValueStr(&I) << "\n";
 #endif
         std::set<TaintFlag*> resultTaintFlags;
         for(unsigned i=0; i<I.getNumOperands();i++) {
