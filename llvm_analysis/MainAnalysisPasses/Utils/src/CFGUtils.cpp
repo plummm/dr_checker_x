@@ -500,7 +500,7 @@ namespace DRCHECKER {
         return;
     }
 
-    void printInstlocTraceJson(std::vector<InstLoc*> *instTrace, llvm::raw_ostream &O) {
+    void printInstlocTraceJson(const std::vector<InstLoc*> *instTrace, llvm::raw_ostream &O) {
         if (!instTrace || !instTrace->size()) {
             O << "[]";
             return;

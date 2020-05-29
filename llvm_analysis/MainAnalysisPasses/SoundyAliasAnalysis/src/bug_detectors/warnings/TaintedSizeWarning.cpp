@@ -14,7 +14,7 @@ namespace DRCHECKER {
         O << "  Call Context:";
         for(Instruction *currCallSite : this->callSiteTrace) {
             O << "   ";
-            InstructionUtils::printInst(currCallSite);
+            InstructionUtils::printInst(currCallSite,O);
         }
     }
 

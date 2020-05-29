@@ -25,7 +25,7 @@ namespace DRCHECKER {
         Value *targetObj;
 
         KernelUninitMemoryLeakWarning(Value *targetObj, std::vector<Instruction*> *callTrace,
-        std::vector<Instruction*> *srcTrace, std::string warningMsg,
+        std::vector<InstLoc*> *srcTrace, std::string warningMsg,
         Instruction *targetInstr, std::string found_by): VulnerabilityWarning(callTrace, srcTrace, warningMsg,
                                                                               targetInstr, found_by) {
             // Just make sure, we are leaking something.

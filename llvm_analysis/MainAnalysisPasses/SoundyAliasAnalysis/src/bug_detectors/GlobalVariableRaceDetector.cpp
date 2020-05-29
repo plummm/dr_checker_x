@@ -23,8 +23,10 @@ namespace DRCHECKER {
         }
         if(usedGlobals.size() != 0) {
             std::string warningMsg = "Trying to use a global variable without locking.";
+            //NOTE: such a warning doesn't involve a taint trace information since the detection itself is not based on the taint analysis.
+            std::vector<InstLoc*> instTrace;
             VulnerabilityWarning *currWarning = new VulnerabilityWarning(this->currFuncCallSites1,
-                                                                         this->currFuncCallSites1,
+                                                                         &instTrace,
                                                                          warningMsg, &I,
                                                                          TAG);
             reportedFunctions.insert(I.getParent()->getParent());

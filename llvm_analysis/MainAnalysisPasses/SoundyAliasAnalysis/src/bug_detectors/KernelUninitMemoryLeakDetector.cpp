@@ -83,7 +83,7 @@ namespace DRCHECKER {
 
                         std::string warningMsg = "Potentially leaking memory on kernel stack (via padded fields) "
                                 "into user space";
-                        std::vector<Instruction *> instructionTrace;
+                        std::vector<InstLoc*> instructionTrace;
 
                         VulnerabilityWarning *currWarning = new KernelUninitMemoryLeakWarning(currObj->getObjectPtr(),
                                                                                               this->currFuncCallSites1,

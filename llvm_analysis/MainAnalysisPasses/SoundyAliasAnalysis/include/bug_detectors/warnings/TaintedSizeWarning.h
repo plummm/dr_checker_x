@@ -23,7 +23,7 @@ namespace DRCHECKER {
     class TaintedSizeWarning: public VulnerabilityWarning {
     public:
         TaintedSizeWarning(std::vector<Instruction*> *callTrace,
-                           std::vector<Instruction*> *srcTrace, std::string warningMsg,
+                           std::vector<InstLoc*> *srcTrace, std::string warningMsg,
                            Instruction *targetInstr, std::string found_by): VulnerabilityWarning(callTrace,
                                                                                                  srcTrace,
                                                                                                  warningMsg,

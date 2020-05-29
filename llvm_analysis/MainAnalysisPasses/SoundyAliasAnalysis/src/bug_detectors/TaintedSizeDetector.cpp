@@ -30,13 +30,13 @@ namespace DRCHECKER {
                     sizeArg = I.getArgOperand(2);
                 }
                 // get the range of the size argument.
-                Range sizeRange = this->currState.getRange(sizeArg);
+                RangeAnalysis::Range sizeRange = this->currState.getRange(sizeArg);
                 // check, if the Range is not constant, if not.
                 // raise a warning.
                 if(!sizeRange.isBounded() || sizeRange.getLower() != sizeRange.getUpper()) {
                     std::string warningMsg = "Non-constant size used in copy_to(or from)_user function.";
                     // no instruction trace.
-                    std::vector<Instruction *> instructionTrace;
+                    std::vector<InstLoc*> instructionTrace;
 
                     VulnerabilityWarning *currWarning = new TaintedSizeWarning(this->currFuncCallSites,
                                                                                &instructionTrace,

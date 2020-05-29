@@ -70,13 +70,15 @@ namespace DRCHECKER {
                     }
 
                     // OK. Raise warning for each of the objects in allInterestingObjects.
-                    for (AliasObject *currObj:allInterestingObjects) {
+                    for (AliasObject *currObj : allInterestingObjects) {
                         std::string warningMsg = "Constant size used to copy into object allocated "
                                                  "with non-constant size";
                         if(this->currState.is_read_write_function) {
                             warningMsg = "Constant size used in file read/write function";
                         }
-                        std::vector<Instruction *> instructionTrace;
+                        //NOTE: this warning has nothing to do w/ the taint analysis, so no need to include the taint trace
+                        //actually we don't have taint trace information in this detector as well...
+                        std::vector<InstLoc*> instructionTrace;
 
                         VulnerabilityWarning *currWarning = new ImproperTaintedDataUseWarning(
                                                                 currObj->getObjectPtr(),
@@ -155,7 +157,8 @@ namespace DRCHECKER {
                                 const ConstantDataArray *currA = dyn_cast<ConstantDataArray>(currConst);
                                 if(currA->getAsString().find("%s") != std::string::npos) {
                                     std::string warningMsg = "%s used in sscanf";
-                                    std::vector<Instruction *> instructionTrace;
+                                    //NOTE: this warning has nothing to do w/ taint anlysis, no need to provide the taint trace.
+                                    std::vector<InstLoc*> instructionTrace;
                                     VulnerabilityWarning *currWarning = new VulnerabilityWarning(
                                             this->currFuncCallSites1,
                                             &instructionTrace,
@@ -187,7 +190,7 @@ namespace DRCHECKER {
                         if(currTaintSet != nullptr) {
                             for(auto currTaint:*currTaintSet) {
                                 std::string warningMsg = "Tainted Data used in risky function";
-                                std::vector<Instruction *> &instructionTrace = currTaint->instructionTrace;
+                                std::vector<InstLoc*> &instructionTrace = currTaint->instructionTrace;
                                 VulnerabilityWarning *currWarning = new ImproperTaintedDataUseWarning(
                                         currPtTo->targetObject->getObjectPtr(),
                                         this->currFuncCallSites1,
