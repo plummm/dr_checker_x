@@ -107,16 +107,19 @@ namespace DRCHECKER {
             O << "\"all_contexts\":[\n";
             for (auto warn_iter = targetState.allVulnWarnings.begin(); warn_iter != targetState.allVulnWarnings.end();
                  warn_iter++) {
+                AnalysisContext *targetContext = warn_iter->first;
+                std::set<VulnerabilityWarning *> *allWarnings = warn_iter->second;
+                if (!targetContext || !allWarnings || !allWarnings->size()) {
+                    continue;
+                }
                 bool addin_comma = false;
                 if(addout_comma) {
                     O << ",\n";
                 }
                 O << "{";
-                AnalysisContext *targetContext = warn_iter->first;
-                std::set<VulnerabilityWarning *> *allWarnings = warn_iter->second;
                 O << "\"num_warnings\":" << allWarnings->size() << ",\n";
                 // O << "At Calling Context:";
-                targetContext->printContext(O);
+                targetContext->printContextJson(O);
                 O << ",";
 
                 //O << "Found:" << allWarnings->size() << " warnings.\n";
@@ -153,35 +156,21 @@ namespace DRCHECKER {
             O << "\"all_instrs\":[\n";
             for (auto warn_iter = targetState.warningsByInstr.begin(); warn_iter != targetState.warningsByInstr.end();
                  warn_iter++) {
+                Instruction *currInstr = warn_iter->first;
+                std::set<VulnerabilityWarning *> *allWarnings = warn_iter->second;
+                if (!currInstr || !allWarnings || !allWarnings->size()) {
+                    continue;
+                }
                 bool addin_comma = false;
                 if(addout_comma) {
                     O << ",\n";
                 }
                 O << "{";
-                Instruction *currInstr = warn_iter->first;
-                std::set<VulnerabilityWarning *> *allWarnings = warn_iter->second;
                 O << "\"num_warnings\":" << allWarnings->size() << ",\n";
-
-                O << "\"at\":\"";
-                O << InstructionUtils::escapeValueString(currInstr) << "\",";
-                O << "\"at_line\":";
-                DILocation *instrLoc = nullptr;
-                //instrLoc = this->target_instr->getDebugLoc().get();
-                instrLoc = InstructionUtils::getCorrectInstrLocation(currInstr);
-                if(instrLoc != nullptr) {
-                    //O << ", src line:" << instrLoc->getLine() << " file:" << instrLoc->getFilename();
-                    O << instrLoc->getLine() << ",\"at_file\":\"" << InstructionUtils::escapeJsonString(instrLoc->getFilename()) << "\",";
-
-                } else {
-                    //O << ", No line";
-                    O << "-1,";
-                }
-                O << "\"at_func\":\"" << InstructionUtils::escapeJsonString(currInstr->getFunction()->getName()) << "\",";
-
-                //O << "Found:" << allWarnings->size() << " warnings.\n";
+                InstructionUtils::printInstJson(currInstr,O);
                 long currWarningNo = 1;
-                O << "\"warnings\":[\n";
-                for (VulnerabilityWarning *currWarning:*(allWarnings)) {
+                O << ",\"warnings\":[\n";
+                for (VulnerabilityWarning *currWarning : *(allWarnings)) {
                     if(addin_comma) {
                         O << ",\n";
                     }

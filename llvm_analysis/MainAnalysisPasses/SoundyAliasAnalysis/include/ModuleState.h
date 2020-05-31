@@ -60,6 +60,22 @@ namespace DRCHECKER {
             O << "-------------------------------\n";
         }
 
+        void printContextJson(llvm::raw_ostream& O) {
+            O << "\"context\":[";
+            bool putComma = false;
+            if (this->callSites) {
+                for(Instruction *currCallSite : *(this->callSites)) {
+                    if(putComma) {
+                        O << ",";
+                    }
+                    O << "{";
+                    InstructionUtils::printInstJson(currCallSite,O);
+                    O << "}\n";
+                    putComma = true;
+                }
+            }
+            O << "\n]";
+        }
     };
 
     /***

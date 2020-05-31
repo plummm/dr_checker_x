@@ -13,5 +13,5 @@ then
 fi
 echo $func_type
 
-#nohup opt -load build_dir/SoundyAliasAnalysis/libSoundyAliasAnalysis.so -dr_checker -toCheckFunction=$2 -functionType=$func_type -outputFile="dr.out.json" $1 -o /dev/null >log_$2 2>&1 &
-nohup opt -load build_dir/SoundyAliasAnalysis/libSoundyAliasAnalysis.so -dr_checker -entryConfig=$2 -outputFile="dr.out.json" $1 -o /dev/null >log_$2 2>&1 &
+#nohup opt -load build_dir/SoundyAliasAnalysis/libSoundyAliasAnalysis.so -dr_checker -toCheckFunction=$2 -functionType=$func_type -outputFile=$2.warn.json -instrWarnings=$2.iwarn.json $1 -o /dev/null >log_$2 2>&1 &
+nohup opt -load build_dir/SoundyAliasAnalysis/libSoundyAliasAnalysis.so -dr_checker -entryConfig=$2 -outputFile=$2.warn.json -instrWarnings=$2.iwarn.json $1 -o /dev/null >log_$2 2>&1 &

@@ -80,7 +80,7 @@ namespace DRCHECKER {
                                             cl::desc("Path to the output file, where all the warnings should be stored."),
                                             cl::value_desc("Path of the output file."), cl::init(""));
 
-    static cl::opt<std::string> instrWarnings("instrWarnOutput",
+    static cl::opt<std::string> instrWarnings("instrWarnings",
                                               cl::desc("Path to the output file, where all the warnings w.r.t instructions should be stored."),
                                               cl::value_desc("Path of the output file."), cl::init(""));
 
