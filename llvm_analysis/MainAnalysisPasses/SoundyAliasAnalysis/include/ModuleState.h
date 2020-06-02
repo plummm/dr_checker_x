@@ -546,6 +546,76 @@ namespace DRCHECKER {
             return nullptr;
         };
 
+        //Return all taint paths from the user input to the specified field of an object.
+        int getAllUserTaintPaths(AliasObject *obj, long fid, std::set<std::vector<InstLoc*>*> &res) {
+            return 0;
+        }
+
+        //Due to our current multi-entry analysis logic, each entry function will be analyzed independently (e.g. it will not
+        //re-use the AliasObject created by other entry functions, instead it will created its own copy), so here we need to
+        //identify all potentially identical objects to the provided one, which ensures that our taint chain construction is
+        //sound.
+        int getAllEquivelantObjs(TaintTag *tag, std::set<AliasObject*> &res) {
+            static std::set<std::set<AliasObject*>*> eqObjs;
+            AliasObject *obj = tag->priv;
+            if (!obj) {
+                return 0;
+            }
+            for (std::set<AliasObject*> *cls : eqObjs) {
+                if (cls && cls->find(obj) != cls->end()) {
+                    res.insert(cls->begin(),cls->end());
+                    return 0;
+                }
+            }
+            //No equivelant class found in the cache, need to do the dirty work now...
+            //First we need to collect all access paths to current object.
+            std::set<std::vector<TypeField*>*> *htys = getTagHierarchyTy(tag);
+            return 0;
+        }
+
+        //Given a taint flag (w/ a specific taint src A), we try to figure out whether there exists a taint path from an user input
+        //U to A and then to the target instruction in the provided taint flag. Basically we try to return all direct or indirect
+        //(e.g. go through multiple entry function invocations) taint paths from the user input to the target instruction affected
+        //by the given taint flag.
+        int getAllUserTaintChains(TaintFlag *tf, std::set<std::vector<InstLoc*>*> &res) {
+            static std::map<TaintTag*,std::set<std::vector<InstLoc*>*>> tagPathMap;
+            if (!tf || !tf->tag) {
+                return 1;
+            }
+            TaintTag *tag = tf->tag;
+            if (tagPathMap.find(tag) == tagPathMap.end()) {
+                //Find all paths from an user input to this tag.
+                tagPathMap[tag].clear();
+                //No need to find other paths if this is already a user input tag.
+                if (tag->is_global && tag->priv) {
+                    //First need to get all equivelant objects as that in the tag.
+                    std::set<AliasObject*> eqObjs;
+                    getAllEquivelantObjs(tag,eqObjs);
+                    //Get all taint paths for each object.
+                    for (AliasObject *obj : eqObjs) {
+                        if (!obj) {
+                            continue;
+                        }
+                        getAllUserTaintPaths(obj,tag->fieldId,tagPathMap[tag]);
+                    }
+                }
+            }
+            //Iterate through every taint path to current "tag" and decide whether it's compatible to the taint path
+            //in current TaintFlag (i.e. whether the prior path can reach current one), if so, we can concat two paths
+            //and the result to "res".
+            for (std::vector<InstLoc*> *ep : tagPathMap[tag]) {
+                //TODO: how to do the compatibility test?
+                if (!ep) {
+                    continue;
+                }
+                std::vector<InstLoc*> *newPath = new std::vector<InstLoc*>();
+                newPath->insert(newPath->end(),ep->begin(),ep->end());
+                newPath->insert(newPath->end(),tf->instructionTrace.begin(),tf->instructionTrace.end());
+                res.push_back(newPath);
+            }
+            return 0;
+        }
+
         bool in_hierarchy_history(AliasObject *obj, long field, std::vector<std::pair<long, AliasObject*>>& history, bool to_add) {
             auto to_check = std::make_pair(field, obj);
             if (std::find(history.begin(),history.end(),to_check) != history.end()) {
@@ -557,52 +627,48 @@ namespace DRCHECKER {
             return false;
         }
 
-        std::set<std::string> *getHierarchyStr(AliasObject *obj, long field, int layer, std::vector<std::pair<long, AliasObject*>>& history) {
+        typedef int (*traverseHierarchyCallback)(std::vector<std::pair<long, AliasObject*>>& chain, bool recur);
+
+        //Visit every object hierarchy chain ending w/ field "fid" of "obj", for each chain, invoke the passed-in callback
+        //to enable some user-defined functionalities.
+        int traverseHierarchy(AliasObject *obj, long field, int layer, std::vector<std::pair<long, AliasObject*>>& history, traverseHierarchyCallback cb = nullptr) {
 #ifdef DEBUG_HIERARCHY
-            dbgs() << layer << " getHierarchyStr(): " << (obj ? InstructionUtils::getTypeStr(obj->targetType) : "") << " | " << field << " ID: " << (const void*)obj << "\n";
+            dbgs() << layer << " traverseHierarchy(): " << (obj ? InstructionUtils::getTypeStr(obj->targetType) : "") << " | " << field << " ID: " << (const void*)obj << "\n";
 #endif
             if (!obj) {
 #ifdef DEBUG_HIERARCHY
-                dbgs() << layer << " getHierarchyStr(): null obj.\n";
+                dbgs() << layer << " traverseHierarchy(): null obj.\n";
 #endif
-                return nullptr;
+                return 0;
             }
+            //TODO: is it really ok to exclude the local objects?
             if (obj->isFunctionLocal()) {
                 //We're not interested in function local variables as they are not persistent.
 #ifdef DEBUG_HIERARCHY
-                dbgs() << layer << " getHierarchyStr(): function local objs.\n";
+                dbgs() << layer << " traverseHierarchy(): function local objs.\n";
 #endif
-                return nullptr;
+                return 0;
             }
-            std::set<std::string> *strs = new std::set<std::string>();
-            std::string currStr = InstructionUtils::getTypeStr(obj->targetType) + ":" + std::to_string(field);
             if (this->in_hierarchy_history(obj,field,history,true)) {
                 //Exists in the history obj chain, should be a loop..
 #ifdef DEBUG_HIERARCHY
-                dbgs() << layer << " getHierarchyStr(): Exists in the obj chain..\n";
+                dbgs() << layer << " traverseHierarchy(): Exists in the obj chain..\n";
 #endif
-                strs->insert("<->" + currStr);
-                return strs;
+                auto curr = std::make_pair(field, obj);
+                history.push_back(curr);
+                if (cb) {
+                    (*cb)(history,true);
+                }
+                history.pop_back();
+                return 1;
             }
+            int r = 0;
             if (obj->parent && obj->parent->embObjs.find(obj->parent_field) != obj->parent->embObjs.end() && obj->parent->embObjs[obj->parent_field] == obj) {
                 //Current obj is embedded in another obj.
 #ifdef DEBUG_HIERARCHY
-                dbgs() << layer << " getHierarchyStr(): find a host obj that embeds this one..";
+                dbgs() << layer << " traverseHierarchy(): find a host obj that embeds this one..";
 #endif
-                std::set<std::string> *rs = getHierarchyStr(obj->parent,obj->parent_field,layer+1,history);
-#ifdef DEBUG_HIERARCHY
-                dbgs() << layer << " getHierarchyStr(): embedded in another obj! #rs: ";
-                if (rs) {
-                    dbgs() << rs->size();
-                }
-                dbgs() << "\n";
-#endif
-                if (rs) {
-                    for (auto& x : *rs) {
-                        strs->insert(x + "." + currStr);
-                    }
-                    delete(rs);
-                }
+                r += traverseHierarchy(obj->parent,obj->parent_field,layer+1,history,cb);
             }
             if (!obj->pointsFrom.empty()) {
                 //Current obj may be pointed to by a field in another obj.
@@ -612,121 +678,72 @@ namespace DRCHECKER {
                         continue;
                     }
                     for (ObjectPointsTo *y : x.second) {
-                        if (!y || y->targetObject != obj || (y->dstfieldId > 0 && y->dstfieldId != field)) {
+                        if (!y || y->targetObject != obj || (y->dstfieldId != 0 && y->dstfieldId != field)) {
                             continue;
                         }
 #ifdef DEBUG_HIERARCHY
-                        dbgs() << layer << " getHierarchyStr(): find a host object that can point to this one...\n";
+                        dbgs() << layer << " traverseHierarchy(): find a host object that can point to this one...\n";
 #endif
-                        std::set<std::string> *rs = getHierarchyStr(srcObj,y->fieldId,layer+1,history);
-#ifdef DEBUG_HIERARCHY
-                        dbgs() << layer << " getHierarchyStr(): host point-to, #rs: " << (rs ? rs->size() : 0) << "\n";
-#endif
-                        if (rs) {
-                            for (auto& z : *rs) {
-                                strs->insert(z + "->" + currStr);
-                            }
-                            delete(rs);
-                        }
+                        r += traverseHierarchy(srcObj,y->fieldId,layer+1,history,cb);
                     }
                 }
             }
-            if (strs->empty()) {
-                strs->insert(currStr);
+            if (!r) {
+                //This means current object is the root of the hierarchy chain, we should invoke the callback for this chain.
+                if (cb) {
+                    (*cb)(history,false);
+                }
+                r = 1;
             }
-#ifdef DEBUG_HIERARCHY
-            dbgs() << layer << " getHierarchyStr(): #strs: " << strs->size() << "\n";
-#endif
             history.pop_back();
-            return strs; 
+            return r; 
         }
 
-        std::set<std::vector<TypeField*>*> *getHierarchyTy(AliasObject *obj, long field, int layer, std::vector<std::pair<long, AliasObject*>>& history) {
-#ifdef DEBUG_HIERARCHY
-            dbgs() << layer << " getHierarchyTy(): " << (obj ? InstructionUtils::getTypeStr(obj->targetType) : "") << " | " << field << " ID: " << (const void*)obj << "\n";
-#endif
-            if (!obj) {
-#ifdef DEBUG_HIERARCHY
-                dbgs() << layer << " getHierarchyTy(): null obj.\n";
-#endif
-                return nullptr;
+        std::set<std::string> hstrs;
+        int hierarchyStrCb(std::vector<std::pair<long, AliasObject*>>& chain, bool recur) {
+            if (chain.empty()) {
+                return 0;
             }
-            if (obj->isFunctionLocal()) {
-                //We're not interested in function local variables as they are not persistent.
-#ifdef DEBUG_HIERARCHY
-                dbgs() << layer << " getHierarchyTy(): function local objs.\n";
-#endif
-                return nullptr;
+            std::string s("");
+            if (recur) {
+                s += "<->";
             }
-            std::set<std::vector<TypeField*>*> *tys = new std::set<std::vector<TypeField*>*>();
-            TypeField *currTf = new TypeField(obj->targetType,field,(void*)obj);
-            if (this->in_hierarchy_history(obj,field,history,true)) {
-                //Exists in the history obj chain, should be a loop..
-#ifdef DEBUG_HIERARCHY
-                dbgs() << layer << " getHierarchyTy(): Exists in the obj chain..\n";
-#endif
-                std::vector<TypeField*> *currTy = new std::vector<TypeField*>();
-                currTy->push_back(currTf);
-                tys->insert(currTy);
-                return tys;
-            }
-            if (obj->parent && obj->parent->embObjs.find(obj->parent_field) != obj->parent->embObjs.end() && obj->parent->embObjs[obj->parent_field] == obj) {
-                //Current obj is embedded in another obj.
-#ifdef DEBUG_HIERARCHY
-                dbgs() << layer << " getHierarchyTy(): find a host obj that embeds this one..";
-#endif
-                std::set<std::vector<TypeField*>*> *rty = getHierarchyTy(obj->parent,obj->parent_field,layer+1,history);
-#ifdef DEBUG_HIERARCHY
-                dbgs() << layer << " getHierarchyTy(): embedded in another obj! #rty: " << (rty ? rty->size() : 0) << "\n";
-#endif
-                if (rty) {
-                    for (auto& x : *rty) {
-                        x->push_back(currTf);
-                        //. (embed field)
-                        tys->insert(x);
-                    }
-                    delete(rty);
-                }
-            }
-            if (!obj->pointsFrom.empty()) {
-                //Current obj may be pointed to by a field in another obj.
-                for (auto &x : obj->pointsFrom) {
-                    AliasObject *srcObj = x.first;
-                    if (!srcObj) {
-                        continue;
-                    }
-                    for (ObjectPointsTo *y : x.second) {
-                        if (!y || y->targetObject != obj || (y->dstfieldId > 0 && y->dstfieldId != field)) {
-                            continue;
-                        }
-#ifdef DEBUG_HIERARCHY
-                        dbgs() << layer << " getHierarchyTy(): find a host object that can point to this one...\n";
-#endif
-                        std::set<std::vector<TypeField*>*> *rty = getHierarchyTy(srcObj,y->fieldId,layer+1,history);
-#ifdef DEBUG_HIERARCHY
-                        dbgs() << layer << " getHierarchyTy(): host point-to, #rty: " << (rty ? rty->size() : 0) << "\n";
-#endif
-                        if (rty) {
-                            for (auto& z : *rty) {
-                                z->push_back(currTf);
-                                //-> (point-to field)
-                                tys->insert(z);
-                            }
-                            delete(rty);
+            for (int i = chain.size() - 1; i >= 0; --i) {
+                long fid = chain[i].first;
+                AliasObject *obj = chain[i].second;
+                if (obj) {
+                    s += (InstructionUtils::getTypeStr(obj->targetType) + ":" + std::to_string(fid));
+                    if (i > 0) {
+                        //Decide the relationship between current obj and the next obj in the chain (e.g. embed or point-to).
+                        if (chain[i-1].second && chain[i-1].second->parent == obj) {
+                            s += ".";
+                        }else {
+                            s += "->";
                         }
                     }
                 }
             }
-            if (tys->empty()) {
-                std::vector<TypeField*> *currTy = new std::vector<TypeField*>();
-                currTy->push_back(currTf);
-                tys->insert(currTy);
+            if (s.size()) {
+                hstrs.insert(s);
             }
-#ifdef DEBUG_HIERARCHY
-            dbgs() << layer << " getHierarchyTy(): #tys: " << tys->size() << "\n";
-#endif
-            history.pop_back();
-            return tys; 
+            return 0;
+        }
+
+        std::set<std::vector<TypeField*>*> htys;
+        int hierarchyTyCb(std::vector<std::pair<long, AliasObject*>>& chain, bool recur) {
+            if (chain.empty()) {
+                return 0;
+            }
+            std::vector<TypeField*> *tys = new std::vector<TypeField*>();
+            for (int i = chain.size() - 1; i >= 0; --i) {
+                long fid = chain[i].first;
+                AliasObject *obj = chain[i].second;
+                if (obj) {
+                    TypeField *currTf = new TypeField(obj->targetType,fid,(void*)obj);
+                    tys->push_back(currTf);
+                }
+            }
+            htys.insert(tys);
         }
 
         //A wrapper of getHierarchyStr() w/ a cache.
@@ -738,8 +755,9 @@ namespace DRCHECKER {
             if (cache.find(tag) == cache.end()) {
                 std::vector<std::pair<long, AliasObject*>> history;
                 history.clear();
-                std::set<std::string> *strs = getHierarchyStr((AliasObject*)tag->priv, tag->fieldId, 0, history);
-                cache[tag] = strs;
+                hstrs.clear();
+                traverseHierarchy((AliasObject*)tag->priv, tag->fieldId, 0, history, hierarchyStrCb);
+                cache[tag] = new std::set<std::string>(hstrs);
             }
             return cache[tag];
         }
@@ -753,8 +771,16 @@ namespace DRCHECKER {
             if (cache.find(tag) == cache.end()) {
                 std::vector<std::pair<long, AliasObject*>> history;
                 history.clear();
-                std::set<std::vector<TypeField*>*> *tys = getHierarchyTy((AliasObject*)tag->priv, tag->fieldId, 0, history);
-                cache[tag] = tys;
+                for (auto &x : htys) {
+                    delete(x);
+                }
+                htys.clear();
+                traverseHierarchy((AliasObject*)tag->priv, tag->fieldId, 0, history, hierarchyTyCb);
+                cache[tag] = new std::set<std::vector<TypeField*>*>();
+                for (auto &x : htys) {
+                    std::vector<TypeField*> *vtf = new std::vector<TypeField*>(*x);
+                    cache[tag]->insert(vtf);
+                }
             }
             return cache[tag];
         }
