@@ -81,12 +81,15 @@ namespace DRCHECKER {
         TypeField() {
             this->ty = nullptr;
             this->fid = 0;
+            this->priv = nullptr;
+            this->tf = nullptr;
         }
 
-        TypeField(Type *ty, long fid, void *priv = nullptr) {
+        TypeField(Type *ty, long fid, void *priv = nullptr, void *tf = nullptr) {
             this->ty = ty;
             this->fid = fid;
             this->priv = priv;
+            this->tf = tf;
         }
 
         bool is_same_ty(TypeField *tf);
@@ -94,6 +97,8 @@ namespace DRCHECKER {
         Type *ty = nullptr;
         long fid = 0;
         void *priv = nullptr;
+        //Used to hold a TaintFlag* in some cases.
+        void *tf = nullptr;
     };
 
     class InstructionUtils {

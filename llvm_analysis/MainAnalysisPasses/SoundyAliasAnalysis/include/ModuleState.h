@@ -546,8 +546,147 @@ namespace DRCHECKER {
             return nullptr;
         };
 
+        //The standard is whether the obj/field combination exists in the history, nothing to do w/ TaintFlag.
+        bool in_taint_history(TypeField *tf, std::vector<TypeField*> &history, bool insert = false) {
+            if (!tf) {
+                return true;
+            }
+            for (TypeField *htf : history) {
+                if (!htf) {
+                    continue;
+                }
+                if (htf->priv == tf->priv && htf->fid == tf->fid) {
+                    return true;
+                }
+            }
+            if (insert) {
+                history.push_back(tf);
+            }
+            return false;
+        }
+
+        std::vector<InstLoc*> *getFullTaintTrace(std::vector<TypeField*> &chain) {
+            if (chain.empty()) {
+                return nullptr;
+            }
+            std::vector<InstLoc*> *tr = new std::vector<InstLoc*>();
+            for (int i = chain.size() - 1; i > 0; --i) {
+                TypeField *tf = chain[i];
+                if (!tf || !tf->tf) {
+                    continue;
+                }
+                TaintFlag *tflg = (TaintFlag*)(tf->tf);
+                //TODO: any cross-entry-func taint path validity test?
+                tr->insert(tr->end(),tflg->instructionTrace.begin(),tflg->instructionTrace.end());
+            }
+            return tr;
+        }
+
         //Return all taint paths from the user input to the specified field of an object.
-        int getAllUserTaintPaths(AliasObject *obj, long fid, std::set<std::vector<InstLoc*>*> &res) {
+        int getAllUserTaintPaths(TypeField *tf, std::vector<TypeField*> &history, std::set<std::vector<InstLoc*>*> &res) {
+            if (!tf) {
+                return 0;
+            }
+            AliasObject *obj = (AliasObject*)(tf->priv);
+            if (!obj) {
+                return 0;
+            }
+            long fid = tf->fid;
+            if (this->in_taint_history(tf,history,true)) {
+                //A taint loop, stop here.
+                return 0;
+            }
+            int r = 0;
+            //Find out who can taint this obj/field...
+            std::set<TaintFlag*> tflgs;
+            FieldTaint* ft = obj->getFieldTaint(fid);
+            if (!ft || !ft->targetTaint.size()) {
+                //No field taint found, any all_content taint flag?
+                if (obj->all_contents_tainted && obj->all_contents_taint_flag) {
+                    tflgs.insert(obj->all_contents_taint_flag);
+                }
+            }else {
+                tflgs.insert(ft->targetTaint.begin(),ft->targetTaint.end());
+            }
+            for (TaintFlag *flg : tflgs) {
+                if (!flg || !flg->tag) {
+                    continue;
+                }
+                TaintTag *tag = flg->tag;
+                TypeField ntf(nullptr,tag->fieldId,tag->priv,flg);
+                if (!tag->is_global) {
+                    //Finally got a chain initiated from the user input...
+                    history.push_back(&ntf);
+                    std::vector<InstLoc*> *tr = getFullTaintTrace(history);
+                    if (tr) {
+                        res.insert(tr);
+                    }
+                    history.pop_back();
+                    continue;
+                }
+                //Recursion..
+                if (tag->priv) {
+                    r += getAllUserTaintPaths(&ntf,history,res);
+                }
+            }
+            history.pop_back();
+            return r;
+        }
+
+        int getAllObjsForPath(std::vector<TypeField*> *p, std::set<AliasObject*> &res) {
+            if (!p || !p->size()) {
+                return 0;
+            }
+            std::set<AliasObject*> stageObjs, nextObjs;
+            stageObjs.insert((AliasObject*)((*p)[0]->priv));
+            int i = 0;
+            for (;i < p->size() - 1; ++i) {
+                TypeField *tf = (*p)[i];
+                TypeField *ntf = (*p)[i+1];
+                if (!tf || !ntf || !tf->priv || !ntf->priv) {
+                   break;
+                }
+                if (stageObjs.empty()) {
+                    break;
+                }
+                nextObjs.clear();
+                //First decide the relationship between current typefield and the next one (e.g. point-to and embed)
+                if (((AliasObject*)(ntf->priv))->parent == tf->priv) {
+                    //Embed, we need to get all embedded objects at the same field of the objs in "stageObjs".
+                    for (AliasObject *so : stageObjs) {
+                        if (so && so->embObjs.find(tf->fid) != so->embObjs.end()) {
+                            AliasObject *no = so->embObjs[tf->fid];
+                            if (InstructionUtils::same_types(no->targetType,ntf->ty)) {
+                                nextObjs.insert(no);
+                            }
+                        }
+                    }
+                }else {
+                    //Point-to, need to find all pointee objects of the same field of the objs in "stageObjs".
+                    for (AliasObject *so : stageObjs) {
+                        if (!so || so->pointsTo.find(tf->fid) == so->pointsTo.end()) {
+                            continue;
+                        }
+                        for (ObjectPointsTo *pto : so->pointsTo[tf->fid]) {
+                            if (pto && pto->targetObject && (pto->dstfieldId == 0 || pto->dstfieldId == ntf->fid) && 
+                                InstructionUtils::same_types(pto->targetObject->targetType,ntf->ty)) {
+                                nextObjs.insert(pto->targetObject);
+                            }
+                        }
+                    }
+                }
+                stageObjs.clear();
+                stageObjs.insert(nextObjs.begin(),nextObjs.end());
+            }
+            //The leaf obj is always in the result set.
+            TypeField *lastTf = (*p)[p->size()-1];
+            if (lastTf && lastTf->priv) {
+                res.insert((AliasObject*)(lastTf->priv));
+            }
+            //Add the inferred equivelant objects by path.
+            if (i >= p->size() - 1) {
+                res.insert(stageObjs.begin(),stageObjs.end());
+            }
             return 0;
         }
 
@@ -557,7 +696,7 @@ namespace DRCHECKER {
         //sound.
         int getAllEquivelantObjs(TaintTag *tag, std::set<AliasObject*> &res) {
             static std::set<std::set<AliasObject*>*> eqObjs;
-            AliasObject *obj = tag->priv;
+            AliasObject *obj = (AliasObject*)(tag->priv);
             if (!obj) {
                 return 0;
             }
@@ -568,8 +707,22 @@ namespace DRCHECKER {
                 }
             }
             //No equivelant class found in the cache, need to do the dirty work now...
+            //By default the obj itself is in its own equivelant class.
+            std::set<AliasObject*> *newCls = new std::set<AliasObject*>();
+            newCls->insert(obj);
+            eqObjs.insert(newCls);
             //First we need to collect all access paths to current object.
             std::set<std::vector<TypeField*>*> *htys = getTagHierarchyTy(tag);
+            //Then based on each access path, we identify all the equivelant objects (i.e. those w/ the same access path).
+            if (htys && htys->size()) {
+                for (std::vector<TypeField*> *ap : *htys) {
+                    if (!ap || !ap->size()) {
+                        continue;
+                    }
+                    getAllObjsForPath(ap,*newCls);
+                }
+            }
+            res.insert(newCls->begin(),newCls->end());
             return 0;
         }
 
@@ -592,11 +745,14 @@ namespace DRCHECKER {
                     std::set<AliasObject*> eqObjs;
                     getAllEquivelantObjs(tag,eqObjs);
                     //Get all taint paths for each object.
+                    std::vector<TypeField*> history;
                     for (AliasObject *obj : eqObjs) {
                         if (!obj) {
                             continue;
                         }
-                        getAllUserTaintPaths(obj,tag->fieldId,tagPathMap[tag]);
+                        history.clear();
+                        TypeField tf(obj->targetType,tag->fieldId,obj);
+                        getAllUserTaintPaths(&tf,history,tagPathMap[tag]);
                     }
                 }
             }
@@ -611,7 +767,7 @@ namespace DRCHECKER {
                 std::vector<InstLoc*> *newPath = new std::vector<InstLoc*>();
                 newPath->insert(newPath->end(),ep->begin(),ep->end());
                 newPath->insert(newPath->end(),tf->instructionTrace.begin(),tf->instructionTrace.end());
-                res.push_back(newPath);
+                res.insert(newPath);
             }
             return 0;
         }
@@ -699,8 +855,8 @@ namespace DRCHECKER {
             return r; 
         }
 
-        std::set<std::string> hstrs;
-        int hierarchyStrCb(std::vector<std::pair<long, AliasObject*>>& chain, bool recur) {
+        static std::set<std::string> hstrs;
+        static int hierarchyStrCb(std::vector<std::pair<long, AliasObject*>>& chain, bool recur) {
             if (chain.empty()) {
                 return 0;
             }
@@ -729,8 +885,8 @@ namespace DRCHECKER {
             return 0;
         }
 
-        std::set<std::vector<TypeField*>*> htys;
-        int hierarchyTyCb(std::vector<std::pair<long, AliasObject*>>& chain, bool recur) {
+        static std::set<std::vector<TypeField*>*> htys;
+        static int hierarchyTyCb(std::vector<std::pair<long, AliasObject*>>& chain, bool recur) {
             if (chain.empty()) {
                 return 0;
             }

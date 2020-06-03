@@ -916,13 +916,8 @@ namespace DRCHECKER {
         //"dstPointsTo" if necessary.
         void updateFieldPointsTo(long srcfieldId, std::set<PointerPointsTo*>* dstPointsTo, InstLoc *propogatingInstr, int is_weak = -1);
 
-    private:
-
-        //NOTE: the arg "is_weak" has the same usage as updateFieldPointsTo().
-        void updateFieldPointsTo_do(long srcfieldId, std::set<PointerPointsTo*>* dstPointsTo, InstLoc *propogatingInstr, int is_weak = -1);
-
         FieldTaint* getFieldTaint(long srcfieldId) {
-            for(auto currFieldTaint:taintedFields) {
+            for(auto currFieldTaint : taintedFields) {
                 if(currFieldTaint->fieldId == srcfieldId) {
                     return currFieldTaint;
                 }
@@ -930,6 +925,10 @@ namespace DRCHECKER {
             return nullptr;
         }
 
+    private:
+
+        //NOTE: the arg "is_weak" has the same usage as updateFieldPointsTo().
+        void updateFieldPointsTo_do(long srcfieldId, std::set<PointerPointsTo*>* dstPointsTo, InstLoc *propogatingInstr, int is_weak = -1);
 
     protected:
         void printPointsTo(llvm::raw_ostream& os) const {
