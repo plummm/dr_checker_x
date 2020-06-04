@@ -78,6 +78,9 @@ namespace DRCHECKER {
         }
     };
 
+    static std::set<std::vector<TypeField*>*> htys;
+    static std::set<std::string> hstrs;
+
     /***
      *  Object which represents GlobalState.
      *  Everything we need in one place.
@@ -107,8 +110,7 @@ namespace DRCHECKER {
         std::map<AnalysisContext*, std::map<Value *, std::set<PointerPointsTo*>*>*> pointToInformation;
         static std::map<Value *, std::set<PointerPointsTo*>*> globalVariables;
 
-        static std::map<Function *, std::set<BasicBlock*>*> loopExitBlocks;
-
+        static std::map<Function*, std::set<BasicBlock*>*> loopExitBlocks;
 
         // Data layout for the current module
         DataLayout *targetDataLayout;
@@ -712,10 +714,10 @@ namespace DRCHECKER {
             newCls->insert(obj);
             eqObjs.insert(newCls);
             //First we need to collect all access paths to current object.
-            std::set<std::vector<TypeField*>*> *htys = getTagHierarchyTy(tag);
+            std::set<std::vector<TypeField*>*> *hty = getTagHierarchyTy(tag);
             //Then based on each access path, we identify all the equivelant objects (i.e. those w/ the same access path).
-            if (htys && htys->size()) {
-                for (std::vector<TypeField*> *ap : *htys) {
+            if (hty && hty->size()) {
+                for (std::vector<TypeField*> *ap : *hty) {
                     if (!ap || !ap->size()) {
                         continue;
                     }
@@ -772,7 +774,7 @@ namespace DRCHECKER {
             return 0;
         }
 
-        bool in_hierarchy_history(AliasObject *obj, long field, std::vector<std::pair<long, AliasObject*>>& history, bool to_add) {
+        static bool in_hierarchy_history(AliasObject *obj, long field, std::vector<std::pair<long, AliasObject*>>& history, bool to_add) {
             auto to_check = std::make_pair(field, obj);
             if (std::find(history.begin(),history.end(),to_check) != history.end()) {
                 return true;
@@ -787,7 +789,7 @@ namespace DRCHECKER {
 
         //Visit every object hierarchy chain ending w/ field "fid" of "obj", for each chain, invoke the passed-in callback
         //to enable some user-defined functionalities.
-        int traverseHierarchy(AliasObject *obj, long field, int layer, std::vector<std::pair<long, AliasObject*>>& history, traverseHierarchyCallback cb = nullptr) {
+        static int traverseHierarchy(AliasObject *obj, long field, int layer, std::vector<std::pair<long, AliasObject*>>& history, traverseHierarchyCallback cb = nullptr) {
 #ifdef DEBUG_HIERARCHY
             dbgs() << layer << " traverseHierarchy(): " << (obj ? InstructionUtils::getTypeStr(obj->targetType) : "") << " | " << field << " ID: " << (const void*)obj << "\n";
 #endif
@@ -805,7 +807,7 @@ namespace DRCHECKER {
 #endif
                 return 0;
             }
-            if (this->in_hierarchy_history(obj,field,history,true)) {
+            if (in_hierarchy_history(obj,field,history,true)) {
                 //Exists in the history obj chain, should be a loop..
 #ifdef DEBUG_HIERARCHY
                 dbgs() << layer << " traverseHierarchy(): Exists in the obj chain..\n";
@@ -855,7 +857,6 @@ namespace DRCHECKER {
             return r; 
         }
 
-        static std::set<std::string> hstrs;
         static int hierarchyStrCb(std::vector<std::pair<long, AliasObject*>>& chain, bool recur) {
             if (chain.empty()) {
                 return 0;
@@ -880,12 +881,11 @@ namespace DRCHECKER {
                 }
             }
             if (s.size()) {
-                hstrs.insert(s);
+                DRCHECKER::hstrs.insert(s);
             }
             return 0;
         }
 
-        static std::set<std::vector<TypeField*>*> htys;
         static int hierarchyTyCb(std::vector<std::pair<long, AliasObject*>>& chain, bool recur) {
             if (chain.empty()) {
                 return 0;
@@ -899,11 +899,11 @@ namespace DRCHECKER {
                     tys->push_back(currTf);
                 }
             }
-            htys.insert(tys);
+            DRCHECKER::htys.insert(tys);
         }
 
         //A wrapper of getHierarchyStr() w/ a cache.
-        std::set<std::string> *getTagHierarchyStr(TaintTag *tag) {
+        static std::set<std::string> *getTagHierarchyStr(TaintTag *tag) {
             static std::map<TaintTag*,std::set<std::string>*> cache;
             if (!tag || !tag->priv) {
                 return nullptr;
@@ -911,15 +911,15 @@ namespace DRCHECKER {
             if (cache.find(tag) == cache.end()) {
                 std::vector<std::pair<long, AliasObject*>> history;
                 history.clear();
-                hstrs.clear();
+                DRCHECKER::hstrs.clear();
                 traverseHierarchy((AliasObject*)tag->priv, tag->fieldId, 0, history, hierarchyStrCb);
-                cache[tag] = new std::set<std::string>(hstrs);
+                cache[tag] = new std::set<std::string>(DRCHECKER::hstrs);
             }
             return cache[tag];
         }
 
         //A wrapper of getHierarchyTy() w/ a cache.
-        std::set<std::vector<TypeField*>*> *getTagHierarchyTy(TaintTag *tag) {
+        static std::set<std::vector<TypeField*>*> *getTagHierarchyTy(TaintTag *tag) {
             static std::map<TaintTag*,std::set<std::vector<TypeField*>*>*> cache;
             if (!tag || !tag->priv) {
                 return nullptr;
@@ -927,13 +927,13 @@ namespace DRCHECKER {
             if (cache.find(tag) == cache.end()) {
                 std::vector<std::pair<long, AliasObject*>> history;
                 history.clear();
-                for (auto &x : htys) {
+                for (auto &x : DRCHECKER::htys) {
                     delete(x);
                 }
-                htys.clear();
+                DRCHECKER::htys.clear();
                 traverseHierarchy((AliasObject*)tag->priv, tag->fieldId, 0, history, hierarchyTyCb);
                 cache[tag] = new std::set<std::vector<TypeField*>*>();
-                for (auto &x : htys) {
+                for (auto &x : DRCHECKER::htys) {
                     std::vector<TypeField*> *vtf = new std::vector<TypeField*>(*x);
                     cache[tag]->insert(vtf);
                 }
@@ -1363,10 +1363,10 @@ namespace DRCHECKER {
                 tagInfoMap[tag_id]["v"] = InstructionUtils::getValueStr(tag->v);
                 tagInfoMap[tag_id]["vid"] = std::to_string((unsigned long)(tag->v));
                 if (tag->priv) {
-                    std::set<std::string> *hstrs = getTagHierarchyStr(tag);
-                    if (hstrs && !hstrs->empty()) {
+                    std::set<std::string> *hstr = getTagHierarchyStr(tag);
+                    if (hstr && !hstr->empty()) {
                         int hc = 0;
-                        for (auto& hs : *hstrs) {
+                        for (auto& hs : *hstr) {
                             tagInfoMap[tag_id]["hs_" + std::to_string(hc)] = hs;
                             ++hc;
                         }
