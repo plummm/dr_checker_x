@@ -70,21 +70,27 @@ HANDLE_BINARY_INST(21, FDiv , BinaryOperator)
                 //because it may originate from a non-user initiated dummy taint source (e.g. a global var), we must carefully inspect
                 //and do a post-processing to see whether we can construct a taint chain (may survive multiple entry functions and 
                 //invocations) that starts from a user input and ends at current instruction.
-                if (currFlag->isTainted()) {
-                    std::string warningMsg = "Potential overflow, using tainted value in binary operation.";
-                    VulnerabilityWarning *currWarning = new VulnerabilityWarning(this->currFuncCallSites,
-                                                                                 &(currFlag->instructionTrace),
-                                                                                 warningMsg, &I,
-                                                                                 TAG);
-                    this->currState.addVulnerabilityWarning(currWarning);
-
-                    if (this->warnedInstructions.find(&I) == this->warnedInstructions.end()) {
-                        this->warnedInstructions.insert(&I);
-                    }
-#ifdef ONLY_ONE_WARNING
-                    return;
-#endif
+                if (!currFlag || !currFlag->isTainted()) {
+                    continue;
                 }
+                std::set<std::vector<InstLoc*>*> tchains;
+                this->currState.getAllUserTaintChains(currFlag,tchains);
+                if (tchains.empty()) {
+                    //No taint from user inputs.
+                    continue;
+                }
+                std::string warningMsg = "Potential overflow, using tainted value in binary operation.";
+                VulnerabilityWarning *currWarning = new VulnerabilityWarning(this->currFuncCallSites,
+                                                                             &tchains,
+                                                                             warningMsg, &I,
+                                                                             TAG);
+                this->currState.addVulnerabilityWarning(currWarning);
+                if (this->warnedInstructions.find(&I) == this->warnedInstructions.end()) {
+                    this->warnedInstructions.insert(&I);
+                }
+#ifdef ONLY_ONE_WARNING
+                return;
+#endif
             }
         }
     }

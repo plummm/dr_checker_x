@@ -177,6 +177,7 @@ namespace DRCHECKER {
                         }
                     }
 
+                    //Check whether the src arg of the risky string functions is tainted, e.g. strcpy(dst,src).
                     std::set<PointerPointsTo*> currValPointsTo;
                     for(auto currVal:toCheck) {
                         std::set<PointerPointsTo*> *currPtsTo = PointsToUtils::getPointsToObjects(this->currState, oldFuncCallSites, currVal);
@@ -185,16 +186,28 @@ namespace DRCHECKER {
                         }
                     }
 
-                    for(PointerPointsTo *currPtTo: currValPointsTo) {
+                    for(PointerPointsTo *currPtTo : currValPointsTo) {
+                        if (!currPtTo || !currPtTo->targetObject) {
+                            continue;
+                        }
                         std::set<TaintFlag*> *currTaintSet = currPtTo->targetObject->getFieldTaintInfo(currPtTo->dstfieldId);
                         if(currTaintSet != nullptr) {
-                            for(auto currTaint:*currTaintSet) {
+                            for(TaintFlag *currTaint : *currTaintSet) {
+                                if (!currTaint) {
+                                    continue;
+                                }
+                                std::set<std::vector<InstLoc*>*> tchains;
+                                this->currState.getAllUserTaintChains(currTaint,tchains);
+                                if (tchains.empty()) {
+                                    //No taint from user inputs.
+                                    continue;
+                                }
                                 std::string warningMsg = "Tainted Data used in risky function";
                                 std::vector<InstLoc*> &instructionTrace = currTaint->instructionTrace;
                                 VulnerabilityWarning *currWarning = new ImproperTaintedDataUseWarning(
                                         currPtTo->targetObject->getObjectPtr(),
                                         this->currFuncCallSites1,
-                                        &instructionTrace,
+                                        &tchains,
                                         warningMsg, &I,
                                         TAG);
                                 this->currState.addVulnerabilityWarning(currWarning);
@@ -208,7 +221,6 @@ namespace DRCHECKER {
                             }
                         }
                     }
-
             }
         } else {
             // only if the function has source.

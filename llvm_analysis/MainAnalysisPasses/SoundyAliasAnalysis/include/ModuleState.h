@@ -609,7 +609,7 @@ namespace DRCHECKER {
                 tflgs.insert(ft->targetTaint.begin(),ft->targetTaint.end());
             }
             for (TaintFlag *flg : tflgs) {
-                if (!flg || !flg->tag) {
+                if (!flg || !flg->isTainted() || !flg->tag) {
                     continue;
                 }
                 TaintTag *tag = flg->tag;
@@ -732,7 +732,7 @@ namespace DRCHECKER {
         //by the given taint flag.
         int getAllUserTaintChains(TaintFlag *tf, std::set<std::vector<InstLoc*>*> &res) {
             static std::map<TaintTag*,std::set<std::vector<InstLoc*>*>> tagPathMap;
-            if (!tf || !tf->tag) {
+            if (!tf || !tf->isTainted() || !tf->tag) {
                 return 1;
             }
             TaintTag *tag = tf->tag;

@@ -33,6 +33,8 @@ namespace DRCHECKER {
                 RangeAnalysis::Range sizeRange = this->currState.getRange(sizeArg);
                 // check, if the Range is not constant, if not.
                 // raise a warning.
+                //TODO: in theory we need to look at whether the "sizeArg" is tainted or not, but currently we simply look at
+                //the result of the range analysis (i.e. whether the range is bounded..).
                 if(!sizeRange.isBounded() || sizeRange.getLower() != sizeRange.getUpper()) {
                     std::string warningMsg = "Non-constant size used in copy_to(or from)_user function.";
                     // no instruction trace.

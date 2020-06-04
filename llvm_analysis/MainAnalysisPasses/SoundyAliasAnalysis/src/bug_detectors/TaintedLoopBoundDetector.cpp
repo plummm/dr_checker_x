@@ -33,31 +33,35 @@ namespace DRCHECKER {
                 // OK, the basic block is a loop exit basic block.
                 // check if the branch instruction is using any tainted value
                 Value *targetCondition = I.getCondition();
-                std::set<TaintFlag *> *conditionTaintInfo = TaintUtils::getTaintInfo(this->currState,
+                std::set<TaintFlag*> *conditionTaintInfo = TaintUtils::getTaintInfo(this->currState,
                                                                                      this->currFuncCallSites,
                                                                                      targetCondition);
                 if(conditionTaintInfo != nullptr) {
                     // for each of the taint flag, add Warning.
-                    for(auto currTaintFlag:*conditionTaintInfo) {
-                        if(currTaintFlag->isTainted()) {
-                            std::string warningMsg = "Loop is bounded by a tainted value.";
-                            VulnerabilityWarning *currWarning = new VulnerabilityWarning(this->currFuncCallSites,
-                                                                                         &(currTaintFlag->instructionTrace),
-                                                                                         warningMsg, &I,
-                                                                                         TAG);
-                            this->currState.addVulnerabilityWarning(currWarning);
-                            if(this->warnedInstructions.find(&I) == this->warnedInstructions.end()) {
-                                this->warnedInstructions.insert(&I);
-                            }
-#ifdef ONLY_ONE_WARNING
-                            return;
-
-#endif
+                    for(TaintFlag *currTaintFlag : *conditionTaintInfo) {
+                        if(!currTaintFlag->isTainted()) {
+                            continue;
                         }
-
+                        std::set<std::vector<InstLoc*>*> tchains;
+                        this->currState.getAllUserTaintChains(currTaintFlag,tchains);
+                        if (tchains.empty()) {
+                            //No taint from user inputs.
+                            continue;
+                        }
+                        std::string warningMsg = "Loop is bounded by a tainted value.";
+                        VulnerabilityWarning *currWarning = new VulnerabilityWarning(this->currFuncCallSites,
+                                                                                     &tchains,
+                                                                                     warningMsg, &I,
+                                                                                     TAG);
+                        this->currState.addVulnerabilityWarning(currWarning);
+                        if(this->warnedInstructions.find(&I) == this->warnedInstructions.end()) {
+                            this->warnedInstructions.insert(&I);
+                        }
+#ifdef ONLY_ONE_WARNING
+                        return;
+#endif
                     }
                 }
-
             }
         } else {
 #ifdef DEBUG_TAINTED_LOOP_COND

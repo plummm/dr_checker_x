@@ -28,10 +28,15 @@ namespace DRCHECKER {
         O << "\"warn_str\":\"";
         O << InstructionUtils::escapeJsonString(this->warning_string);
         O << "\",";
-        //
         InstructionUtils::printInstJson(this->target_instr,O);
-        O << ",\"inst_trace\":";
-        printInstlocTraceJson(&(this->trace),O);
+        int i = 0;
+        for (auto &trace : this->traces) {
+            if (trace == nullptr) {
+                continue;
+            }
+            O << ",\"inst_trace_" << i++ << "\":";
+            printInstlocTraceJson(trace,O);
+        }
         O << ",\"leaked_struct\":\"" << InstructionUtils::escapeValueString(this->targetObj) << "\"";
         O << "}\n";
     }

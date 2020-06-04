@@ -31,6 +31,15 @@ namespace DRCHECKER {
                                                                                                  found_by) {
         }
 
+        TaintedSizeWarning(std::vector<Instruction*> *callTrace,
+                           std::set<std::vector<InstLoc*>*> *srcTraces, std::string warningMsg,
+                           Instruction *targetInstr, std::string found_by): VulnerabilityWarning(callTrace,
+                                                                                                 srcTraces,
+                                                                                                 warningMsg,
+                                                                                                 targetInstr,
+                                                                                                 found_by) {
+        }
+
         virtual void printCompleteWarning(llvm::raw_ostream& O) const;
 
         //virtual void printWarning(llvm::raw_ostream& O) const;
