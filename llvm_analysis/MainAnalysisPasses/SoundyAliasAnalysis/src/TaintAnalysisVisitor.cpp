@@ -127,13 +127,13 @@ namespace DRCHECKER {
 
         std::set<TaintFlag*> *newTaintInfo = new std::set<TaintFlag*>();
 
-        for(auto currVal:srcVals) {
+        for(auto currVal : srcVals) {
             std::set<TaintFlag*> *currValTaintInfo = getTaintInfo(currVal);
             // we do not have taint info? strip and check
             if(currValTaintInfo == nullptr) {
                 currVal = currVal->stripPointerCasts();
+                currValTaintInfo = getTaintInfo(currVal);
             }
-            currValTaintInfo = getTaintInfo(currVal);
             if(currValTaintInfo != nullptr) {
                 this->makeTaintInfoCopy(targetInstr, dyn_cast<Instruction>(targetInstr),
                                         currValTaintInfo, newTaintInfo);
@@ -236,7 +236,7 @@ namespace DRCHECKER {
         // check if one of the operand is tainted?
         // get all values that need to be merged.
         std::set<Value*> allVals;
-        for(unsigned i=0;i<I.getNumOperands(); i++) {
+        for(unsigned i=0; i<I.getNumOperands(); i++) {
             Value* currOp = I.getOperand(i);
             RangeAnalysis::Range currRange = this->currState.getRange(currOp);
             if(currRange.isBounded()) {
@@ -264,7 +264,7 @@ namespace DRCHECKER {
         std::set<TaintFlag*> *newTaintInfo = new std::set<TaintFlag*>();
 
         bool already_stripped = true;
-        if(srcTaintInfo == nullptr) {
+        if (srcTaintInfo == nullptr) {
 #ifdef DEBUG_LOAD_INSTR
             dbgs() << "TaintAnalysisVisitor::visitLoadInst(): No taint info for srcPointer: " << InstructionUtils::getValueStr(srcPointer) << "\n";
 #endif
@@ -280,7 +280,7 @@ namespace DRCHECKER {
         }
 
         //Copy the taint from tainted pointer.
-        if(srcTaintInfo != nullptr) {
+        if (srcTaintInfo != nullptr) {
 #ifdef DEBUG_LOAD_INSTR
             dbgs() << "The src pointer itself is tainted.\n";
 #endif

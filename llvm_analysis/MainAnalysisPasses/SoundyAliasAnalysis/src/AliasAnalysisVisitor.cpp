@@ -22,11 +22,13 @@ namespace DRCHECKER {
 #define DEBUG_UPDATE_POINTSTO
 //#define AGGRESSIVE_PTO_DUP_FILTER
 //#define DEBUG_TMP
+//#define INFER_XENTRY_SHARED_OBJ
 
     //hz: A helper method to create and (taint) a new OutsideObject.
     OutsideObject* AliasAnalysisVisitor::createOutsideObj(Value *p, bool taint) {
         InstLoc *vloc = new InstLoc(p,this->currFuncCallSites);
         std::map<Value *, std::set<PointerPointsTo*>*> *currPointsTo = this->currState.getPointsToInfo(this->currFuncCallSites);
+#ifdef INFER_XENTRY_SHARED_OBJ
         //Can we get a same-typed object from the global cache (generated when analyzing another entry function)?
         //NOTE: there are multiple places in the code that create a new OutsideObject, but we onlyd do this multi-entry cache mechanism here,
         //because other places create the object that is related to another object (emb/host/field point-to), while we only need to cache the
@@ -39,15 +41,18 @@ namespace DRCHECKER {
                 return obj;
             }
         }
+#endif
         std::set<TaintFlag*> *existingTaints = nullptr;
         //Need to taint it?
         if (taint) {
             existingTaints = TaintUtils::getTaintInfo(this->currState,this->currFuncCallSites,p);
         }
         OutsideObject *robj = DRCHECKER::createOutsideObj(vloc, currPointsTo, taint, existingTaints);
+#ifdef INFER_XENTRY_SHARED_OBJ
         if (robj) {
             DRCHECKER::addToSharedObjCache(robj);
         }
+#endif
         return robj;
     }
 
@@ -1617,8 +1622,8 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
         dbgs() << "AliasAnalysisVisitor::visitStoreInst(): " << InstructionUtils::getValueStr(&I) << "\n";
 #endif
         Value *targetPointer = I.getPointerOperand();
-        GEPOperator *gep = dyn_cast<GEPOperator>(I.getPointerOperand());
-        if(gep && gep->getNumOperands() > 0 && gep->getPointerOperand() && !dyn_cast<GetElementPtrInst>(I.getPointerOperand())) {
+        GEPOperator *gep = dyn_cast<GEPOperator>(targetPointer);
+        if(gep && gep->getNumOperands() > 0 && gep->getPointerOperand() && !dyn_cast<GetElementPtrInst>(targetPointer)) {
 #ifdef DEBUG_STORE_INSTR
             dbgs() << "There is a GEP operator for targetPointer: " << InstructionUtils::getValueStr(gep) << "\n";
 #endif
