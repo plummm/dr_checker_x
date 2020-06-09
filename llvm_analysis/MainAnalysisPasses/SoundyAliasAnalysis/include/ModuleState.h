@@ -702,9 +702,15 @@ namespace DRCHECKER {
             if (!obj) {
                 return 0;
             }
+            //Always includes itself.
+            res.insert(obj);
             for (std::set<AliasObject*> *cls : eqObjs) {
                 if (cls && cls->find(obj) != cls->end()) {
-                    res.insert(cls->begin(),cls->end());
+                    for (AliasObject *co : *cls) {
+                        if (obj->auto_generated || co->auto_generated) {
+                            res.insert(co);
+                        }
+                    }
                     return 0;
                 }
             }
@@ -724,7 +730,11 @@ namespace DRCHECKER {
                     getAllObjsForPath(ap,*newCls);
                 }
             }
-            res.insert(newCls->begin(),newCls->end());
+            for (AliasObject *co : *newCls) {
+                if (obj->auto_generated || co->auto_generated) {
+                    res.insert(co);
+                }
+            }
             return 0;
         }
 
