@@ -382,13 +382,16 @@ namespace DRCHECKER {
         //Ok, now try to insert records in "unique_pto" to field points-to.
         //to_add: the pto records we should insert in the end (e.g. we may have duplicated records in existing field pto).
         //to_del: The existing pto records we should remove (e.g. overridden by new pto due to CFG relationship like post-dominator).
+        //NOTE that instead of actually removing the overridden pto, we will mark it as "inactive" so the later load won't consider
+        //it. The reason is that in the bug detection phase, we need to have a record of all ever existed pto relationship.
         std::set<ObjectPointsTo*> to_add, to_del;
         for (ObjectPointsTo *pto : unique_pto) {
             //Kill every existing pto we can, then decide whether we need to add current new pto.
             bool is_dup = false;
             for (ObjectPointsTo *e : this->pointsTo[srcfieldId]) {
                 //The kill criteria: current pto is a strong update and it post-dominates an existing pto.
-                if (!pto->is_weak) {
+                //NOTE that we only need to kill those active pto records, since inactive ones are already killed.
+                if (e->is_active && !pto->is_weak) {
                     //Ok, it's a strong update, decide whether it post-dominates "e", if so, delete "e" from existing pto set.
                     if (pto->propogatingInst && pto->propogatingInst->postDom(e->propogatingInst)) {
                         to_del.insert(e);
@@ -417,6 +420,8 @@ namespace DRCHECKER {
                 if (e->is_weak != pto->is_weak) {
                     e->is_weak = false;
                 }
+                //Re-activate the existing pto due to the fact that a duplicated one is freshly inserted.
+                this->activateFieldPto(e,true);
             }
             if (!is_dup) {
                 to_add.insert(pto);
@@ -425,8 +430,14 @@ namespace DRCHECKER {
                 delete(pto);
             }
         }
-        //Do the actual deletion and insertion.
+        //Do the actual deletion(de-activation) and insertion(activation).
         for (ObjectPointsTo *x : to_del) {
+            this->activateFieldPto(x,false);
+#ifdef DEBUG_UPDATE_FIELD_POINT
+            dbgs() << "updateFieldPointsTo_do(): de-activate point-to: ";
+            x->print(dbgs());
+#endif
+            /*
             this->pointsTo[srcfieldId].erase(x);
             //Don't forget to update the "pointsFrom" records of the affected objects.
             if (x->targetObject) {
@@ -437,6 +448,7 @@ namespace DRCHECKER {
             x->print(dbgs());
 #endif
             delete(x);
+            */
         }
         for (ObjectPointsTo *x : to_add) {
             this->pointsTo[srcfieldId].insert(x);
@@ -444,13 +456,14 @@ namespace DRCHECKER {
             if (x->targetObject) {
                 x->targetObject->addPointsFrom(this,x);
             }
+            this->activateFieldPto(x,true);
 #ifdef DEBUG_UPDATE_FIELD_POINT
-            dbgs() << "updateFieldPointsTo_do(): add point-to: ";
+            dbgs() << "updateFieldPointsTo_do(): add and activate point-to: ";
             x->print(dbgs());
 #endif
         }
 #ifdef DEBUG_UPDATE_FIELD_POINT
-        dbgs() << "updateFieldPointsTo_do(): After updates: " << this->countObjectPointsTo(srcfieldId) << "\n"; 
+        dbgs() << "updateFieldPointsTo_do(): After updates: " << this->countObjectPointsTo(srcfieldId) << " active: " << this->countObjectPointsTo(srcfieldId,1) << "\n"; 
 #endif
     }
 

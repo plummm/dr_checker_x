@@ -66,9 +66,12 @@ namespace DRCHECKER {
         //For customized usage.
         //E.g. when processing GEP, sometimes we may convert all indices into a single offset and skip "processGEPMultiDimension", use this flag to indicate this.
         int flag = 0;
+        //indicates whether this pto record is currently active (e.g. may be invalidated by another strong post-dom pto update.).
+        bool is_active = true;
 
         ObjectPointsTo() {
             this->flag = 0;
+            this->is_active = true;
         }
 
         ~ObjectPointsTo() {
@@ -81,6 +84,7 @@ namespace DRCHECKER {
             this->propogatingInst = srcObjPointsTo->propogatingInst;
             this->is_weak = srcObjPointsTo->is_weak;
             this->flag = 0;
+            this->is_active = srcObjPointsTo->is_active;
         }
 
         ObjectPointsTo(long fieldId, AliasObject *targetObject, long dstfieldId, InstLoc *propogatingInst = nullptr, bool is_Weak = false) {
@@ -90,6 +94,7 @@ namespace DRCHECKER {
             this->propogatingInst = propogatingInst;
             this->is_weak = is_weak;
             this->flag = 0;
+            this->is_active = true;
         }
 
         virtual ObjectPointsTo* makeCopy() {
@@ -302,7 +307,8 @@ namespace DRCHECKER {
             }
         }
 
-        unsigned long countObjectPointsTo(long srcfieldId) {
+        //If "act" is negative, return # of all pto on file, otherwise, only return active/inactive pto records.
+        unsigned long countObjectPointsTo(long srcfieldId, int act = -1) {
             /***
              * Count the number of object-field combinations that could be pointed by
              * a field (i.e srcfieldId).
@@ -310,7 +316,16 @@ namespace DRCHECKER {
             if (this->pointsTo.find(srcfieldId) == this->pointsTo.end()) {
                 return 0;
             }
-            return this->pointsTo[srcfieldId].size();
+            if (act < 0) {
+                return this->pointsTo[srcfieldId].size();
+            }
+            int num = 0;
+            for (ObjectPointsTo *pto : this->pointsTo[srcfieldId]) {
+                if (pto && pto->is_active == !!act) {
+                    ++num;
+                }
+            }
+            return num;
         }
 
         //update the "pointsFrom" records.
@@ -335,19 +350,45 @@ namespace DRCHECKER {
             return true;
         }
 
-        bool erasePointsFrom(AliasObject *srcObj, ObjectPointsTo *pto) {
+        //If "act" is negative, the specified pto record will be removed, otherwise, its "is_active" field will be set to "act".
+        bool erasePointsFrom(AliasObject *srcObj, ObjectPointsTo *pto, int act = -1) {
             if (!srcObj || !pto || this->pointsFrom.find(srcObj) == this->pointsFrom.end()) {
                 return true;
             }
             for (auto it = this->pointsFrom[srcObj].begin(); it != this->pointsFrom[srcObj].end(); ) {
                 ObjectPointsTo *p = *it;
                 if (p->fieldId == pto->fieldId && p->dstfieldId == pto->dstfieldId) {
-                    it = this->pointsFrom[srcObj].erase(it);
+                    if (act < 0) {
+                        it = this->pointsFrom[srcObj].erase(it);
+                    }else {
+                        //Just deactivate the pointsFrom record w/o removing it.
+                        p->is_active = !!act;
+                        ++it;
+                    }
                 }else {
                     ++it;
                 }
             }
             return true;
+        }
+
+        //activate/de-activate the field pto record.
+        void activateFieldPto(ObjectPointsTo *pto, bool activate = true) {
+            if (!pto) {
+                return;
+            }
+            if (activate) {
+                pto->is_active = true;
+                if (pto->targetObject) {
+                    pto->targetObject->erasePointsFrom(this,pto,1);
+                }
+            }else {
+                pto->is_active = false;
+                if (pto->targetObject) {
+                    pto->targetObject->erasePointsFrom(this,pto,0);
+                }
+            }
+            return;
         }
 
         //Get the type of a specific field in this object.
