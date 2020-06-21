@@ -469,7 +469,7 @@ namespace DRCHECKER {
 
     void ObjectPointsTo::print(llvm::raw_ostream& OS) {
         if (this->targetObject) {
-            OS << InstructionUtils::getTypeStr(this->targetObject->targetType) << " | " << this->fieldId << " -> " << this->dstfieldId;
+            OS << this->fieldId << " -> " << InstructionUtils::getTypeStr(this->targetObject->targetType) << " | " << this->dstfieldId;
             OS << " Tgt Obj ID: " << (const void*)(this->targetObject) << "\n";
         }
     }

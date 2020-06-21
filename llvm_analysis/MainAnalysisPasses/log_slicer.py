@@ -50,11 +50,18 @@ def inst_analyze():
 #TODO: add context lines to the identified obj lines when appropriate.
 def obj_slice(k):
     global log,cc,insts
+    #For each tuple entry k, if the matched obj line contains k[1], then we will try to include the context
+    #up to the line including k[0] and down to the line including k[2].
+    #To to safe and conservative, we will not include the context lines that are out of current inst scope.
+    ctx = [
+        ('updateFieldPointsTo() for', 'updateFieldPointsTo', 'After updates'),
+    ]
     cc_index = sorted(list(cc))
     cur_cc = 0
     cur_in = -1
     next_in = -1
-    for i in range(len(log)):
+    i = 0
+    while i < len(log):
         if log[i].find(k) >= 0:
             #Print the post-inst visit context of the previous matched line if needed.
             if cur_in > -1 and cur_in + 1 < len(insts) and i >= insts[cur_in + 1]:
@@ -72,8 +79,29 @@ def obj_slice(k):
                 cur_in = j
                 print_inst(insts[j],log[insts[j]])
             #INVARIANT: 'cur_in' is the nearest previous inst visit of the current matched obj line.
-            #Print the matched obj line itself
-            print_match(i,log[i])
+            #Print the matched obj line w/ necessary contexts.
+            has_ctx = False
+            #Current inst scope
+            ui = (0 if cur_in < 0 else insts[cur_in])
+            di = (insts[cur_in+1] if cur_in+1 < len(insts) else len(log))
+            for t in ctx:
+                if log[i].find(t[1]) >= 0:
+                    #Identify the start and the end of the context.
+                    up = down = i
+                    while up > ui and log[up].find(t[0]) < 0:
+                        up -= 1
+                    while down < di and log[down].find(t[2]) < 0:
+                        down += 1
+                    #print '-----------------' + 'ui:' + str(ui) + ' di:' + str(di) + ' up:' + str(up) + ' down:' + str(down) + ' i:' + str(i)
+                    #Printing..
+                    for m in range(up,down+1):
+                        print_match(m,log[m])
+                    i = down
+                    has_ctx = True
+                    break
+            if not has_ctx:
+                print_match(i,log[i])
+        i += 1
 
 def tag_slice(k):
     pass
