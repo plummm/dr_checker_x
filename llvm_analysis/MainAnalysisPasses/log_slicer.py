@@ -14,7 +14,13 @@ def println(ln,s):
     print '%-*d: %s' % (10,ln+1,s)
 
 def print_cc(ln,c):
-    println(ln,'->'.join(c))
+    println(ln,'##CC: ' + '->'.join(c))
+
+def print_inst(ln,s):
+    println(ln,'--INST: ' + s)
+
+def print_match(ln,s):
+    println(ln,'    ' + s)
 
 #decide whether a line is a inst visit/update event.
 def is_inst_line(i):
@@ -52,7 +58,7 @@ def obj_slice(k):
         if log[i].find(k) >= 0:
             #Print the post-inst visit context of the previous matched line if needed.
             if cur_in > -1 and cur_in + 1 < len(insts) and i >= insts[cur_in + 1]:
-                println(insts[cur_in + 1],log[insts[cur_in + 1]])
+                print_inst(insts[cur_in + 1],log[insts[cur_in + 1]])
                 cur_in += 1
             #First print the cc history to this matched line.
             while cur_cc < len(cc_index) and i >= cc_index[cur_cc]:
@@ -64,10 +70,10 @@ def obj_slice(k):
                 j += 1
             if j <> cur_in:
                 cur_in = j
-                println(insts[j],log[insts[j]])
+                print_inst(insts[j],log[insts[j]])
             #INVARIANT: 'cur_in' is the nearest previous inst visit of the current matched obj line.
             #Print the matched obj line itself
-            println(i,log[i])
+            print_match(i,log[i])
 
 def tag_slice(k):
     pass
