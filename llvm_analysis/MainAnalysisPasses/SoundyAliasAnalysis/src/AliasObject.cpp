@@ -482,6 +482,9 @@ namespace DRCHECKER {
             return nullptr;
         }
         OutsideObject *newObj = new OutsideObject(nullptr, ty);
+#ifdef DEBUG_CREATE_DUMMY_OBJ_IF_NULL
+        dbgs() << "Type-based createOutsideObj(): New obj created: " << (const void*)newObj << "\n";
+#endif
         //All outside objects are generated automatically.
         newObj->auto_generated = true;
         //Need taint?

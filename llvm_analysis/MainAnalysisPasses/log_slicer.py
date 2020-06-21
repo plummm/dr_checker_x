@@ -1,0 +1,125 @@
+#!/usr/bin/python
+
+import sys,os
+
+#Raw log file content
+log = []
+#line -> call chain
+cc = {}
+#lines that are inst events, record the line num.
+insts = []
+
+#To match the vim, we change 0-based to 1-based
+def println(ln,s):
+    print '%-*d: %s' % (10,ln+1,s)
+
+def print_cc(ln,c):
+    println(ln,'->'.join(c))
+
+#decide whether a line is a inst visit/update event.
+def is_inst_line(i):
+    global log
+    #After seeing a prefix string, we need to match the "!dbg" within the Nth line next, if matched, then it's an inst line.
+    pref = [
+        'AliasAnalysisVisitor::visit', 0,
+        'TaintAnalysisVisitor::visit', 0,
+        'updatePointsToObjects for', 0,
+        'TaintUtils::updateTaintInfo() for', 0,
+        '*********fetchPointsToObjects', 1,
+    ]
+    if i < 0 or i >= len(log) or log[i].find('!dbg') < 0:
+        return False;
+    for k in range(0,len(pref),2):
+        off = pref[k+1]
+        if i-off >= 0 and log[i-off].startswith(pref[k]):
+            return True
+    return False
+
+def inst_analyze():
+    global log,insts
+    for i in range(len(log)):
+        if is_inst_line(i):
+            insts.append(i)
+
+#TODO: add context lines to the identified obj lines when appropriate.
+def obj_slice(k):
+    global log,cc,insts
+    cc_index = sorted(list(cc))
+    cur_cc = 0
+    cur_in = -1
+    next_in = -1
+    for i in range(len(log)):
+        if log[i].find(k) >= 0:
+            #Print the post-inst visit context of the previous matched line if needed.
+            if cur_in > -1 and cur_in + 1 < len(insts) and i >= insts[cur_in + 1]:
+                println(insts[cur_in + 1],log[insts[cur_in + 1]])
+                cur_in += 1
+            #First print the cc history to this matched line.
+            while cur_cc < len(cc_index) and i >= cc_index[cur_cc]:
+                print_cc(cc_index[cur_cc],cc[cc_index[cur_cc]])
+                cur_cc += 1
+            #Then print the nearest previous inst visit.
+            j = cur_in
+            while j + 1 < len(insts) and i >= insts[j+1]:
+                j += 1
+            if j <> cur_in:
+                cur_in = j
+                println(insts[j],log[insts[j]])
+            #INVARIANT: 'cur_in' is the nearest previous inst visit of the current matched obj line.
+            #Print the matched obj line itself
+            println(i,log[i])
+
+def tag_slice(k):
+    pass
+
+#Analyze the call chain at each line in the log.
+def cc_analyze():
+    global log,cc
+    cur_cc = []
+    ln = 0
+    for l in log:
+        #E.g. line format:
+        #[TIMING] Start func(5) snd_seq_pool_new: Thu Feb 13 13:50:05 2020  
+        #[TIMING] End func(5) snd_seq_pool_new in: 1.122699e+01s 
+        if l.startswith('[TIMING] Start func'):
+            tks = l.split(' ')
+            if len(tks) < 4:
+                cur_cc.append('!ERR')
+            else:
+                cur_cc.append(tks[3][:-1])
+            cc[ln] = list(cur_cc)
+        elif l.startswith('[TIMING] End func'):
+            if len(cur_cc) > 0:
+                cur_cc.pop()
+            cc[ln] = list(cur_cc)
+        ln += 1
+
+def cc_slice():
+    global cc
+    for i in sorted(list(cc)):
+        print_cc(i,cc[i])
+
+#The log file is in general very large, this script tries to slice only information of interest (e.g. all events related to a certain object)
+#and output them in a well-organized readable format, so that our life can be made easier when debugging...
+if __name__ == '__main__':
+    if len(sys.argv) < 2:
+        print 'Usage: ./log_slicer.py log_file key_type(tag/obj) key(ID)'
+    else:
+        #First read in the log file.
+        with open(sys.argv[1],'r') as f:
+            for l in f:
+                log.append(l[:-1])
+        #Preliminary callchain analysis
+        cc_analyze()
+        if len(sys.argv) < 4:
+            cc_slice()
+        else:
+            inst_analyze()
+            k = sys.argv[3]
+            if sys.argv[2] == 'tag':
+                tag_slice(k)
+            elif sys.argv[2] == 'obj':
+                obj_slice(k)
+            else:
+                #By default perform a callchain analysis for each line in the log.
+                cc_slice()

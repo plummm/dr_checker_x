@@ -857,6 +857,7 @@ AliasObject* AliasAnalysisVisitor::x_type_obj_copy(AliasObject *srcObj, Type *ds
     return newObj;
 }
 
+//TODO: we need to handle the potential pointer arithmetic here...
 void AliasAnalysisVisitor::visitBinaryOperator(BinaryOperator &I) {
     /***
      *  Handle binary instruction.
@@ -881,16 +882,12 @@ void AliasAnalysisVisitor::visitBinaryOperator(BinaryOperator &I) {
     if(finalPointsToInfo != nullptr) {
         // Update the points to object of the current instruction.
 #ifdef DEBUG_BINARY_INSTR
-        dbgs() << "Updating points to information in the binary instruction:";
-        I.print(dbgs());
-        dbgs() << "\n";
+        dbgs() << "Updating points to information in the binary instruction: " << InstructionUtils::getValueStr(&I) << "\n";
 #endif
         this->updatePointsToObjects(&I, finalPointsToInfo);
     } else {
 #ifdef DEBUG_BINARY_INSTR
-        dbgs() << "No value is a pointer in the binary instruction.";
-        I.print(dbgs());
-        dbgs() << "\n";
+        dbgs() << "No value is a pointer in the binary instruction: " << InstructionUtils::getValueStr(&I) << "\n";
 #endif
     }
 
@@ -898,12 +895,9 @@ void AliasAnalysisVisitor::visitBinaryOperator(BinaryOperator &I) {
     // it is really weired if we are trying to do a binary operation on 2-pointers
     if(hasPointsToObjects(I.getOperand(0)) && hasPointsToObjects(I.getOperand(1))) {
 #ifdef DEBUG_BINARY_INSTR
-        dbgs() << "WARNING: Trying to perform binary operation on 2-pointers.";
-        I.print(dbgs());
-        dbgs() << "\n";
+        dbgs() << "WARNING: Trying to perform binary operation on 2-pointers: " << InstructionUtils::getValueStr(&I) << "\n";
 #endif
     }
-
 }
 
 void AliasAnalysisVisitor::visitPHINode(PHINode &I) {
@@ -930,15 +924,11 @@ void AliasAnalysisVisitor::visitPHINode(PHINode &I) {
         // Update the points to object of the current instruction.
         this->updatePointsToObjects(&I, finalPointsToInfo);
 #ifdef DEBUG_PHI_INSTR
-        dbgs() << "Merging points to information in the PHI instruction:";
-        I.print(dbgs());
-        dbgs() << "\n";
+        dbgs() << "Merging points to information in the PHI instruction: " << InstructionUtils::getValueStr(&I) << "\n";
 #endif
     } else {
 #ifdef DEBUG_PHI_INSTR
-        dbgs() << "None of the operands are pointers in the PHI instruction:";
-        I.print(dbgs());
-        dbgs() << "\n";
+        dbgs() << "None of the operands are pointers in the PHI instruction: " << InstructionUtils::getValueStr(&I) << "\n";
 #endif
     }
 
