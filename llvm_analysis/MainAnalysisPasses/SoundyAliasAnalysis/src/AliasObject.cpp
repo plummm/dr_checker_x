@@ -28,9 +28,8 @@ namespace DRCHECKER {
             Instruction *targetInstr, bool create_arg_obj) {
         dbgs() << "\n*********fetchPointsToObjects**********\n";
         dbgs() << "Current Inst: " << InstructionUtils::getValueStr(targetInstr) << "\n";
-        dbgs() << "Object Type: " << InstructionUtils::getTypeStr(this->targetType) << "\n";
+        dbgs() << InstructionUtils::getTypeStr(this->targetType) << " | " << srcfieldId << " OBJ: " << (const void*)this << "\n";
         dbgs() << "Object Ptr: " << InstructionUtils::getValueStr(this->getValue()) << "\n";
-        dbgs() << "Obj ID: " << (const void*)this << "\n";
         if (this->getValue()){
             /*
                if(dyn_cast<Instruction>(this->targetVar)){
@@ -39,7 +38,6 @@ namespace DRCHECKER {
                }
              */
         }
-        dbgs() << "Target Field: " << srcfieldId << "\n";
         dbgs() << "*******************\n";
     }
 
@@ -89,21 +87,55 @@ namespace DRCHECKER {
     }
 
     void getLivePtos(std::set<ObjectPointsTo*> *srcPto, InstLoc *loc, std::set<ObjectPointsTo*> *retPto) {
-        if (!srcPto || !retPto) {
+        if (!srcPto || !retPto || !loc) {
+#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
+            dbgs() << "AliasObject::getLivePtos(): !srcPto || !retPto || !loc\n";
+#endif
+            return;
+        }
+        int stCnt = retPto->size();
+        //Preliminary processing: filter out the inactive pto records.
+        std::set<ObjectPointsTo*> actPtos;
+        for (ObjectPointsTo *pto : *srcPto) {
+            if (pto && pto->is_active) {
+                actPtos.insert(pto);
+            }
+        }
+        if (actPtos.empty()) {
+#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
+            dbgs() << "AliasObject::getLivePtos(): No active/valid pto records after pre-filtering!\n";
+#endif
             return;
         }
         //Step 1: reachability test - whether a src pto (updated at a certain InstLoc) can reach current location.
-        if (loc) {
-            for (ObjectPointsTo *pto : *srcPto) {
-                if (pto && loc->reachable(pto->propogatingInst)) {
+        //NOTE: here we need to consider the case where one pto is killed along its path to the destination by another strong pto update.
+        std::set<InstLoc*> blocklist;
+        for (ObjectPointsTo *pto : actPtos) {
+            if (pto->propogatingInst && !pto->is_weak) {
+                blocklist.insert(pto->propogatingInst);
+            }
+        }
+        for (ObjectPointsTo *pto : actPtos) {
+            if (pto->propogatingInst) {
+                if (loc->reachable(pto->propogatingInst,&blocklist)) {
                     retPto->insert(pto);
                 }
+            }else {
+                //TODO: is it correct to conservatively add the pto records w/o update sites to the live pto set?
+#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
+                dbgs() << "AliasObject::getLivePtos(): !!! pto w/o update site info: ";
+                pto->print(dbgs());
+#endif
+                retPto->insert(pto);
             }
         }
         //Step 2: post-dom test - some pto records may "kill" others due to post-dom relationship.
         //TODO: do we really need this test here given that we have already done such a test when updating the field pto.
         //Step 3: de-duplication test. 
         //TODO: we may not need to do this as well since it's performed at the update time.
+#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
+        dbgs() << "AliasObject::getLivePtos(): initial #candidates: " << srcPto->size() << " #active: " << actPtos.size() << " #final: " << retPto->size() - stCnt << "\n";
+#endif
         return;
     }
 
@@ -602,7 +634,7 @@ namespace DRCHECKER {
             return nullptr;
         }
 #ifdef DEBUG_CREATE_EMB_OBJ
-        dbgs() << "createEmbObj(): host type: " << InstructionUtils::getTypeStr(hostObj->targetType) << " | " << host_dstFieldId << "\n";
+        dbgs() << "createEmbObj(): host type: " << InstructionUtils::getTypeStr(hostObj->targetType) << " | " << host_dstFieldId << " ID: " << (const void*)(hostObj) << "\n";
 #endif
         if (dyn_cast<SequentialType>(hostObj->targetType)) {
             //We collapse the array/vector to a single element.

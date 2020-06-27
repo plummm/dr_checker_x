@@ -73,8 +73,20 @@ namespace DRCHECKER {
         //Return true if this InstLoc post-dominates the "other" InstLoc.
         bool postDom(InstLoc *other);
 
-        //Return true if this is reachable from the "other" InstLoc.
-        bool reachable(InstLoc *other);
+        //Return true if this is reachable from the "other" InstLoc, under the presence of the blocking instructions in the "blocklist".
+        bool reachable(InstLoc *other, std::set<InstLoc*> *blocklist = nullptr);
+        
+        //Whether a callsite in the calling context can bypass all the blocking nodes and reach current inst.
+        bool callable(int ci, std::set<InstLoc*> *blocklist);
+        
+        //Whether current inst can return to a callsite in the calling context avoiding all the blocking nodes.
+        bool returnable(int ci, std::set<InstLoc*> *blocklist);
+
+        //Decide whether "this" can be reached from the entry of its host function when there exists some blocking nodes.
+        bool reachableFromSt(std::set<InstLoc*> *blocklist);
+
+        //Decide whether "this" can reach its host function return sites when there exists some blocking nodes.
+        bool reachableToEd(std::set<InstLoc*> *blocklist);
     };
 
     extern void printInstlocJson(InstLoc *inst, llvm::raw_ostream &O);

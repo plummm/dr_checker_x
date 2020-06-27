@@ -130,12 +130,11 @@ namespace DRCHECKER {
     }
 
 
-    // following functions are shamelessly copied from LLVM.
-    bool isPotentiallyReachableFromMany(SmallVectorImpl<BasicBlock *> &Worklist, BasicBlock *StopBB) {
-
-        // Limit the number of blocks we visit. The goal is to avoid run-away compile
-        // times on large CFGs without hampering sensible code. Arbitrarily chosen.
-        unsigned Limit = 32;
+    // The basic skeleton of the below code is from llvm, but we need to add support for "blocklist" and accurate reachability test instead of "potentially".
+    // "limit": Limit the number of blocks we visit. The goal is to avoid run-away compile times on large CFGs without hampering sensible code.
+    // We can set "limit" to 0 to have an accurate reachability test (i.e. exhaust *all* the paths).
+    bool isPotentiallyReachableFromMany(SmallVectorImpl<BasicBlock*> &Worklist, BasicBlock *StopBB, unsigned limit = 32) {
+        bool has_limit = (limit > 0);
         SmallSet<const BasicBlock*, 32> Visited;
         do {
             BasicBlock *BB = Worklist.pop_back_val();
@@ -144,7 +143,7 @@ namespace DRCHECKER {
             if (BB == StopBB)
                 return true;
 
-            if (!--Limit) {
+            if (has_limit && !--limit) {
                 // We haven't been able to prove it one way or the other. Conservatively
                 // answer true -- that there is potentially a path.
                 return true;
@@ -157,10 +156,16 @@ namespace DRCHECKER {
         return false;
     }
 
-    bool isPotentiallyReachable(const Instruction *A, const Instruction *B) {
-        assert(A->getParent()->getParent() == B->getParent()->getParent() &&
-               "This analysis is function-local!");
-
+    //NOTE: we assume both "A", "B", and those blocking instructions in "blocklist" all belong to the *same* function!
+    //If "A" is nullptr, we will set the entry inst as "A";
+    //If "B" is nullptr, we will regard any function return inst as "B" (e.g. return true if "A" can reach any ret inst).
+    bool isPotentiallyReachable(const Instruction *A, const Instruction *B, unsigned limit = 32, std::set<Instruction*> *blocklist = nullptr) {
+        if (A && B && A->getParent()->getParent() != B->getParent()->getParent()) {
+            //They belong to different functions.
+            dbgs() << "!!! isPotentiallyReachable(): A and B have different host functions! A: " << InstructionUtils::getValueStr(A);
+            dbgs() << " B: " << InstructionUtils::getValueStr(B) << "\n";
+            return false;
+        }
         SmallVector<BasicBlock*, 32> Worklist;
 
         if (A->getParent() == B->getParent()) {
@@ -169,7 +174,7 @@ namespace DRCHECKER {
             // start looking at multiple blocks, the first instruction of the block is
             // reachable, so we only need to determine reachability between whole
             // blocks.
-            BasicBlock *BB = const_cast<BasicBlock *>(A->getParent());
+            BasicBlock *BB = const_cast<BasicBlock*>(A->getParent());
 
             // Linear scan, start at 'A', see whether we hit 'B' or the end first.
             for (BasicBlock::const_iterator I = A->getIterator(), E = BB->end(); I != E;
@@ -200,10 +205,62 @@ namespace DRCHECKER {
             return false;
 
         return isPotentiallyReachableFromMany(
-                Worklist, const_cast<BasicBlock *>(B->getParent()));
+                Worklist, const_cast<BasicBlock *>(B->getParent()), limit);
     }
 
-    // llvm copying ends
+    // llvm skeleton ends.
+
+    //Decide whether "this" can be reached from the entry of its host function when there exists some blocking nodes.
+    bool InstLoc::reachableFromSt(std::set<InstLoc*> *blocklist) {
+        if (!blocklist || blocklist->empty()) {
+            return true;
+        }
+        if (!this->hasCtx()) {
+            return true;
+        }
+        //First see whether there are any blocking insts within the same function and calling contexts as "this", if none, return true directly.
+        std::set<Instruction*> validBis;
+        for (InstLoc *bi : *blocklist) {
+            if (bi && bi->hasCtx() && *(bi->ctx) == *(this->ctx)) {
+                if (dyn_cast<Instruction*>(bi->inst)) {
+                    validBis.insert(dyn_cast<Instruction*>(bi->inst));
+                }
+            }
+        }
+        if (validBis.empty()) {
+            return true;
+        }
+        Instruction *ei = dyn_cast<Instruction*>(this->inst);
+        if (!ei || !ei->getFunction()) {
+            //Is this possible given the non-null context....
+            return true;
+        }
+        return isPotentiallyReachable(ei->getFunction()->getEntryBlock().getFirstNonPHI(), ei, &validBis);
+    }
+
+    //Decide whether "this" can reach its host function return sites when there exists some blocking nodes.
+    //This can be more complex than "reachableFromSt" since there can be multuiple return sites.
+    bool InstLoc::reachableToEd(std::set<InstLoc*> *blocklist) {
+        if (!blocklist || blocklist->empty()) {
+            return true;
+        }
+        if (!this->hasCtx()) {
+            return true;
+        }
+        //First see whether there are any blocking insts within the same function and calling contexts as "this", if none, return true directly.
+        std::set<InstLoc*> validBis;
+        for (InstLoc *bi : *blocklist) {
+            if (bi && bi->hasCtx() && *(bi->ctx) == *(this->ctx)) {
+                if (dyn_cast<Instruction*>(bi->inst)) {
+                    validBis.insert(dyn_cast<Instruction*>(bi->inst));
+                }
+            }
+        }
+        if (validBis.empty()) {
+            return true;
+        }
+        //Need to inspect all possible return sites, return true as long as we can reach at least one.
+    }
 
     bool BBTraversalHelper::isReachable(Instruction *startInstr, Instruction *endInstr,
                                         std::vector<Instruction*> *callSites) {
@@ -413,14 +470,58 @@ namespace DRCHECKER {
         return true;
     }
 
-    //Whether "other" can reach "this".
-    bool InstLoc::reachable(InstLoc *other) {
+    //Decide whether current inst can be reached from its one specified upward callsite (denoted by the
+    //index "ci" in its calling context), in the presence of the blocking insts in the "blocklist".
+    bool InstLoc::callable(int ci, std::set<InstLoc*> *blocklist) {
+        if (!blocklist || blocklist->empty()) {
+            //Without blocking nodes it's easily reachable if we don't consider the static dead code, which should be rare..
+            return true;
+        }
+        if (!this->hasCtx()) {
+            return true;
+        }
+        assert(this->ctx->size() % 2);
+        if (ci < 0) {
+            ci = 0;
+        }
+        //Align ci to always be the entry inst index in the calling context.
+        if (ci % 2) {
+            ++ci;
+        }
+        //Decide the reachability in each segment of the call chain.
+        for (;ci + 1 < this->ctx->size(); ci += 2) {
+            if ()
+        }
+        if (ci < this->ctx->size()) {
+            //The final segment.
+        }
+        return true;
+    }
+
+    //Decide whether current inst can return to its one specified upward callsite (denoted by the
+    //index "ci" in its calling context), in the presence of the blocking insts in the "blocklist".
+    bool InstLoc::returnable(int ci, std::set<InstLoc*> *blocklist) {
+        //
+    }
+
+    //Whether "other" can reach "this", inter-procedually.
+    bool InstLoc::reachable(InstLoc *other, std::set<InstLoc*> *blocklist) {
         if (!other) {
             return false;
         }
         if (!other->hasCtx()) {
-            //This means the "other" is a global var and can reach every inst inside functions.
-            return true;
+            //This means the "other" is a global var and and in theory can reach every inst inside functions,
+            //but still we need to consider whether the blocklist (if any) is in the way.
+            if (!blocklist || blocklist->empty()) {
+                return true;
+            }
+            //There does exist some blocking insts.
+            if (this->hasCtx()) {
+                return this->callable(0,blocklist);
+            }else {
+                //TODO: both are gloabl vars, what's the definition of the "reachability" then...
+                return true;
+            }
         }
         if (!this->hasCtx()) {
             //"this" is a global var but "other" isn't, obviously "other" cannot reach "this" reversally.
@@ -429,6 +530,7 @@ namespace DRCHECKER {
         assert(this->ctx->size() % 2);
         assert(other->ctx->size() % 2);
         //Ok, both contexts exist, decide whether "other" can reach "this" from its current context.
+        //Get the first divergence point in the call chains of both.
         int ip = 0;
         while (ip < this->ctx->size() && ip < other->ctx->size() && (*(this->ctx))[ip] == (*(other->ctx))[ip] && ++ip);
         if (ip == 0) {
@@ -446,17 +548,32 @@ namespace DRCHECKER {
         Instruction *end = nullptr, *src = nullptr;
         if (ip >= this->ctx->size()) {
             //Case 1.2. or 1.4.
-            end = dyn_cast<Instruction>(this->inst);
+            //First make sure that "other" can successfully return to the callsite within current caller.
+            if (blocklist && !blocklist->empty() && !other->returnable(ip,blocklist)) {
+                return false;
+            }
+            //Then we can only consider the intra-procedural reachability.
             src = dyn_cast<Instruction>(other->inst);
             if (ip < other->ctx->size()) {
                 src = (*(other->ctx))[ip];
             }
+            end = dyn_cast<Instruction>(this->inst);
         }else if (ip >= other->ctx->size()) {
             //Case 1.3.
+            //First make sure "this" can be reached from the call site within current caller.
+            if (blocklist && !blocklist->empty() && !this->callable(ip,blocklist)) {
+                return false;
+            }
+            //Then intra-procedural reachability.
             src = dyn_cast<Instruction>(other->inst);
             end = (*(this->ctx))[ip];
         }else if (ip % 2) {
             //Case 1.1.
+            //First make sure "other" can return *and* "this" can be reached...
+            if (blocklist && !blocklist->empty() && (!other->returnable(ip,blocklist) || !this->callable(ip,blocklist))) {
+                return false;
+            }
+            //Then intra-procedural reachability.
             src = (*(other->ctx))[ip];
             end = (*(this->ctx))[ip];
         }else {
@@ -468,6 +585,7 @@ namespace DRCHECKER {
             //assert(false);
             return false;
         }
+        //TODO: need to support "blocklist" here.
         return isPotentiallyReachable(src,end);
     }
 

@@ -55,6 +55,7 @@ def obj_slice(k):
     #To to safe and conservative, we will not include the context lines that are out of current inst scope.
     ctx = [
         ('updateFieldPointsTo() for', 'updateFieldPointsTo', 'After updates'),
+        ('createEmbObj(): host type', 'createEmbObj', 'createEmbObj(): the embedded obj created'),
     ]
     cc_index = sorted(list(cc))
     cur_cc = 0
@@ -88,9 +89,9 @@ def obj_slice(k):
                 if log[i].find(t[1]) >= 0:
                     #Identify the start and the end of the context.
                     up = down = i
-                    while up > ui and log[up].find(t[0]) < 0:
+                    while t[0] and up > ui and log[up].find(t[0]) < 0:
                         up -= 1
-                    while down < di and log[down].find(t[2]) < 0:
+                    while t[2] and down < di and log[down].find(t[2]) < 0:
                         down += 1
                     #print '-----------------' + 'ui:' + str(ui) + ' di:' + str(di) + ' up:' + str(up) + ' down:' + str(down) + ' i:' + str(i)
                     #Printing..

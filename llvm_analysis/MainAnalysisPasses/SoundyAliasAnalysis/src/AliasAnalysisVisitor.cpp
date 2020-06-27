@@ -408,8 +408,8 @@ namespace DRCHECKER {
                 Type *src_ety = nullptr;
 #ifdef DEBUG_GET_ELEMENT_PTR
                 dbgs() << "AliasAnalysisVisitor::makePointsToCopy(): basePointerType: " << InstructionUtils::getTypeStr(basePointerType) << "\n";
-                dbgs() << "Cur Points-to, host_type: " << InstructionUtils::getTypeStr(host_type) << " | " << host_dstFieldId << "\n";
-                dbgs() << "hostObj: " << (const void*)hostObj <<  " target field id: " << fieldId << " is_var_fid: " << is_var_fid << "\n";
+                dbgs() << "Cur Points-to, host_type: " << InstructionUtils::getTypeStr(host_type) << " | " << host_dstFieldId;
+                dbgs() << " hostObj: " << (const void*)hostObj <<  " target field id: " << fieldId << " is_var_fid: " << is_var_fid << "\n";
 #endif
                 if (!host_type || !InstructionUtils::isIndexValid(host_type,host_dstFieldId)){
                     //TODO: It's unlikely, but is this skip safe?
@@ -518,11 +518,11 @@ update:
                 if (newPointsToObj){
                     //Insert the points-to info.
 #ifdef DEBUG_GET_ELEMENT_PTR
-                    dbgs() << "Assign points-to object: ";
+                    dbgs() << "makePointsToCopy: Assign points-to object: ";
                     if(newPointsToObj->targetObject){
                         dbgs() << InstructionUtils::getTypeStr(newPointsToObj->targetObject->targetType);
                     }
-                    dbgs() << " | dstField: " << newPointsToObj->dstfieldId << "\n";
+                    dbgs() << " | " << newPointsToObj->dstfieldId << " ID: " << (const void*)(newPointsToObj->targetObject) << "\n";
 #endif
                     newPointsToInfo->insert(newPointsToInfo->begin(), newPointsToObj);
                 }
