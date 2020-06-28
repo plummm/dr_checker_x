@@ -130,19 +130,77 @@ namespace DRCHECKER {
     }
 
 
+    unsigned getSuccNum(BasicBlock *bb) {
+        if (!bb) {
+            return 0;
+        }
+        unsigned c = 0;
+        for (auto I = succ_begin(bb), E = succ_end(bb); I != E; ++I, ++c);
+        return c;
+    }
+
     // The basic skeleton of the below code is from llvm, but we need to add support for "blocklist" and accurate reachability test instead of "potentially".
     // "limit": Limit the number of blocks we visit. The goal is to avoid run-away compile times on large CFGs without hampering sensible code.
     // We can set "limit" to 0 to have an accurate reachability test (i.e. exhaust *all* the paths).
-    bool isPotentiallyReachableFromMany(SmallVectorImpl<BasicBlock*> &Worklist, BasicBlock *StopBB, unsigned limit = 32) {
+    bool isPotentiallyReachableFromMany(SmallVectorImpl<BasicBlock*> &Worklist, Instruction *Stop, unsigned limit = 32, std::set<Instruction*> *blocklist = nullptr) {
         bool has_limit = (limit > 0);
-        SmallSet<const BasicBlock*, 32> Visited;
+        SmallSet<const BasicBlock*, 128> Visited;
         do {
             BasicBlock *BB = Worklist.pop_back_val();
             if (!Visited.insert(BB).second)
                 continue;
-            if (BB == StopBB)
-                return true;
-
+            //Visit this BB to see whether the path is killed by a blocking inst or it can reach the target inst already.
+            //First get the effective blocking insts in current BB.
+            std::set<Instruction*> validBis;
+            if (blocklist && !blocklist->empty()) {
+                for (Instruction *bi : *blocklist) {
+                    if (bi && bi->getParent() == BB) {
+                        validBis.insert(bi);
+                    }
+                }
+            }
+            //Scan current BB.
+            if (Stop) {
+                if (Stop->getParent() != BB) {
+                    if (!validBis.empty()) {
+                        //Killed...
+                        continue;
+                    }
+                }else {
+                    if (validBis.empty()) {
+                        //Victory!
+                        return true;
+                    }else {
+                        //See whether we will be killed before reaching "Stop".
+                        for (Instruction *I : *BB) {
+                            if (I == Stop) {
+                                return true;
+                            }
+                            if (validBis.find(I) != validBis.end()) {
+                                //No need to explore more paths since the killer is just before the destination in the same BB.
+                                return false;
+                            }
+                        }
+                        //Impossible to get here.
+                        assert(false);
+                    }
+                }
+            }else {
+                if (!getSuccNum(BB)) {
+                    //We have reached a return site (null Stop means we need to find a path to the return).
+                    if (validBis.empty()) {
+                        //Nothing between us and a return.
+                        return true;
+                    }else {
+                        continue;
+                    }
+                }else {
+                    //Need to continue explore unless it's already killed.
+                    if (!validBis.empty()) {
+                        continue;
+                    }
+                }
+            }
             if (has_limit && !--limit) {
                 // We haven't been able to prove it one way or the other. Conservatively
                 // answer true -- that there is potentially a path.
@@ -150,9 +208,23 @@ namespace DRCHECKER {
             }
             Worklist.append(succ_begin(BB), succ_end(BB));
         } while (!Worklist.empty());
-
         // We have exhausted all possible paths and are certain that 'To' can not be
         // reached from 'From'.
+        return false;
+    }
+
+    //This assumes A and B are within the same BB, perform a linear scan to decide the reachability from A to B.
+    bool isReachableInBB(const Instruction *A, const Instruction *B) {
+        if (!A || !B || A->getParent() != B->getParent()) {
+            return false;
+        }
+        BasicBlock *BB = const_cast<BasicBlock*>(A->getParent());
+        // Linear scan, start at 'A', see whether we hit 'B' or the end first.
+        for (BasicBlock::const_iterator I = A->getIterator(), E = BB->end(); I != E;
+             ++I) {
+            if (&*I == B)
+                return true;
+        }
         return false;
     }
 
@@ -160,6 +232,15 @@ namespace DRCHECKER {
     //If "A" is nullptr, we will set the entry inst as "A";
     //If "B" is nullptr, we will regard any function return inst as "B" (e.g. return true if "A" can reach any ret inst).
     bool isPotentiallyReachable(const Instruction *A, const Instruction *B, unsigned limit = 32, std::set<Instruction*> *blocklist = nullptr) {
+        if (!A && !B) {
+            return true;
+        }
+        if ((A && !A->getParent()) || (B && !B->getParent())) {
+            //One of these insts may be created by ourselves.. Conservatively return true.
+            dbgs() << "!!! isPotentiallyReachable(): A or B doesn't belong to any BBs! A: " << InstructionUtils::getValueStr(A);
+            dbgs() << " B: " << InstructionUtils::getValueStr(B) << "\n";
+            return true;
+        }
         if (A && B && A->getParent()->getParent() != B->getParent()->getParent()) {
             //They belong to different functions.
             dbgs() << "!!! isPotentiallyReachable(): A and B have different host functions! A: " << InstructionUtils::getValueStr(A);
@@ -167,45 +248,78 @@ namespace DRCHECKER {
             return false;
         }
         SmallVector<BasicBlock*, 32> Worklist;
-
-        if (A->getParent() == B->getParent()) {
-            // The same block case is special because it's the only time we're looking
-            // within a single block to see which instruction comes first. Once we
-            // start looking at multiple blocks, the first instruction of the block is
-            // reachable, so we only need to determine reachability between whole
-            // blocks.
-            BasicBlock *BB = const_cast<BasicBlock*>(A->getParent());
-
-            // Linear scan, start at 'A', see whether we hit 'B' or the end first.
-            for (BasicBlock::const_iterator I = A->getIterator(), E = BB->end(); I != E;
-                 ++I) {
-                if (&*I == B)
-                    return true;
+        if (!A) {
+            //Whether we can reach inst B from the function entry w/ the blocking insts.
+            //If no blocking insts at all obviously we can arrive anywhere within the function from entry.
+            if (!blocklist || blocklist->empty()) {
+                return true;
             }
-
-            // Can't be in a loop if it's the entry block -- the entry block may not
-            // have predecessors.
-            if (BB == &BB->getParent()->getEntryBlock())
-                return false;
-
-            // Otherwise, continue doing the normal per-BB CFG walk.
+            //Otherwise perform the standard path search from the entry node.
+            BasicBlock *BB = const_cast<BasicBlock*>(B->getParent());
+            Worklist.push_back(&BB->getParent()->getEntryBlock());
+        }else if (!B) {
+            //Test whether A can reach any return site w/ the block list.
+            //If no blocking insts obviously we can arrive at the return sites.
+            if (!blocklist || blocklist->empty()) {
+                return true;
+            }
+            //Otherwise first see whether it's already blocked within the same node.
+            BasicBlock *BB = const_cast<BasicBlock*>(A->getParent());
+            for (Instruction *bi : *blocklist) {
+                if (bi && bi->getParent() == BB && bi != A && isReachableInBB(A,bi)) {
+                    return false;
+                }
+            }
+            //It can survive the current node, then do the standard path search towards the return sites.
             Worklist.append(succ_begin(BB), succ_end(BB));
-
+            if (Worklist.empty()) {
+                //This means A is already in a return node, and it's not blocked to the end, so directly return true.
+                return true;
+            }
+        }else {
+            //Both A and B are not null.
+            //Optimizations for null "blocklist":
+            if (!blocklist || blocklist->empty()) {
+                if (A->getParent() != B->getParent()) {
+                    if (A->getParent() == &A->getParent()->getParent()->getEntryBlock())
+                        return true;
+                    if (B->getParent() == &A->getParent()->getParent()->getEntryBlock())
+                        return false;
+                }
+            }
+            //First see whether A can go out of its host BB w/o being killed by blocking inst (return false) or meeting B (return true).
+            BasicBlock *BB = const_cast<BasicBlock*>(A->getParent());
+            for (BasicBlock::const_iterator I = A->getIterator(), E = BB->end(); I != E; ++I) {
+                if (&*I == B) {
+                    return true;
+                }
+                if (blocklist && &*I != A && blocklist->find(&*I) != blocklist->end()) {
+                    //Blocked before reaching B...
+                    return false;
+                }
+            }
+            //Shortcuts from the original llvm code: if A and B are both in entry node (cannot be in a loop) and B is before A, return false.
+            if (BB == B->getParent() && BB == &BB->getParent()->getEntryBlock()) {
+                return false;
+            }
+            //Then standard path search..
+            Worklist.append(succ_begin(BB), succ_end(BB));
             if (Worklist.empty()) {
                 // We've proven that there's no path!
                 return false;
             }
-        } else {
-            Worklist.push_back(const_cast<BasicBlock*>(A->getParent()));
         }
-
-        if (A->getParent() == &A->getParent()->getParent()->getEntryBlock())
-            return true;
-        if (B->getParent() == &A->getParent()->getParent()->getEntryBlock())
-            return false;
-
-        return isPotentiallyReachableFromMany(
-                Worklist, const_cast<BasicBlock *>(B->getParent()), limit);
+        //A final optimization: if there are any blocking insts just before B within the same BB, return false directly.
+        //NOTE: the cases where A and B are in the same BB and A is after certain blocking insts in the BB are all handled above.
+        if (B && blocklist && !blocklist->empty()) {
+            BasicBlock *BB = B->getParent();
+            for (Instruction *bi : *blocklist) {
+                if (bi && bi->getParent() == BB && isReachableInBB(bi,B)) {
+                    return false;
+                }
+            }
+        }
+        return isPotentiallyReachableFromMany(Worklist, B, limit, blocklist);
     }
 
     // llvm skeleton ends.
