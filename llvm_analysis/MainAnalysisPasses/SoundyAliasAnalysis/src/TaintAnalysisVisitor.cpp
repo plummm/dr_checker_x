@@ -56,9 +56,9 @@ namespace DRCHECKER {
                                                                   std::set<TaintFlag*> *srcTaintInfo,
                                                                   std::set<TaintFlag*> *dstTaintInfo) {
         if(srcTaintInfo != nullptr) {
-            std::set<TaintFlag *> *newTaintInfo = new std::set<TaintFlag *>();
+            std::set<TaintFlag*> *newTaintInfo = new std::set<TaintFlag*>();
             bool add_taint = false;
-            for (auto currTaint:*srcTaintInfo) {
+            for (auto currTaint : *srcTaintInfo) {
                 if (!currTaint) {
                     continue;
                 }

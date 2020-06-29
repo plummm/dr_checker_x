@@ -68,6 +68,35 @@ namespace DRCHECKER {
             return (this->ctx && !this->ctx->empty());
         }
 
+        //Whether "this"'s ctx is a prefix of "other"'s.
+        //Identical ctx: return 0, prefix: return the 1st index after the prefix, otherwise -1.
+        int prefixCtx(InstLoc *other) {
+            if (!other) {
+                return -1;
+            }
+            if (!other->hasCtx()) {
+                return (this->hasCtx() ? -1 : 0);
+            }
+            int i = 0;
+            for (;i < this->ctx->size() && i < other->ctx->size(); ++i) {
+                if (*(this->ctx)[i] != *(other->ctx)[i]) {
+                    break;
+                }
+            }
+            if (i >= this->ctx->size()) {
+                return (i < other->ctx->size() ? i : 0);
+            }
+            return -1;
+        }
+
+        Function *getFunc() {
+            Instruction *I = dyn_cast<Instruction*>(this->inst);
+            if (!I || !I->getParent()) {
+                return nullptr;
+            }
+            return I->getFunction();
+        }
+
         void print(raw_ostream &O);
 
         //Return true if this InstLoc post-dominates the "other" InstLoc.
@@ -82,11 +111,10 @@ namespace DRCHECKER {
         //Whether current inst can return to a callsite in the calling context avoiding all the blocking nodes.
         bool returnable(int ci, std::set<InstLoc*> *blocklist);
 
-        //Decide whether "this" can be reached from the entry of its host function when there exists some blocking nodes.
-        bool reachableFromSt(std::set<InstLoc*> *blocklist);
+        //Decide whether "this" can be reached from the entry or can reach the return of its host function when there exists some blocking nodes.
+        bool canReachEnd(std::set<InstLoc*> *blocklist, bool fromEntry = true);
 
-        //Decide whether "this" can reach its host function return sites when there exists some blocking nodes.
-        bool reachableToEd(std::set<InstLoc*> *blocklist);
+        void getBlocksInCurrFunc(std::set<InstLoc*> *blocklist, std::set<Instruction*> &validBis);
     };
 
     extern void printInstlocJson(InstLoc *inst, llvm::raw_ostream &O);

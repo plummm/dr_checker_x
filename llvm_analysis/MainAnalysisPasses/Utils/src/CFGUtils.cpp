@@ -214,6 +214,7 @@ namespace DRCHECKER {
     }
 
     //This assumes A and B are within the same BB, perform a linear scan to decide the reachability from A to B.
+    //NOTE: the scope is only the single BB, e.g. we don't consider the case where B reach an earlier position in the BB via a outside loop.
     bool isReachableInBB(const Instruction *A, const Instruction *B) {
         if (!A || !B || A->getParent() != B->getParent()) {
             return false;
@@ -324,56 +325,71 @@ namespace DRCHECKER {
 
     // llvm skeleton ends.
 
-    //Decide whether "this" can be reached from the entry of its host function when there exists some blocking nodes.
-    bool InstLoc::reachableFromSt(std::set<InstLoc*> *blocklist) {
-        if (!blocklist || blocklist->empty()) {
-            return true;
-        }
-        if (!this->hasCtx()) {
-            return true;
-        }
-        //First see whether there are any blocking insts within the same function and calling contexts as "this", if none, return true directly.
-        std::set<Instruction*> validBis;
-        for (InstLoc *bi : *blocklist) {
-            if (bi && bi->hasCtx() && *(bi->ctx) == *(this->ctx)) {
-                if (dyn_cast<Instruction*>(bi->inst)) {
-                    validBis.insert(dyn_cast<Instruction*>(bi->inst));
-                }
-            }
-        }
-        if (validBis.empty()) {
-            return true;
-        }
-        Instruction *ei = dyn_cast<Instruction*>(this->inst);
-        if (!ei || !ei->getFunction()) {
-            //Is this possible given the non-null context....
-            return true;
-        }
-        return isPotentiallyReachable(ei->getFunction()->getEntryBlock().getFirstNonPHI(), ei, &validBis);
+    //We now have a set of blocking insts "bis" associated w/ a same up-level callsite (e-1 is the callsite index in their ctx),
+    //we need to decide whether these blocking insts will prevent that callsite from returning.
+    //NOTE: this callsite may have multiple different callees (e.g. indirect call), in that case, as long as one callee can be
+    //bypassed, we will conclude that the callsite can be bypassed to be conservative.
+    bool bypassCall(std::set<InstLoc*> &bis, int e) {
+        //
     }
 
-    //Decide whether "this" can reach its host function return sites when there exists some blocking nodes.
-    //This can be more complex than "reachableFromSt" since there can be multuiple return sites.
-    bool InstLoc::reachableToEd(std::set<InstLoc*> *blocklist) {
+    void InstLoc::getBlocksInCurrFunc(std::set<InstLoc*> *blocklist, std::set<Instruction*> &validBis) {
         if (!blocklist || blocklist->empty()) {
-            return true;
+            return;
         }
         if (!this->hasCtx()) {
-            return true;
+            return;
         }
-        //First see whether there are any blocking insts within the same function and calling contexts as "this", if none, return true directly.
-        std::set<InstLoc*> validBis;
+        std::map<Instruction*, std::set<InstLoc*>> callsiteBis;
         for (InstLoc *bi : *blocklist) {
-            if (bi && bi->hasCtx() && *(bi->ctx) == *(this->ctx)) {
-                if (dyn_cast<Instruction*>(bi->inst)) {
-                    validBis.insert(dyn_cast<Instruction*>(bi->inst));
+            if (bi && bi->hasCtx()) {
+                int r = this->prefixCtx(bi);
+                if (r == 0) {
+                    //The blocking inst is in exactly the same host function w/ the same calling context as "this".
+                    if (dyn_cast<Instruction*>(bi->inst)) {
+                        validBis.insert(dyn_cast<Instruction*>(bi->inst));
+                    }
+                }else if (r > 0) {
+                    //While the blocking inst is not in the same ctx and function as "this", one of its up level callsite is..
+                    //So we need to further inspect whether this callsite can block our way (e.g. the blocking inst post-dominates this callsite).
+                    callsiteBis[*(other->ctx)[r]].insert(bi);
                 }
             }
         }
+        //Start to inspect the callsites who can lead to blocking insts to see whether they can be bypassed (i.e. there is one path from 
+        //the callsite to the return w/o triggering the underlying blocking insts), if not, these callsites also need to be regarded as blocking insts.
+        for (auto &e : callsiteBis) {
+            Instruction *cs = e.first;
+            std::set<InstLoc*> &bis = e.second;
+            //Some sanity check..
+            if (!cs || !cs->getParent() || cs->getFunction() != this->getFunc()) {
+                continue;
+            }
+            if (!bypassCall(bis,this->ctx->size()+1)) {
+                validBis.insert(cs);
+            }
+        }
+        return;
+    }
+
+    //Decide whether "this" can be reached from the entry of its host function when there exists some blocking nodes.
+    bool InstLoc::canReachEnd(std::set<InstLoc*> *blocklist, bool fromEntry = true) {
+        //First see whether there are any blocking insts within the same function and calling contexts as "this", if none, return true directly.
+        std::set<Instruction*> validBis;
+        this->getBlocksInCurrFunc(blocklist,validBis);
         if (validBis.empty()) {
             return true;
         }
-        //Need to inspect all possible return sites, return true as long as we can reach at least one.
+        //Ok there are some blocking insts, we need to traverse all possible paths.
+        Instruction *ei = dyn_cast<Instruction*>(this->inst);
+        if (!ei || !ei->getParent()) {
+            //In case "this" is a inst created by ourselves or a simple var.
+            return true;
+        }
+        if (fromEntry) {
+            return isPotentiallyReachable(nullptr, ei, 0, &validBis);
+        }
+        return isPotentiallyReachable(ei, nullptr, 0, &validBis);
     }
 
     bool BBTraversalHelper::isReachable(Instruction *startInstr, Instruction *endInstr,
@@ -385,7 +401,7 @@ namespace DRCHECKER {
 
         // both belong to the same function.
         if(startInstr->getParent()->getParent() == endInstr->getParent()->getParent()) {
-            return isPotentiallyReachable(startInstr, endInstr);
+            return isPotentiallyReachable(startInstr, endInstr, 0);
         }
 
         // OK, both instructions belongs to different functions.
@@ -399,7 +415,7 @@ namespace DRCHECKER {
         for(long i=(callSites->size() - 1);i>=0; i--) {
             newEndInstr = (*callSites)[i];
             if(newEndInstr->getParent()->getParent() == startInstr->getParent()->getParent()) {
-                if(isPotentiallyReachable(startInstr, newEndInstr)) {
+                if(isPotentiallyReachable(startInstr, newEndInstr, 0)) {
                     return true;
                 }
             }
@@ -595,16 +611,22 @@ namespace DRCHECKER {
             return true;
         }
         assert(this->ctx->size() % 2);
+        //Align ci to always be the callsite index in the calling context.
         if (ci < 0) {
-            ci = 0;
-        }
-        //Align ci to always be the entry inst index in the calling context.
-        if (ci % 2) {
+            ci = 1;
+        }else if (ci % 2 == 0) {
+            //"ci" indexes an entry inst of a function, re-point it to the next callsite.
             ++ci;
+        }else {
+            //"ci" indexes a callsite, which must be able to reach the entry of its callee, so we start from the callsite in the callee.
+            ci += 2;
         }
         //Decide the reachability in each segment of the call chain.
-        for (;ci + 1 < this->ctx->size(); ci += 2) {
-            if ()
+        for (;ci < this->ctx->size(); ci += 2) {
+            Instruction *I = *(this->ctx)[ci];
+            if (I && I->getParent()) { 
+                //
+            }
         }
         if (ci < this->ctx->size()) {
             //The final segment.
