@@ -329,11 +329,117 @@ namespace DRCHECKER {
     //we need to decide whether these blocking insts will prevent that callsite from returning.
     //NOTE: this callsite may have multiple different callees (e.g. indirect call), in that case, as long as one callee can be
     //bypassed, we will conclude that the callsite can be bypassed to be conservative.
-    bool bypassCall(std::set<InstLoc*> &bis, int e) {
-        //
+    bool bypassCall(std::set<InstLoc*> &bis, unsigned e) {
+        if (bis.empty() || !e) {
+            return true;
+        }
+        //First group the blocking insts according to the 1st callee of the callsite.
+        Instruction *cs = nullptr;
+        std::map<Instruction*,std::set<InstLoc*>> callBis; 
+        for (InstLoc *bi : bis) {
+            if (bi && bi->hasCtx() && e < bi->ctx->size() && 
+                *(bi->ctx)[e] && *(bi->ctx)[e-1]) {
+                if (!cs) {
+                    cs = *(bi->ctx)[e-1];
+                }else if (cs != *(bi->ctx)[e-1]) {
+                    //This doesn't match our pre-condition about this function - blcokers should originate from the same call site.
+                    continue;
+                }
+                callBis[*(bi->ctx)[e]].insert(bi);
+            }
+        }
+        if (callBis.empty()) {
+            return true;
+        }
+        //Insepct each group, as long as one can be bypassed, return true.
+        for (auto &p : callBis) {
+            Instruction *ei = p.first;
+            std::set<InstLoc*> &ebis = p.second;
+            //Recursion: for the 1st layer callee, get all direct blocking insts and potential blocking callsites (i.e. the actual blocking inst
+            //is in a >1 layer callee), then recursively call "bypassCall" to see whether these callsites are true blockers.
+            //After deciding all blocker sites in this 1st level callee, just test the reachability from the entry to return to see whether
+            //the original callsite in the up-level can be bypassed.
+            std::map<Instruction*, std::set<InstLoc*>> callsiteBis;
+            std::set<Instruction*> instBis;
+            for (InstLoc *bi : ebis) {
+                if (e + 1 >= bi->ctx->size()) {
+                    //No more callsites, the blocker is just in current function.
+                    if (dyn_cast<Instruction*>(bi->inst)) {
+                        instBis.insert(dyn_cast<Instruction*>(bi->inst));
+                    }
+                }else {
+                    //Another callsite - a potential blocker but not sure.
+                    //Some sanity checks..
+                    Instruction *I0 = *(this->ctx)[e];
+                    Instruction *I1 = *(this->ctx)[e+1];
+                    if (I0 && I1 && I0->getParent() && I1->getParent() && I0->getFunction() == I1->getFunction()) {
+                        callsiteBis[I1].insert(bi);
+                    }
+                }
+            }
+            //Before resorting to the standard reachability test, we can do some optimizations for early decisions.
+            unsigned isz = instBis.size();
+            unsigned csz = callsiteBis.size();
+            if (isz + csz == 0) {
+                return true;
+            }
+            std::set<BasicBlock*> retDoms;
+            BBTraversalHelper::getDomsForRet(ei->getFunction(), retDoms);
+            //In theory there must exist some dominators for the return sites (e.g. the entry node), so if the return set is empty there must 
+            //be something wrong - in that case we fallback to not have any optimizations since it's already unreliable. 
+            if (isz + csz == 1 && !retDoms.empty()) {
+                if (isz > 0) {
+                    //We can conclude immediately.
+                    BasicBlock *bib = (*instBis.begin())->getParent();
+                    if (retDoms.find(bib) == retDoms.end()) {
+                        //The only blocker is not in the critical path from the entry to return, so it can be bypassed.
+                        return true;
+                    }
+                    //Otherwise still need to see the next group for a different callee, if any.
+                    continue;
+                }else {
+                    //If the potential blocker is not in a critical path then no need for another layer of recursion. 
+                    BasicBlock *bib = (*callsiteBis.begin()).first->getParent();
+                    if (retDoms.find(bib) == retDoms.end()) {
+                        //The only blocker is not in the critical path from the entry to return, so it can be bypassed.
+                        return true;
+                    }
+                    //Ok it's on the critical path, we need to know whether it's a true blocker, if not, still return true directly, 
+                    //otherwise, this group is already killed, turn to the next group.
+                    if (bypassCall((*callsiteBis.begin()).second, e+2)) {
+                        return true;
+                    }
+                    continue;
+                }
+            }
+            //Decide whether the potential callsite blockers are true...
+            for (auto &e : callsiteBis) {
+                if (!bypassCall(e.second,e+2)) {
+                    //Ok this is a real blocker.
+                    instBis.insert(e.first);
+                }
+            }
+            //At this point, we get all blockers in "instBis" (potential callsite blockers also finalized).
+            //Try the optimization again before invoking the standard reachability test.
+            if (instBis.size() == 0) {
+                return true;
+            }
+            if (instBis.size() == 1 && !retDoms.empty()) {
+                BasicBlock *bib = (*instBis.begin())->getParent();
+                if (retDoms.find(bib) == retDoms.end()) {
+                    return true;
+                }
+                continue;
+            }
+            //Ok finally the reachability test..
+            if (isPotentiallyReachable(ei,nullptr,0,&instBis)) {
+                return true;
+            }
+        }
+        return false;
     }
 
-    void InstLoc::getBlocksInCurrFunc(std::set<InstLoc*> *blocklist, std::set<Instruction*> &validBis) {
+    void InstLoc::getBlockersInCurrFunc(std::set<InstLoc*> *blocklist, std::set<Instruction*> &validBis) {
         if (!blocklist || blocklist->empty()) {
             return;
         }
@@ -352,7 +458,9 @@ namespace DRCHECKER {
                 }else if (r > 0) {
                     //While the blocking inst is not in the same ctx and function as "this", one of its up level callsite is..
                     //So we need to further inspect whether this callsite can block our way (e.g. the blocking inst post-dominates this callsite).
-                    callsiteBis[*(other->ctx)[r]].insert(bi);
+                    if (*(other->ctx)[r]) {
+                        callsiteBis[*(other->ctx)[r]].insert(bi);
+                    }
                 }
             }
         }
@@ -376,7 +484,7 @@ namespace DRCHECKER {
     bool InstLoc::canReachEnd(std::set<InstLoc*> *blocklist, bool fromEntry = true) {
         //First see whether there are any blocking insts within the same function and calling contexts as "this", if none, return true directly.
         std::set<Instruction*> validBis;
-        this->getBlocksInCurrFunc(blocklist,validBis);
+        this->getBlockersInCurrFunc(blocklist,validBis);
         if (validBis.empty()) {
             return true;
         }
@@ -434,6 +542,44 @@ namespace DRCHECKER {
             domMap[pfunc] = pdom;
         }
         return domMap[pfunc];
+    }
+
+    void BBTraversalHelper::getDomsForRet(llvm::Function* pfunc, std::set<llvm::BasicBlock*> &r) {
+        llvm::DominatorTree *domT = BBTraversalHelper::getDomTree(pfunc);
+        if (!domT) {
+            return;
+        }
+        //Ok, first get all ret nodes (i.e. #succ = 0).
+        std::set<llvm::BasicBlock*> rets;
+        for (llvm::BasicBlock *bb : *pfunc) {
+            if (getSuccNum(bb) == 0) {
+                rets.insert(bb);
+            }
+        }
+        //Get dominators for all ret nodes.
+        r.clear();
+        std::set<llvm::BasicBlock*> t;
+        for (llvm::BasicBlock *bb : rets) {
+            t.clear();
+            DomTreeNodeBase<BasicBlock> *dtn = domT->getNode(bb);
+            while (dtn) {
+                t.insert(dtn->getBlock());
+                dtn = dtn->getIDom();
+            }
+            if (r.empty()) {
+                r.insert(t.begin(),t.end());
+            }else {
+                //Keep the intersection of "t" and "r" in "r".
+                for (auto it = r.begin(); it != r.end(); ) {
+                    if (t.find(*it) == t.end()) {
+                        it = r.erase(it);
+                    }else {
+                        ++it;
+                    }
+                }
+            }
+        }
+        return;
     }
 
     llvm::PostDominatorTree *BBTraversalHelper::getPostDomTree(llvm::Function* pfunc) { 

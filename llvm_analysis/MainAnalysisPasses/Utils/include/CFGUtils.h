@@ -114,7 +114,7 @@ namespace DRCHECKER {
         //Decide whether "this" can be reached from the entry or can reach the return of its host function when there exists some blocking nodes.
         bool canReachEnd(std::set<InstLoc*> *blocklist, bool fromEntry = true);
 
-        void getBlocksInCurrFunc(std::set<InstLoc*> *blocklist, std::set<Instruction*> &validBis);
+        void getBlockersInCurrFunc(std::set<InstLoc*> *blocklist, std::set<Instruction*> &validBis);
     };
 
     extern void printInstlocJson(InstLoc *inst, llvm::raw_ostream &O);
@@ -165,6 +165,9 @@ namespace DRCHECKER {
 
         //We assume src and end are within the same function.
         static bool instPostDom(Instruction *src, Instruction *end);
+
+        //Get all dom nodes for all return sites (i.e. in order to return we must pass these nodes).
+        static void getDomsForRet(llvm::Function* pfunc, std::set<llvm::BasicBlock*> &ret);
     };
 }
 #endif //PROJECT_CFGUTILS_H
