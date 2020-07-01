@@ -58,7 +58,7 @@ namespace DRCHECKER {
             if (this->ctx == other->ctx) {
                 return true;
             }
-            if (this->ctx && *(this->ctx) != *(other->ctx)) {
+            if (this->ctx && *this->ctx != *other->ctx) {
                 return false;
             }
             return true;
@@ -107,7 +107,7 @@ namespace DRCHECKER {
         
         //Decide whether current inst can be reached from (or return to) its one specified upward callsite (denoted by the
         //index "ci" in its calling context), in the presence of the blocking insts in the "blocklist".
-        bool chainable(int ci, std::set<InstLoc*> *blocklist, bool callFrom);
+        bool chainable(int ci, std::set<InstLoc*> *blocklist, bool callFrom = true);
 
         //Decide whether "this" can be reached from the entry or can reach the return of its host function when there exists some blocking nodes.
         bool canReachEnd(std::set<InstLoc*> *blocklist, bool fromEntry = true);

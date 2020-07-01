@@ -1221,7 +1221,7 @@ namespace DRCHECKER {
         for (int i = 0; i < cands.size(); ++i) {
             Type *t = (*cands[i]->fds)[0]->getOutermostTy();
             dbgs() << "inferContainerTy(): CAND " << i << " SCORE " << cands[i]->score << " : " << InstructionUtils::getTypeStr(t) << "\n"; 
-            for (FieldDesc *fd : *(cands[i]->fds)) {
+            for (FieldDesc *fd : *cands[i]->fds) {
                 fd->print(dbgs());
             }
         }

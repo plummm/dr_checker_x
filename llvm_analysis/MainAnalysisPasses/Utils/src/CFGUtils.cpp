@@ -144,7 +144,7 @@ namespace DRCHECKER {
     // We can set "limit" to 0 to have an accurate reachability test (i.e. exhaust *all* the paths).
     bool isPotentiallyReachableFromMany(SmallVectorImpl<BasicBlock*> &Worklist, Instruction *Stop, unsigned limit = 32, std::set<Instruction*> *blocklist = nullptr) {
         bool has_limit = (limit > 0);
-        SmallSet<const BasicBlock*, 128> Visited;
+        SmallSet<const BasicBlock*, 32> Visited;
         do {
             BasicBlock *BB = Worklist.pop_back_val();
             if (!Visited.insert(BB).second)
@@ -215,13 +215,13 @@ namespace DRCHECKER {
 
     //This assumes A and B are within the same BB, perform a linear scan to decide the reachability from A to B.
     //NOTE: the scope is only the single BB, e.g. we don't consider the case where B reach an earlier position in the BB via a outside loop.
-    bool isReachableInBB(const Instruction *A, const Instruction *B) {
+    bool isReachableInBB(Instruction *A, Instruction *B) {
         if (!A || !B || A->getParent() != B->getParent()) {
             return false;
         }
         BasicBlock *BB = const_cast<BasicBlock*>(A->getParent());
         // Linear scan, start at 'A', see whether we hit 'B' or the end first.
-        for (BasicBlock::const_iterator I = A->getIterator(), E = BB->end(); I != E;
+        for (BasicBlock::iterator I = A->getIterator(), E = BB->end(); I != E;
              ++I) {
             if (&*I == B)
                 return true;
@@ -232,7 +232,7 @@ namespace DRCHECKER {
     //NOTE: we assume both "A", "B", and those blocking instructions in "blocklist" all belong to the *same* function!
     //If "A" is nullptr, we will set the entry inst as "A";
     //If "B" is nullptr, we will regard any function return inst as "B" (e.g. return true if "A" can reach any ret inst).
-    bool isPotentiallyReachable(const Instruction *A, const Instruction *B, unsigned limit = 32, std::set<Instruction*> *blocklist = nullptr) {
+    bool isPotentiallyReachable(Instruction *A, Instruction *B, unsigned limit = 32, std::set<Instruction*> *blocklist = nullptr) {
         if (!A && !B) {
             return true;
         }
@@ -290,7 +290,7 @@ namespace DRCHECKER {
             }
             //First see whether A can go out of its host BB w/o being killed by blocking inst (return false) or meeting B (return true).
             BasicBlock *BB = const_cast<BasicBlock*>(A->getParent());
-            for (BasicBlock::const_iterator I = A->getIterator(), E = BB->end(); I != E; ++I) {
+            for (BasicBlock::iterator I = A->getIterator(), E = BB->end(); I != E; ++I) {
                 if (&*I == B) {
                     return true;
                 }
@@ -338,14 +338,14 @@ namespace DRCHECKER {
         std::map<Instruction*,std::set<InstLoc*>> callBis; 
         for (InstLoc *bi : bis) {
             if (bi && bi->hasCtx() && e < bi->ctx->size() && 
-                *(bi->ctx)[e] && *(bi->ctx)[e-1]) {
+                (*bi->ctx)[e] && (*bi->ctx)[e-1]) {
                 if (!cs) {
-                    cs = *(bi->ctx)[e-1];
-                }else if (cs != *(bi->ctx)[e-1]) {
+                    cs = (*bi->ctx)[e-1];
+                }else if (cs != (*bi->ctx)[e-1]) {
                     //This doesn't match our pre-condition about this function - blcokers should originate from the same call site.
                     continue;
                 }
-                callBis[*(bi->ctx)[e]].insert(bi);
+                callBis[(*bi->ctx)[e]].insert(bi);
             }
         }
         if (callBis.empty()) {
@@ -364,14 +364,14 @@ namespace DRCHECKER {
             for (InstLoc *bi : ebis) {
                 if (e + 1 >= bi->ctx->size()) {
                     //No more callsites, the blocker is just in current function.
-                    if (dyn_cast<Instruction*>(bi->inst)) {
-                        instBis.insert(dyn_cast<Instruction*>(bi->inst));
+                    if (dyn_cast<Instruction>(bi->inst)) {
+                        instBis.insert(dyn_cast<Instruction>(bi->inst));
                     }
                 }else {
                     //Another callsite - a potential blocker but not sure.
                     //Some sanity checks..
-                    Instruction *I0 = *(this->ctx)[e];
-                    Instruction *I1 = *(this->ctx)[e+1];
+                    Instruction *I0 = (*bi->ctx)[e];
+                    Instruction *I1 = (*bi->ctx)[e+1];
                     if (I0 && I1 && I0->getParent() && I1->getParent() && I0->getFunction() == I1->getFunction()) {
                         callsiteBis[I1].insert(bi);
                     }
@@ -413,10 +413,10 @@ namespace DRCHECKER {
                 }
             }
             //Decide whether the potential callsite blockers are true...
-            for (auto &e : callsiteBis) {
-                if (!bypassCall(e.second,e+2)) {
+            for (auto &cs : callsiteBis) {
+                if (!bypassCall(cs.second,e+2)) {
                     //Ok this is a real blocker.
-                    instBis.insert(e.first);
+                    instBis.insert(cs.first);
                 }
             }
             //At this point, we get all blockers in "instBis" (potential callsite blockers also finalized).
@@ -452,14 +452,14 @@ namespace DRCHECKER {
                 int r = this->isCtxPrefix(bi);
                 if (r == 0) {
                     //The blocking inst is in exactly the same host function w/ the same calling context as "this".
-                    if (dyn_cast<Instruction*>(bi->inst)) {
-                        validBis.insert(dyn_cast<Instruction*>(bi->inst));
+                    if (dyn_cast<Instruction>(bi->inst)) {
+                        validBis.insert(dyn_cast<Instruction>(bi->inst));
                     }
                 }else if (r > 0) {
-                    //While the blocking inst is not in the same ctx and function as "this", one of its up level callsite is..
+                    //While the blocker is not in the same ctx and function as "this", one of its up level callsite is..
                     //So we need to further inspect whether this callsite can block our way (e.g. the blocking inst post-dominates this callsite).
-                    if (*(other->ctx)[r]) {
-                        callsiteBis[*(other->ctx)[r]].insert(bi);
+                    if ((*bi->ctx)[r]) {
+                        callsiteBis[(*bi->ctx)[r]].insert(bi);
                     }
                 }
             }
@@ -481,7 +481,7 @@ namespace DRCHECKER {
     }
 
     //Decide whether "this" can be reached from the entry of its host function when there exists some blocking nodes.
-    bool InstLoc::canReachEnd(std::set<InstLoc*> *blocklist, bool fromEntry = true) {
+    bool InstLoc::canReachEnd(std::set<InstLoc*> *blocklist, bool fromEntry) {
         //First see whether there are any blocking insts within the same function and calling contexts as "this", if none, return true directly.
         std::set<Instruction*> validBis;
         this->getBlockersInCurrFunc(blocklist,validBis);
@@ -489,7 +489,7 @@ namespace DRCHECKER {
             return true;
         }
         //Ok there are some blocking insts, we need to traverse all possible paths.
-        Instruction *ei = dyn_cast<Instruction*>(this->inst);
+        Instruction *ei = dyn_cast<Instruction>(this->inst);
         if (!ei || !ei->getParent()) {
             //In case "this" is a inst created by ourselves or a simple var.
             return true;
@@ -551,9 +551,9 @@ namespace DRCHECKER {
         }
         //Ok, first get all ret nodes (i.e. #succ = 0).
         std::set<llvm::BasicBlock*> rets;
-        for (llvm::BasicBlock *bb : *pfunc) {
-            if (getSuccNum(bb) == 0) {
-                rets.insert(bb);
+        for (llvm::BasicBlock &bb : *pfunc) {
+            if (getSuccNum(&bb) == 0) {
+                rets.insert(&bb);
             }
         }
         //Get dominators for all ret nodes.
@@ -634,7 +634,7 @@ namespace DRCHECKER {
             if (this->ctx && this->ctx->size() > 0) {
                 O << "[";
                 std::string lastFunc;
-                for (Instruction *inst : *(this->ctx)) {
+                for (Instruction *inst : *this->ctx) {
                     if (inst && inst->getFunction()) {
                         std::string func = inst->getFunction()->getName().str();
                         //TODO: self-recursive invocation
@@ -671,7 +671,7 @@ namespace DRCHECKER {
             //NOTE 2: the total size of a calling context must be odd. (i.e. it must end w/ the entry inst of the callee).
             assert(this->ctx->size() % 2);
             assert(other->ctx->size() % 2);
-            while (ip < this->ctx->size() && ip < other->ctx->size() && (*(this->ctx))[ip] == (*(other->ctx))[ip] && ++ip);
+            while (ip < this->ctx->size() && ip < other->ctx->size() && (*this->ctx)[ip] == (*other->ctx)[ip] && ++ip);
             if (ip == 0) {
                 //Both have calling contexts but no common prefix... This means the top-level entry functions are different, no way to post-dom.
                 return false;
@@ -690,7 +690,7 @@ namespace DRCHECKER {
                 Instruction *end = dyn_cast<Instruction>(this->inst);
                 Instruction *src = dyn_cast<Instruction>(other->inst);
                 if (ip < other->ctx->size()) {
-                    src = (*(other->ctx))[ip];
+                    src = (*other->ctx)[ip];
                 }
                 if (!end || !src || end->getFunction() != src->getFunction()) {
                     //Is this possible?
@@ -704,7 +704,7 @@ namespace DRCHECKER {
             if (ip >= other->ctx->size()) {
                 //This must be case 1.3. We may still need to inspect the remaining "this" context.
                 Instruction *src = dyn_cast<Instruction>(other->inst);
-                Instruction *end = dyn_cast<Instruction>((*(this->ctx))[ip]);
+                Instruction *end = dyn_cast<Instruction>((*this->ctx)[ip]);
                 if (!end || !src || end->getFunction() != src->getFunction()) {
                     //Is this possible?
 #ifdef DEBUG_INTER_PROC_POSTDOM
@@ -722,7 +722,7 @@ namespace DRCHECKER {
                     return false;
                 }
                 //case 1.1., we may still need further inspect.
-                if (!BBTraversalHelper::instPostDom((*(other->ctx))[ip],(*(this->ctx))[ip])) {
+                if (!BBTraversalHelper::instPostDom((*other->ctx)[ip],(*this->ctx)[ip])) {
                     return false;
                 }
             }
@@ -734,13 +734,13 @@ namespace DRCHECKER {
         assert(!(ip % 2));
         assert(ip < this->ctx->size());
         while (ip + 1 < this->ctx->size()) {
-            if (!BBTraversalHelper::instPostDom((*(this->ctx))[ip],(*(this->ctx))[ip+1])) {
+            if (!BBTraversalHelper::instPostDom((*this->ctx)[ip],(*this->ctx)[ip+1])) {
                 return false;
             }
             ++ip;
         }
         Instruction *end = dyn_cast<Instruction>(this->inst);
-        if (end && !BBTraversalHelper::instPostDom((*(this->ctx))[ip],end)) {
+        if (end && !BBTraversalHelper::instPostDom((*this->ctx)[ip],end)) {
             return false;
         }
         return true;
@@ -748,7 +748,7 @@ namespace DRCHECKER {
 
     //Decide whether current inst can be reached from (or return to) its one specified upward callsite (denoted by the
     //index "ci" in its calling context), in the presence of the blocking insts in the "blocklist".
-    bool InstLoc::chainable(int ci, std::set<InstLoc*> *blocklist, bool callFrom = true) {
+    bool InstLoc::chainable(int ci, std::set<InstLoc*> *blocklist, bool callFrom) {
         if (!blocklist || blocklist->empty()) {
             //Without blocking nodes it's easily reachable/returnable if we don't consider the static dead code, which should be rare..
             return true;
@@ -770,7 +770,7 @@ namespace DRCHECKER {
         if (callFrom) {
             //Decide the reachability in each segment of the call chain.
             for (;ci < this->ctx->size(); ci += 2) {
-                Instruction *I = *(this->ctx)[ci];
+                Instruction *I = (*this->ctx)[ci];
                 if (I && I->getParent()) { 
                     std::vector<Instruction*> newCtx(this->ctx->begin(), this->ctx->begin()+ci);
                     InstLoc il(I,&newCtx);
@@ -787,7 +787,7 @@ namespace DRCHECKER {
                 return false;
             }
             for (int i = this->ctx->size() - 2; i >= ci; --i) {
-                Instruction *I = *(this->ctx)[i];
+                Instruction *I = (*this->ctx)[i];
                 if (I && I->getParent()) { 
                     std::vector<Instruction*> newCtx(this->ctx->begin(), this->ctx->begin()+i);
                     InstLoc il(I,&newCtx);
@@ -828,7 +828,7 @@ namespace DRCHECKER {
         //Ok, both contexts exist, decide whether "other" can reach "this" from its current context.
         //Get the first divergence point in the call chains of both.
         int ip = 0;
-        while (ip < this->ctx->size() && ip < other->ctx->size() && (*(this->ctx))[ip] == (*(other->ctx))[ip] && ++ip);
+        while (ip < this->ctx->size() && ip < other->ctx->size() && (*this->ctx)[ip] == (*other->ctx)[ip] && ++ip);
         if (ip == 0) {
             //Different top-level entry function, not reachable.
             return false;
@@ -852,7 +852,7 @@ namespace DRCHECKER {
             //Then we can only consider the intra-procedural reachability.
             src = dyn_cast<Instruction>(other->inst);
             if (ip < other->ctx->size()) {
-                src = (*(other->ctx))[ip];
+                src = (*other->ctx)[ip];
             }
             end = dyn_cast<Instruction>(this->inst);
         }else if (ip >= other->ctx->size()) {
@@ -863,7 +863,7 @@ namespace DRCHECKER {
             }
             //Then intra-procedural reachability.
             src = dyn_cast<Instruction>(other->inst);
-            end = (*(this->ctx))[ip];
+            end = (*this->ctx)[ip];
         }else if (ip % 2) {
             //Case 1.1.
             //First make sure "other" can return *and* "this" can be reached...
@@ -871,8 +871,8 @@ namespace DRCHECKER {
                 return false;
             }
             //Then intra-procedural reachability.
-            src = (*(other->ctx))[ip];
-            end = (*(this->ctx))[ip];
+            src = (*other->ctx)[ip];
+            end = (*this->ctx)[ip];
         }else {
             //Case 2.
             return false;
@@ -907,7 +907,7 @@ namespace DRCHECKER {
         if (inst->hasCtx()) {
             O << ",\"ctx\":[";
             bool comma = false;
-            for (Instruction *ci : *(inst->ctx)) {
+            for (Instruction *ci : *inst->ctx) {
                 if (ci) {
                     if (comma) {
                         O << ",";
