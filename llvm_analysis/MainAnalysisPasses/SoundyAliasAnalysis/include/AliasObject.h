@@ -715,6 +715,12 @@ namespace DRCHECKER {
         virtual void fetchPointsToObjects_log(long srcfieldId, std::set<std::pair<long, AliasObject*>> &dstObjects,
             Instruction *targetInstr, bool create_arg_obj);
 
+        //Get the living field ptos at a certain InstLoc.
+        virtual void getLivePtos(long fid, InstLoc *loc, std::set<ObjectPointsTo*> *retPto);
+
+        //Reset the field pto records when switching to a new entry function.
+        virtual void resetPtos(long fid, Instruction *entry);
+
         //Decide whether the "p" may point to this AliasObject.
         //Return: negative: impossible, positive: the larger, the more likely.
         virtual int maybeAPointee(Value *p);

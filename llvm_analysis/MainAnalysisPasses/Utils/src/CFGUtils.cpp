@@ -172,11 +172,11 @@ namespace DRCHECKER {
                         return true;
                     }else {
                         //See whether we will be killed before reaching "Stop".
-                        for (Instruction *I : *BB) {
-                            if (I == Stop) {
+                        for (Instruction &I : *BB) {
+                            if (&I == Stop) {
                                 return true;
                             }
-                            if (validBis.find(I) != validBis.end()) {
+                            if (validBis.find(&I) != validBis.end()) {
                                 //No need to explore more paths since the killer is just before the destination in the same BB.
                                 return false;
                             }
@@ -449,7 +449,7 @@ namespace DRCHECKER {
         std::map<Instruction*, std::set<InstLoc*>> callsiteBis;
         for (InstLoc *bi : *blocklist) {
             if (bi && bi->hasCtx()) {
-                int r = this->prefixCtx(bi);
+                int r = this->isCtxPrefix(bi);
                 if (r == 0) {
                     //The blocking inst is in exactly the same host function w/ the same calling context as "this".
                     if (dyn_cast<Instruction*>(bi->inst)) {
@@ -746,44 +746,58 @@ namespace DRCHECKER {
         return true;
     }
 
-    //Decide whether current inst can be reached from its one specified upward callsite (denoted by the
+    //Decide whether current inst can be reached from (or return to) its one specified upward callsite (denoted by the
     //index "ci" in its calling context), in the presence of the blocking insts in the "blocklist".
-    bool InstLoc::callable(int ci, std::set<InstLoc*> *blocklist) {
+    bool InstLoc::chainable(int ci, std::set<InstLoc*> *blocklist, bool callFrom = true) {
         if (!blocklist || blocklist->empty()) {
-            //Without blocking nodes it's easily reachable if we don't consider the static dead code, which should be rare..
+            //Without blocking nodes it's easily reachable/returnable if we don't consider the static dead code, which should be rare..
             return true;
         }
         if (!this->hasCtx()) {
             return true;
         }
         assert(this->ctx->size() % 2);
-        //Align ci to always be the callsite index in the calling context.
+        //Align ci to always be the callsite index in the calling context where we want to call/return from/to.
         if (ci < 0) {
             ci = 1;
         }else if (ci % 2 == 0) {
             //"ci" indexes an entry inst of a function, re-point it to the next callsite.
             ++ci;
         }else {
-            //"ci" indexes a callsite, which must be able to reach the entry of its callee, so we start from the callsite in the callee.
+            //"ci" indexes a callsite, start from the callsite in the callee.
             ci += 2;
         }
-        //Decide the reachability in each segment of the call chain.
-        for (;ci < this->ctx->size(); ci += 2) {
-            Instruction *I = *(this->ctx)[ci];
-            if (I && I->getParent()) { 
-                //
+        if (callFrom) {
+            //Decide the reachability in each segment of the call chain.
+            for (;ci < this->ctx->size(); ci += 2) {
+                Instruction *I = *(this->ctx)[ci];
+                if (I && I->getParent()) { 
+                    std::vector<Instruction*> newCtx(this->ctx->begin(), this->ctx->begin()+ci);
+                    InstLoc il(I,&newCtx);
+                    if (!il.canReachEnd(blocklist,true)) {
+                        return false;
+                    }
+                }
             }
-        }
-        if (ci < this->ctx->size()) {
             //The final segment.
+            return this->canReachEnd(blocklist,true);
+        }else {
+            //First decide whether current end inst can return to the up-level.
+            if (!this->canReachEnd(blocklist,false)) {
+                return false;
+            }
+            for (int i = this->ctx->size() - 2; i >= ci; --i) {
+                Instruction *I = *(this->ctx)[i];
+                if (I && I->getParent()) { 
+                    std::vector<Instruction*> newCtx(this->ctx->begin(), this->ctx->begin()+i);
+                    InstLoc il(I,&newCtx);
+                    if (!il.canReachEnd(blocklist,false)) {
+                        return false;
+                    }
+                }
+            }
+            return true;
         }
-        return true;
-    }
-
-    //Decide whether current inst can return to its one specified upward callsite (denoted by the
-    //index "ci" in its calling context), in the presence of the blocking insts in the "blocklist".
-    bool InstLoc::returnable(int ci, std::set<InstLoc*> *blocklist) {
-        //
     }
 
     //Whether "other" can reach "this", inter-procedually.
@@ -797,9 +811,9 @@ namespace DRCHECKER {
             if (!blocklist || blocklist->empty()) {
                 return true;
             }
-            //There does exist some blocking insts.
+            //There does exist some blockers.
             if (this->hasCtx()) {
-                return this->callable(0,blocklist);
+                return this->chainable(0,blocklist,true);
             }else {
                 //TODO: both are gloabl vars, what's the definition of the "reachability" then...
                 return true;
@@ -831,7 +845,8 @@ namespace DRCHECKER {
         if (ip >= this->ctx->size()) {
             //Case 1.2. or 1.4.
             //First make sure that "other" can successfully return to the callsite within current caller.
-            if (blocklist && !blocklist->empty() && !other->returnable(ip,blocklist)) {
+            if (blocklist && !blocklist->empty() && ip < other->ctx->size() && !other->chainable(ip,blocklist,false)) {
+                //This is case 1.2. and "other" cannot successfully return.
                 return false;
             }
             //Then we can only consider the intra-procedural reachability.
@@ -843,7 +858,7 @@ namespace DRCHECKER {
         }else if (ip >= other->ctx->size()) {
             //Case 1.3.
             //First make sure "this" can be reached from the call site within current caller.
-            if (blocklist && !blocklist->empty() && !this->callable(ip,blocklist)) {
+            if (blocklist && !blocklist->empty() && !this->chainable(ip,blocklist,true)) {
                 return false;
             }
             //Then intra-procedural reachability.
@@ -852,7 +867,7 @@ namespace DRCHECKER {
         }else if (ip % 2) {
             //Case 1.1.
             //First make sure "other" can return *and* "this" can be reached...
-            if (blocklist && !blocklist->empty() && (!other->returnable(ip,blocklist) || !this->callable(ip,blocklist))) {
+            if (blocklist && !blocklist->empty() && (!other->chainable(ip,blocklist,false) || !this->chainable(ip,blocklist,true))) {
                 return false;
             }
             //Then intra-procedural reachability.
@@ -862,13 +877,21 @@ namespace DRCHECKER {
             //Case 2.
             return false;
         }
-        if (!end || !src || end->getFunction() != src->getFunction()) {
+        if (!end || !src || !end->getParent() || !src->getParent() || end->getFunction() != src->getFunction()) {
             //Is this possible?
             //assert(false);
+            dbgs() << "!!! InstLoc::reachable(): src and end are not normal insts within the same function: src: ";
+            dbgs() << InstructionUtils::getValueStr(src) << " end: " << InstructionUtils::getValueStr(end) << "\n";
             return false;
         }
-        //TODO: need to support "blocklist" here.
-        return isPotentiallyReachable(src,end);
+        //Finally the reachability test between "src" and "end" intra-procedurally.
+        //First we need to finalize the blocker list wirthin current function (e.g. some callsites may also be blockers).
+        std::set<Instruction*> validBis;
+        std::vector<Instruction*> newCtx(this->ctx->begin(), (ip < this->ctx->size() ? this->ctx->begin()+ip : this->ctx->end()));
+        InstLoc il(src,&newCtx);
+        il.getBlockersInCurrFunc(blocklist,validBis);
+        //Do the test.
+        return isPotentiallyReachable(src,end,0,&validBis);
     }
 
     void printInstlocJson(InstLoc *inst, llvm::raw_ostream &O) {

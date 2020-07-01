@@ -86,12 +86,70 @@ namespace DRCHECKER {
         return nullptr;
     }
 
-    void getLivePtos(std::set<ObjectPointsTo*> *srcPto, InstLoc *loc, std::set<ObjectPointsTo*> *retPto) {
+    //We have switched to a different level 0 entry function, need to reset the activation status of the ptos.
+    void AliasObject::resetPtos(long fid, Instruction *entry) {
+#ifdef DEBUG_UPDATE_FIELD_POINT
+        dbgs() << "AliasObject::resetPtos(): Reset field pto for: " << (const void*)this << " | " << fid;
+        dbgs() << ", switch entry to: ";
+        InstructionUtils::printInst(entry,dbgs());
+#endif
+        if (this->pointsTo.find(fid) == this->pointsTo.end()) {
+            return;
+        }
+        std::set<ObjectPointsTo*> *srcPto = &(this->pointsTo[fid]);
+        for (ObjectPointsTo *pto : *srcPto) {
+            if (pto && pto->propogatingInst) {
+                InstLoc *pil = pto->propogatingInst;
+                if (pto->is_active && pil->hasCtx() && (*pil->ctx)[0] != entry) {
+                    //Deactivate it.
+                    this->activateFieldPto(pto,false);
+#ifdef DEBUG_UPDATE_FIELD_POINT
+                    dbgs() << "AliasObject::resetPtos(): de-activate point-to: ";
+                    pto->print(dbgs());
+#endif
+                }
+                if (!pto->is_active && !pil->hasCtx()) {
+                    //This is a deactivated global preset pto, need to re-activate it since we're on a new entry.
+                    this->activateFieldPto(pto,true);
+#ifdef DEBUG_UPDATE_FIELD_POINT
+                    dbgs() << "AliasObject::resetPtos(): re-activate point-to: ";
+                    pto->print(dbgs());
+#endif
+                }
+            }
+        }
+    }
+
+    void AliasObject::getLivePtos(long fid, InstLoc *loc, std::set<ObjectPointsTo*> *retPto) {
+        if (this->pointsTo.find(fid) == this->pointsTo.end()) {
+            return;
+        }
+        std::set<ObjectPointsTo*> *srcPto = &(this->pointsTo[fid]);
         if (!srcPto || !retPto || !loc) {
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
             dbgs() << "AliasObject::getLivePtos(): !srcPto || !retPto || !loc\n";
 #endif
             return;
+        }
+        //Reactivation check: if there has been a level 0 entry function change (e.g. we have finished analyzing ioctl_0 and started
+        //ioctl_1) since last update to the field pto set, we then need to:
+        //(1) deactivate those active pto records set up when analyzing the previous entry functions.
+        //(2) re-activate those inactive preset pto records (e.g. global struct definition) killed by last entry function.
+        //The criteria: when there exists any active pto record whose update site belongs to a different level 0 entry than "loc".
+        if (loc->hasCtx() && (*loc->ctx)[0]) {
+            for (ObjectPointsTo *pto : *srcPto) {
+                if (pto && pto->is_active && pto->propogatingInst) {
+                    InstLoc *pil = pto->propogatingInst;
+                    if (pil->hasCtx() && (*pil->ctx)[0] && (*loc->ctx)[0] != (*pil->ctx)[0]) {
+                        //Do the reactivation..
+#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
+                        dbgs() << "AliasObject::getLivePtos(): Reset the field pto due to level 0 entry switch!\n";
+#endif
+                        this->resetPtos(fid,(*loc->ctx)[0]);
+                        break;
+                    }
+                }
+            }
         }
         int stCnt = retPto->size();
         //Preliminary processing: filter out the inactive pto records.
@@ -167,7 +225,7 @@ namespace DRCHECKER {
         if (this->pointsTo.find(srcfieldId) != this->pointsTo.end()) {
             //Decide which pto records are valid at current load site (i.e. the InstLoc "currInst").
             std::set<ObjectPointsTo*> livePtos;
-            getLivePtos(&(this->pointsTo[srcfieldId]),currInst,&livePtos);
+            this->getLivePtos(srcfieldId,currInst,&livePtos);
             for (ObjectPointsTo *obj : livePtos) {
                 if (obj->fieldId == srcfieldId && obj->targetObject) {
                     //We handle a special case here:

@@ -70,7 +70,7 @@ namespace DRCHECKER {
 
         //Whether "this"'s ctx is a prefix of "other"'s.
         //Identical ctx: return 0, prefix: return the 1st index after the prefix, otherwise -1.
-        int prefixCtx(InstLoc *other) {
+        int isCtxPrefix(InstLoc *other) {
             if (!other) {
                 return -1;
             }
@@ -79,7 +79,7 @@ namespace DRCHECKER {
             }
             int i = 0;
             for (;i < this->ctx->size() && i < other->ctx->size(); ++i) {
-                if (*(this->ctx)[i] != *(other->ctx)[i]) {
+                if ((*this->ctx)[i] != (*other->ctx)[i]) {
                     break;
                 }
             }
@@ -90,7 +90,7 @@ namespace DRCHECKER {
         }
 
         Function *getFunc() {
-            Instruction *I = dyn_cast<Instruction*>(this->inst);
+            Instruction *I = dyn_cast<Instruction>(this->inst);
             if (!I || !I->getParent()) {
                 return nullptr;
             }
@@ -105,11 +105,9 @@ namespace DRCHECKER {
         //Return true if this is reachable from the "other" InstLoc, under the presence of the blocking instructions in the "blocklist".
         bool reachable(InstLoc *other, std::set<InstLoc*> *blocklist = nullptr);
         
-        //Whether a callsite in the calling context can bypass all the blocking nodes and reach current inst.
-        bool callable(int ci, std::set<InstLoc*> *blocklist);
-        
-        //Whether current inst can return to a callsite in the calling context avoiding all the blocking nodes.
-        bool returnable(int ci, std::set<InstLoc*> *blocklist);
+        //Decide whether current inst can be reached from (or return to) its one specified upward callsite (denoted by the
+        //index "ci" in its calling context), in the presence of the blocking insts in the "blocklist".
+        bool chainable(int ci, std::set<InstLoc*> *blocklist, bool callFrom);
 
         //Decide whether "this" can be reached from the entry or can reach the return of its host function when there exists some blocking nodes.
         bool canReachEnd(std::set<InstLoc*> *blocklist, bool fromEntry = true);

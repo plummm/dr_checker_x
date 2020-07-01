@@ -381,8 +381,8 @@ namespace DRCHECKER {
     }
 
     //Set up a cache for the expensive "print" operation.
-    std::string& InstructionUtils::getValueStr(Value *v) {
-        static std::map<Value*,std::string> ValueNameMap;
+    std::string& InstructionUtils::getValueStr(const Value *v) {
+        static std::map<const Value*,std::string> ValueNameMap;
         if (ValueNameMap.find(v) == ValueNameMap.end()) {
             if(v){
                 std::string str;
