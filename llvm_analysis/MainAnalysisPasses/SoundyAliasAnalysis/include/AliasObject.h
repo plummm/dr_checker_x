@@ -450,7 +450,6 @@ namespace DRCHECKER {
 
         //This is a wrapper of "updateFieldPointsTo" for convenience, it assumes that we only have one pto record for the "fieldId" to update,
         //and this pto points to field 0 of "dstObject".
-        //NOTE: currently this is only invoked in the initial global object setup phase (e.g. need to make gv0->f0 point to gv1)
         //TODO: consider to replace more "updateFieldPointsTo" invocation to this when applicable, to simplify the codebase.
         void addObjectToFieldPointsTo(long fieldId, AliasObject *dstObject, InstLoc *propagatingInstr = nullptr, bool is_weak = false) {
 #ifdef DEBUG_UPDATE_FIELD_POINT
@@ -709,11 +708,11 @@ namespace DRCHECKER {
 
         virtual void taintSubObj(AliasObject *newObj, long srcfieldId, InstLoc *targetInstr);
 
-        virtual void fetchPointsToObjects(long srcfieldId, std::set<std::pair<long, AliasObject*>> &dstObjects,
-            InstLoc *currInst = nullptr, bool create_arg_obj = false);
+        virtual void fetchPointsToObjects(long srcfieldId, std::set<std::pair<long, AliasObject*>> &dstObjects, InstLoc *currInst = nullptr);
 
-        virtual void fetchPointsToObjects_log(long srcfieldId, std::set<std::pair<long, AliasObject*>> &dstObjects,
-            Instruction *targetInstr, bool create_arg_obj);
+        virtual void createFieldPointee(long fid, std::set<std::pair<long, AliasObject*>> &dstObjects, InstLoc *currInst = nullptr, InstLoc *siteInst = nullptr);
+
+        virtual void fetchPointsToObjects_log(long srcfieldId, std::set<std::pair<long, AliasObject*>> &dstObjects, Instruction *targetInstr);
 
         //Get the living field ptos at a certain InstLoc.
         virtual void getLivePtos(long fid, InstLoc *loc, std::set<ObjectPointsTo*> *retPto);

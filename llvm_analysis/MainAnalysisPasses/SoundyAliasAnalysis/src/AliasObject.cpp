@@ -24,8 +24,7 @@ namespace DRCHECKER {
         return true;
     }
 
-    void AliasObject::fetchPointsToObjects_log(long srcfieldId, std::set<std::pair<long, AliasObject*>> &dstObjects,
-            Instruction *targetInstr, bool create_arg_obj) {
+    void AliasObject::fetchPointsToObjects_log(long srcfieldId, std::set<std::pair<long, AliasObject*>> &dstObjects, Instruction *targetInstr) {
         dbgs() << "\n*********fetchPointsToObjects**********\n";
         dbgs() << "Current Inst: " << InstructionUtils::getValueStr(targetInstr) << "\n";
         dbgs() << InstructionUtils::getTypeStr(this->targetType) << " | " << srcfieldId << " OBJ: " << (const void*)this << "\n";
@@ -191,6 +190,43 @@ namespace DRCHECKER {
         //TODO: do we really need this test here given that we have already done such a test when updating the field pto.
         //Step 3: de-duplication test. 
         //TODO: we may not need to do this as well since it's performed at the update time.
+        //
+        //The final step: path coverage check.
+        //Can these pto records in "retPto" cover every path from the very beginning to current "loc"?
+        //If not we need to create dummy objs for the uncovered paths.
+        //If no live ptos then the caller will create dummy obj itself, no need for us. 
+        if (retPto->size() > 0) {
+            bool has_global_pto= false;
+            for (ObjectPointsTo *pto : *srcPto) {
+                if (!pto->propogatingInst) {
+                    continue;
+                }
+                InstLoc *pil = pto->propogatingInst;
+                if (!pil->hasCtx()) {
+                    has_global_pto = true;
+                    break;
+                }
+                if (pil->hasCtx() && pil->ctx->size() == 1 && loc->hasCtx() && 
+                    (*loc->ctx)[0] == (*pil->ctx)[0] && pil->inst && pil->inst == (*pil->ctx)[0]) {
+                    has_global_pto = true;
+                    break;
+                }
+            }
+            //Already have global pto (can follow any path) -> It's either activated now, or deactivated because it's completely blocked -> no need to test the path coverage any more.
+            if (!has_global_pto) {
+                //Test whether current active ptos can cover all paths from entry to "loc".
+                blocklist.clear();
+                for (ObjectPointsTo *pto : *retPto) {
+                    if (pto && pto->propogatingInst) {
+                        blocklist.insert(pto->propogatingInst);
+                    }
+                }
+                if (loc->chainable(0,&blocklist,true)) {
+                    //Ok, need to create the "default" dummy obj at the entry...
+                    //TODO:
+                }
+            }
+        }
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
         dbgs() << "AliasObject::getLivePtos(): initial #candidates: " << srcPto->size() << " #active: " << actPtos.size() << " #final: " << retPto->size() - stCnt << "\n";
 #endif
@@ -198,8 +234,7 @@ namespace DRCHECKER {
     }
 
     //An improved version of "fetchPointsToObjects", we need to consider the type of each field.
-    void AliasObject::fetchPointsToObjects(long srcfieldId, std::set<std::pair<long, AliasObject*>> &dstObjects,
-            InstLoc *currInst, bool create_arg_obj) {
+    void AliasObject::fetchPointsToObjects(long srcfieldId, std::set<std::pair<long, AliasObject*>> &dstObjects, InstLoc *currInst) {
         /***
          * Get all objects pointed by field identified by srcfieldID
          *
@@ -211,7 +246,7 @@ namespace DRCHECKER {
         //TODO: deal with other types of insts that can invoke "fetchPointsToObjects" in its handler.
         Type *expObjTy = getLoadedPointeeTy(targetInstr);
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-        fetchPointsToObjects_log(srcfieldId, dstObjects, targetInstr, create_arg_obj);
+        fetchPointsToObjects_log(srcfieldId, dstObjects, targetInstr);
 #endif
         //Collapse the array/vector into a single element.
         //TODO: index-sensitive array access.
@@ -269,16 +304,46 @@ namespace DRCHECKER {
         if (hasObjects || InstructionUtils::isAsanInst(targetInstr)) {
             return;
         }
-        //Below we try to create a dummy object.
+        //Try to create a dummy object.
+#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
+        dbgs() << "AliasObject::fetchPointsToObjects: No existing pto records for the field, try to create a dummy obj.\n";
+#endif
+        //TODO: since we cannot find any existing pto records, we need to create a "default" pto for current field who should exist at current level 0 function entry,
+        //thus, we need to set the "siteInst" to the entry, instead of the "currInst".
+        if (currInst && currInst->hasCtx() && (*currInst->ctx)[0]) {
+            std::vector<Instruction*> newCtx(currInst->ctx->begin(),currInst->ctx->begin()+1);
+            InstLoc il((*currInst->ctx)[0],&newCtx);
+            this->createFieldPointee(srcfieldId, dstObjects, currInst, &il);
+        }else {
+            dbgs() << "!!! AliasObject::fetchPointsToObjects: currInst does not have a valid level 0 entry function!\n";
+            this->createFieldPointee(srcfieldId, dstObjects, currInst);
+        }
+    }
+
+    //Create a dummy field pto object.
+    //"currInst" is the instruction where we actually need to use the field pto (but find it's not present), while "siteInst" is the location
+    //we need to address the newly created field pto to (i.e. its "propagatingInst"). E.g.
+    //func_entry: //site 0... if (..) {//site 1} else {//site 2}
+    //Imagine "currInst" is in site 1, and site 2 also needs to use the same field pto, if in site 1 we don't have any pto records,
+    //that means the pto is absent from the very beginning (e.g. function entry), so we actually need to create the pto in site 0 (i.e. siteInst)
+    //so that site 2 later can also use it.
+    void AliasObject::createFieldPointee(long fid, std::set<std::pair<long, AliasObject*>> &dstObjects, InstLoc *currInst, InstLoc *siteInst) {
+        if (siteInst == nullptr) {
+            siteInst = currInst;
+        }
+        Instruction *targetInstr = currInst ? dyn_cast<Instruction>(currInst->inst) : nullptr;
+        //What's the expected type of the fetched point-to object?
+        //TODO: deal with other types of insts that can invoke "fetchPointsToObjects" in its handler.
+        Type *expObjTy = getLoadedPointeeTy(targetInstr);
         //Get the type of the field for which we want to get the pointee.
         int err = 0;
-        Type *ety = this->getFieldTy(srcfieldId,&err);
+        Type *ety = this->getFieldTy(fid,&err);
         if (!ety) {
             if (err == 2) {
                 //The requested field id is OOB, sth bad has happended.
-                dbgs() << "!!! fetchPointsToObjects(): srcfieldId OOB!\n";
-                dbgs() << "Below is the info about current AliasObject...\n";
-                fetchPointsToObjects_log(srcfieldId, dstObjects, targetInstr, create_arg_obj);
+                dbgs() << "!!! AliasObject::createFieldPointee(): field ID OOB!";
+                dbgs() << " Below is the info about current AliasObject...\n";
+                fetchPointsToObjects_log(fid, dstObjects, targetInstr);
             }
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
             dbgs() << "Cannot decide the type of the dst element!\n";
@@ -291,16 +356,15 @@ namespace DRCHECKER {
         //(2) The dst element is an embedded composite, if this is the case we need to recursively extract the first field of it until we get a non-composite field, then we can decide the type of dummy obj to create.
         //(3) No type information for the dst element is available, return directly.
         AliasObject *hostObj = this;
-        long fid = srcfieldId;
         while (dyn_cast<CompositeType>(ety)) {
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-            dbgs() << "fetchPointsToObjects(): dst field " << fid << " is a composite: " << InstructionUtils::getTypeStr(ety) << "\n"; 
-            dbgs() << "fetchPointsToObjects(): Try to get/create an emb obj for the dst field.\n"; 
+            dbgs() << "AliasObject::createFieldPointee(): dst field " << fid << " is a composite: " << InstructionUtils::getTypeStr(ety) << "\n"; 
+            dbgs() << "AliasObject::createFieldPointee(): Try to get/create an emb obj for the dst field.\n"; 
 #endif
             AliasObject *newObj = DRCHECKER::createEmbObj(hostObj, fid);
             if (!newObj) {
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-                dbgs() << "!!! fetchPointsToObjects(): Failed to create the emb obj.\n"; 
+                dbgs() << "!!! AliasObject::createFieldPointee(): Failed to create the emb obj.\n"; 
 #endif
                 return;
             }
@@ -310,11 +374,12 @@ namespace DRCHECKER {
             ety = dyn_cast<CompositeType>(ety)->getTypeAtIndex((unsigned)fid);
         }
         //It's possible that the embedded object already has the point-to record for field 0, if so, we just return the existing pto records.
+        //If not, the "fetchPointsToObjects" will again invoke "createFieldPointee" to create the dummy object.
         if (hostObj != this) {
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-            dbgs() << "fetchPointsToObjects(): recursively fetch the point-to from the embedded composite field.\n"; 
+            dbgs() << "AliasObject::createFieldPointee(): fetch the point-to from the embedded composite field.\n"; 
 #endif
-            return hostObj->fetchPointsToObjects(fid,dstObjects,currInst,create_arg_obj);
+            return hostObj->fetchPointsToObjects(fid,dstObjects,currInst);
         }
         //Decide the type of the dummy object we want to create..
         //NOTE: a non-pointer field can also be converted to a pointer and thus have pointees... 
@@ -327,7 +392,7 @@ namespace DRCHECKER {
             real_ty = expObjTy;
         }
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-        dbgs() << "fetchPointsToObjects(): about to create dummy obj of type: " << InstructionUtils::getTypeStr(real_ty) << "\n"; 
+        dbgs() << "AliasObject::createFieldPointee(): about to create dummy obj of type: " << InstructionUtils::getTypeStr(real_ty) << "\n"; 
 #endif
         if (!real_ty) {
             return;
@@ -342,35 +407,26 @@ namespace DRCHECKER {
             for (Function *func : candidateFuncs) {
                 GlobalObject *newObj = new GlobalObject(func);
                 //Update points-to
-                hostObj->addObjectToFieldPointsTo(fid,newObj,currInst,false);
+                hostObj->addObjectToFieldPointsTo(fid,newObj,siteInst,false);
                 dstObjects.insert(dstObjects.end(), std::make_pair(0, newObj));
             }
 #endif
         }else if (validTyForOutsideObj(real_ty)) {
-            // if there are no composite objects that this pointer field points to, generate a dummy object.
-            if(create_arg_obj || hostObj->isFunctionArg() || hostObj->isOutsideObject() || hostObj->isHeapLocation()) {
+            OutsideObject *newObj = new OutsideObject(targetInstr,real_ty);
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-                dbgs() << "Creating a new dummy AliasObject...\n";
+            dbgs() << "AliasObject::createFieldPointee(): New obj created. Id: " << (const void*)newObj << "\n";
 #endif
-                OutsideObject *newObj = new OutsideObject(targetInstr,real_ty);
-#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-                dbgs() << "New obj Id: " << (const void*)newObj << "\n";
-#endif
-                newObj->auto_generated = true;
-                // get the taint for the field and add that taint to the newly created object
-                hostObj->taintSubObj(newObj,fid,currInst);
-
-                //Handle some special cases like mutual point-to in linked list node "list_head".
-                hostObj->handleSpecialFieldPointTo(newObj,fid,currInst);
-
-                //Update points-to
-                hostObj->addObjectToFieldPointsTo(fid,newObj,currInst,false);
-
-                dstObjects.insert(dstObjects.end(), std::make_pair(0, newObj));
-            }
+            newObj->auto_generated = true;
+            // get the taint for the field and add that taint to the newly created object
+            hostObj->taintSubObj(newObj,fid,siteInst);
+            //Handle some special cases like mutual point-to in linked list node "list_head".
+            hostObj->handleSpecialFieldPointTo(newObj,fid,siteInst);
+            //Update points-to
+            hostObj->addObjectToFieldPointsTo(fid,newObj,siteInst,false);
+            dstObjects.insert(dstObjects.end(), std::make_pair(0, newObj));
         }else {
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-                dbgs() << "fetchPointsToObjects(): the pointee type is invalid to create a dummy obj!\n";
+            dbgs() << "fetchPointsToObjects(): the pointee type is invalid to create a dummy obj!\n";
 #endif
         }
     }

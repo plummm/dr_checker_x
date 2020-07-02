@@ -269,7 +269,9 @@ namespace DRCHECKER {
             // add the source instruction into the trace.
             this->addInstructionToTrace(srcOperand);
             // add target inst to the trace.
-            this->addInstructionToTrace(targetInstr);
+            if (targetInstr != srcOperand) {
+                this->addInstructionToTrace(targetInstr);
+            }
             //hz: tag propagation.
             this->tag = copyTaint->tag;
         }

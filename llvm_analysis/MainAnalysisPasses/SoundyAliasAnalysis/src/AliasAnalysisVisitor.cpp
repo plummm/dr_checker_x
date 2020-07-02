@@ -1566,9 +1566,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
         InstLoc *propInst = new InstLoc(&I,this->currFuncCallSites);
         for(const std::pair<long, AliasObject*> &currObjPair : targetObjects) {
             // fetch objects that could be pointed by the field.
-            // if this object is a function argument then
-            // dynamically try to create an object, if we do not have any object
-            currObjPair.second->fetchPointsToObjects(currObjPair.first, finalObjects, propInst, finalObjects.empty());
+            currObjPair.second->fetchPointsToObjects(currObjPair.first, finalObjects, propInst);
         }
         if(finalObjects.size() > 0) {
 #ifdef FAST_HEURISTIC
