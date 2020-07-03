@@ -32,6 +32,7 @@ def is_inst_line(i):
         'updatePointsToObjects for', 0,
         'TaintUtils::updateTaintInfo() for', 0,
         '*********fetchPointsToObjects', 1,
+        '*********FieldAccess', 1,
     ]
     if i < 0 or i >= len(log) or log[i].find('!dbg') < 0:
         return False;

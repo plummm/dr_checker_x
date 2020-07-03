@@ -448,6 +448,25 @@ namespace DRCHECKER {
             return;
         }
 
+        void logFieldPto(long fid, raw_ostream &O) {
+            if (this->pointsTo.find(fid) == this->pointsTo.end()) {
+                return;
+            }
+            int total = 0, act = 0, strong = 0;
+            for (ObjectPointsTo *pto : this->pointsTo[fid]) {
+                if (pto) {
+                    ++total;
+                    if (pto->is_active) {
+                        ++act;
+                    }
+                    if (!pto->is_weak) {
+                        ++strong;
+                    }
+                }
+            }
+            O << "Field Pto: " << (const void*)this << " | " << fid << " : " << "#Total: " << total << " #Active: " << act << " #Strong: " << strong << "\n";
+        }
+
         //This is a wrapper of "updateFieldPointsTo" for convenience, it assumes that we only have one pto record for the "fieldId" to update,
         //and this pto points to field 0 of "dstObject".
         //TODO: consider to replace more "updateFieldPointsTo" invocation to this when applicable, to simplify the codebase.
@@ -712,7 +731,9 @@ namespace DRCHECKER {
 
         virtual void createFieldPointee(long fid, std::set<std::pair<long, AliasObject*>> &dstObjects, InstLoc *currInst = nullptr, InstLoc *siteInst = nullptr);
 
-        virtual void fetchPointsToObjects_log(long srcfieldId, std::set<std::pair<long, AliasObject*>> &dstObjects, Instruction *targetInstr);
+        virtual void logFieldAccess(long srcfieldId, Instruction *targetInstr = nullptr, const std::string &msg = "");
+
+        AliasObject *getNestedObj(long fid);
 
         //Get the living field ptos at a certain InstLoc.
         virtual void getLivePtos(long fid, InstLoc *loc, std::set<ObjectPointsTo*> *retPto);
