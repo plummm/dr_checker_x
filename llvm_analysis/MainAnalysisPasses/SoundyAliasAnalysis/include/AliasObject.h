@@ -756,9 +756,8 @@ namespace DRCHECKER {
             }
             assert(targetTaintFlag);
             if(!this->all_contents_tainted) {
-                TaintTag *existingTag = targetTaintFlag->tag;
                 bool is_global = true;
-                if (existingTag && !existingTag->is_global) {
+                if (targetTaintFlag->tag && !targetTaintFlag->tag->is_global) {
                     is_global = false;
                 }
                 this->all_contents_tainted = true;
@@ -777,7 +776,7 @@ namespace DRCHECKER {
 #ifdef DEBUG_UPDATE_FIELD_TAINT
                 dbgs() << "AliasObject::taintAllFieldsWithTag(): Updating field taint for obj: " << (const void*)this << "\n";
 #endif
-                for (auto fieldId:allAvailableFields) {
+                for (auto fieldId : allAvailableFields) {
 #ifdef DEBUG_UPDATE_FIELD_TAINT
                     dbgs() << "AliasObject::taintAllFieldsWithTag(): Adding taint to field:" << fieldId << "\n";
 #endif

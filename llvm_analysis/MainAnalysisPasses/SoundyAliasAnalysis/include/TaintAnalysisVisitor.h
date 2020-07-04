@@ -127,7 +127,7 @@ namespace DRCHECKER {
          * @param srcVals values whose taint values need to be merged.
          * @return Set of new taint flags
          */
-        std::set<TaintFlag*> *mergeTaintInfo(std::set<Value *> &srcVals, Value *targetInstr);
+        std::set<TaintFlag*> *mergeTaintInfo(std::set<Value*> &srcVals, Instruction *targetInstr);
 
 
         /***
@@ -178,13 +178,9 @@ namespace DRCHECKER {
          * @param dstTaintInfo [optional] set to which the copied taint info needs to be added
          * @return pointer to the newly created or provided via dstTaintInfo set of taint info
          */
-        std::set<TaintFlag*>* makeTaintInfoCopy(Value *srcOperand, Instruction *targetInstruction,
-                                                std::set<TaintFlag*>* srcTaintInfo,
-                                                std::set<TaintFlag*> *dstTaintInfo = nullptr);
+        std::set<TaintFlag*>* makeTaintInfoCopy(Instruction *targetInstruction, std::set<TaintFlag*>* srcTaintInfo, std::set<TaintFlag*> *dstTaintInfo = nullptr);
 
-        std::set<TaintFlag*>* makeTaintInfoCopy(Value *srcOperand, Instruction *targetInstruction,
-                                                TaintFlag *srcTaintFlag,
-                                                std::set<TaintFlag*> *dstTaintInfo = nullptr);
+        std::set<TaintFlag*>* makeTaintInfoCopy(Instruction *targetInstruction, TaintFlag *srcTaintFlag, std::set<TaintFlag*> *dstTaintInfo = nullptr);
 
         InstLoc *makeInstLoc(Value *v);
 

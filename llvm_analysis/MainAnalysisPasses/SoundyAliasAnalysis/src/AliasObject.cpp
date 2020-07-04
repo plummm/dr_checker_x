@@ -51,7 +51,7 @@ namespace DRCHECKER {
             dbgs() << "AliasObject::taintSubObj(): Adding taint of field:" << srcfieldId << " to sub object: " << (const void*)newObj << "\n";
 #endif
             for(auto existingTaint:*fieldTaint) {
-                TaintFlag *newTaint = new TaintFlag(existingTaint,targetInstr,targetInstr);
+                TaintFlag *newTaint = new TaintFlag(existingTaint,targetInstr);
                 newObj->taintAllFieldsWithTag(newTaint);
             }
             newObj->is_taint_src = true;
@@ -65,7 +65,7 @@ namespace DRCHECKER {
                 dbgs() << "AliasObject::taintSubObj(): Trying to get field from an object whose contents are fully tainted\n";
 #endif
                 assert(this->all_contents_taint_flag != nullptr);
-                TaintFlag *newTaint = new TaintFlag(this->all_contents_taint_flag,targetInstr,targetInstr);
+                TaintFlag *newTaint = new TaintFlag(this->all_contents_taint_flag,targetInstr);
                 newObj->taintAllFieldsWithTag(newTaint);
                 newObj->is_taint_src = true;
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS

@@ -260,18 +260,14 @@ namespace DRCHECKER {
             this->tag = tag;
         }
 
-        TaintFlag(TaintFlag *copyTaint, InstLoc *targetInstr, InstLoc *srcOperand) {
+        TaintFlag(TaintFlag *copyTaint, InstLoc *targetInstr) {
             this->targetInstr = targetInstr;
             this->is_tainted = copyTaint->isTainted();
             // copy the instruction trace from the source taint guy
             this->instructionTrace.insert(instructionTrace.begin(),
                                           copyTaint->instructionTrace.begin(), copyTaint->instructionTrace.end());
-            // add the source instruction into the trace.
-            this->addInstructionToTrace(srcOperand);
             // add target inst to the trace.
-            if (targetInstr != srcOperand) {
-                this->addInstructionToTrace(targetInstr);
-            }
+            this->addInstructionToTrace(targetInstr);
             //hz: tag propagation.
             this->tag = copyTaint->tag;
         }

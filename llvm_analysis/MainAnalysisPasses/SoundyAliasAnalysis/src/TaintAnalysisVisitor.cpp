@@ -52,9 +52,7 @@ namespace DRCHECKER {
         TaintUtils::updateTaintInfo(this->currState, this->currFuncCallSites, targetVal, targetTaintInfo);
     }
 
-    std::set<TaintFlag*>* TaintAnalysisVisitor::makeTaintInfoCopy(Value *srcOperand, Instruction *targetInstruction,
-                                                                  std::set<TaintFlag*> *srcTaintInfo,
-                                                                  std::set<TaintFlag*> *dstTaintInfo) {
+    std::set<TaintFlag*>* TaintAnalysisVisitor::makeTaintInfoCopy(Instruction *targetInstruction, std::set<TaintFlag*> *srcTaintInfo, std::set<TaintFlag*> *dstTaintInfo) {
         if(srcTaintInfo != nullptr) {
             std::set<TaintFlag*> *newTaintInfo = new std::set<TaintFlag*>();
             bool add_taint = false;
@@ -65,7 +63,9 @@ namespace DRCHECKER {
                 add_taint = true;
                 //hz: we're doing the taint analysis for global states, which can survive function invocations,
                 //stmt0 in the 1st function call may affect stmt1 in the 2nd invocation of the same function,
-                //although stmt0 cannot reach stmt1 in the CFG of this function, so we disable the below reachability check.
+                //although stmt0 cannot reach stmt1 in the CFG of this function, so it seems we should disable the below reachability check.
+                //However, we can rely on the post-processing to do the multi-entry fixed-point analysis, and here we still
+                //enforce the reachability test to avoid the taint explosion and have a better and cleaner summary of a single entry function.
 #ifdef ENFORCE_TAINT_PATH
                 if(currTaint->targetInstr != nullptr && !currTaint->is_inherent) {
                     Instruction *srcInstruction = dyn_cast<Instruction>(currTaint->targetInstr->inst);
@@ -76,7 +76,7 @@ namespace DRCHECKER {
                 }
 #endif
                 if(add_taint) {
-                    TaintFlag *newTaintFlag = new TaintFlag(currTaint, this->makeInstLoc(targetInstruction), this->makeInstLoc(srcOperand));
+                    TaintFlag *newTaintFlag = new TaintFlag(currTaint, this->makeInstLoc(targetInstruction));
                     TaintAnalysisVisitor::addNewTaintFlag(newTaintInfo,newTaintFlag);
                 }else {
 #ifdef DEBUG_ENFORCE_TAINT_PATH
@@ -112,18 +112,16 @@ namespace DRCHECKER {
         return nullptr;
     }
 
-    std::set<TaintFlag*>* TaintAnalysisVisitor::makeTaintInfoCopy(Value *srcOperand, Instruction *targetInstruction,
-                                                                  TaintFlag *srcTaintFlag,
-                                                                  std::set<TaintFlag*> *dstTaintInfo) {
+    std::set<TaintFlag*>* TaintAnalysisVisitor::makeTaintInfoCopy(Instruction *targetInstruction, TaintFlag *srcTaintFlag, std::set<TaintFlag*> *dstTaintInfo) {
         if (!srcTaintFlag) {
             return nullptr;
         }
         std::set<TaintFlag*> srcTaintInfo;
         srcTaintInfo.insert(srcTaintFlag);
-        return TaintAnalysisVisitor::makeTaintInfoCopy(srcOperand,targetInstruction,&srcTaintInfo,dstTaintInfo);
+        return TaintAnalysisVisitor::makeTaintInfoCopy(targetInstruction,&srcTaintInfo,dstTaintInfo);
     }
 
-    std::set<TaintFlag*>* TaintAnalysisVisitor::mergeTaintInfo(std::set<Value *> &srcVals, Value *targetInstr) {
+    std::set<TaintFlag*>* TaintAnalysisVisitor::mergeTaintInfo(std::set<Value *> &srcVals, Instruction *targetInstr) {
 
         std::set<TaintFlag*> *newTaintInfo = new std::set<TaintFlag*>();
 
@@ -135,8 +133,7 @@ namespace DRCHECKER {
                 currValTaintInfo = getTaintInfo(currVal);
             }
             if(currValTaintInfo != nullptr) {
-                this->makeTaintInfoCopy(targetInstr, dyn_cast<Instruction>(targetInstr),
-                                        currValTaintInfo, newTaintInfo);
+                this->makeTaintInfoCopy(targetInstr, currValTaintInfo, newTaintInfo);
             }
         }
         // if there is no taint info?
@@ -163,7 +160,7 @@ namespace DRCHECKER {
         // if the src operand is tainted then the instruction is tainted.
 
         Value *srcOperand = I.getOperand(0);
-        std::set<TaintFlag*>* srcTaintInfo = getTaintInfo(srcOperand);
+        std::set<TaintFlag*> *srcTaintInfo = getTaintInfo(srcOperand);
         if(srcTaintInfo == nullptr) {
             srcOperand = srcOperand->stripPointerCasts();
             srcTaintInfo = getTaintInfo(srcOperand);
@@ -171,7 +168,7 @@ namespace DRCHECKER {
 
         // if there exists some taintflags..propagate them
         if(srcTaintInfo != nullptr) {
-            std::set<TaintFlag*> *newTaintInfo = this->makeTaintInfoCopy(srcOperand, &I, srcTaintInfo);
+            std::set<TaintFlag*> *newTaintInfo = this->makeTaintInfoCopy(&I, srcTaintInfo);
             if(newTaintInfo != nullptr) {
                 this->updateTaintInfo(&I, newTaintInfo);
             } else {
@@ -284,7 +281,7 @@ namespace DRCHECKER {
 #ifdef DEBUG_LOAD_INSTR
             dbgs() << "The src pointer itself is tainted.\n";
 #endif
-            TaintAnalysisVisitor::makeTaintInfoCopy(srcPointer,&I,srcTaintInfo,newTaintInfo);
+            TaintAnalysisVisitor::makeTaintInfoCopy(&I,srcTaintInfo,newTaintInfo);
         }
 
         if(!already_stripped) {
@@ -330,7 +327,7 @@ namespace DRCHECKER {
                 // if the field is tainted, add the taint from the field
                 // to the result of this instruction.
                 if (fieldTaintInfo != nullptr) {
-                    this->makeTaintInfoCopy(&I, &I, fieldTaintInfo, newTaintInfo);
+                    this->makeTaintInfoCopy(&I, fieldTaintInfo, newTaintInfo);
                 } else {
 #ifdef DEBUG_LOAD_INSTR
                     dbgs() << "No taint information available!\n";
@@ -369,48 +366,34 @@ namespace DRCHECKER {
         // if the value, we are trying to store is tainted? Then process, else
         // ignore.
         if(srcTaintInfo != nullptr) {
-
 #ifdef DEBUG_STORE_INSTR
             dbgs() << "TaintAnalysisVisitor::visitStoreInst: #srcTaintInfo: " << srcTaintInfo->size() << "\n";
 #endif
-
             // create newTaintInfo set.
-            std::set<TaintFlag *> *newTaintInfo = new std::set<TaintFlag *>();
+            std::set<TaintFlag*> *newTaintInfo = new std::set<TaintFlag*>();
 
-            TaintAnalysisVisitor::makeTaintInfoCopy(srcPointer,&I,srcTaintInfo,newTaintInfo);
-
-            // check dstTaintInfo.
+            TaintAnalysisVisitor::makeTaintInfoCopy(&I,srcTaintInfo,newTaintInfo);
 
             Value *dstPointer = I.getPointerOperand();
-            std::set<TaintFlag *> *dstTaintInfo = getTaintInfo(dstPointer);
 
-            bool already_stripped = true;
-
-            if(dstTaintInfo == nullptr) {
-                already_stripped = false;
-                if(getTaintInfo(dstPointer->stripPointerCasts())) {
-                    dstPointer = dstPointer->stripPointerCasts();
-                    dstTaintInfo = getTaintInfo(dstPointer);
-                    already_stripped = true;
-                }
-            }
-
-            if(!already_stripped) {
-                if(!PointsToUtils::hasPointsToObjects(currState, this->currFuncCallSites, dstPointer)) {
+            //HZ: besides deciding whether we need to strip the pointer, the "dstTaintInfo" in the original code actually has no usage later...
+            //HZ: so rewrite the original logic as below:
+            //TODO: why do we need to even consider the "dstTaintInfo" when making the strip decision?
+            if (!getTaintInfo(dstPointer)) {
+                if (getTaintInfo(dstPointer->stripPointerCasts()) || 
+                    !PointsToUtils::hasPointsToObjects(currState, this->currFuncCallSites, dstPointer))
+                {
                     dstPointer = dstPointer->stripPointerCasts();
                 }
             }
 
-            std::set<PointerPointsTo*>* dstPointsTo = PointsToUtils::getPointsToObjects(currState,
-                                                                                        this->currFuncCallSites,
-                                                                                        dstPointer);
+            std::set<PointerPointsTo*>* dstPointsTo = PointsToUtils::getPointsToObjects(currState, this->currFuncCallSites, dstPointer);
 
             if(dstPointsTo != nullptr) {
-
                 // Now store the taint into correct fields.
                 // this set stores the <fieldid, targetobject> of all the objects to which the dstPointer points to.
                 std::set<std::pair<long, AliasObject *>> targetObjects;
-                for (PointerPointsTo *currPointsToObj:*dstPointsTo) {
+                for (PointerPointsTo *currPointsToObj : *dstPointsTo) {
                     long target_field = currPointsToObj->dstfieldId;
                     AliasObject *dstObj = currPointsToObj->targetObject;
                     auto to_check = std::make_pair(target_field, dstObj);
@@ -418,23 +401,21 @@ namespace DRCHECKER {
                         targetObjects.insert(targetObjects.end(), to_check);
                     }
                 }
-
                 bool is_added;
                 // Now try to store the newTaintInfo into all of these objects.
-                for(auto newTaintFlag:*newTaintInfo) {
+                for (auto newTaintFlag : *newTaintInfo) {
                     is_added = false;
-                    for(auto fieldObject:targetObjects) {
-                        if(fieldObject.second->addFieldTaintFlag(fieldObject.first, newTaintFlag)) {
+                    for (auto fieldObject : targetObjects) {
+                        if (fieldObject.second->addFieldTaintFlag(fieldObject.first, newTaintFlag)) {
                             is_added = true;
                         }
                     }
                     // if the current taint is not added to any object.
                     // delete the newTaint object.
-                    if(!is_added) {
+                    if (!is_added) {
                         delete(newTaintFlag);
                     }
                 }
-
             }
             // clean up
             delete(newTaintInfo);
@@ -460,12 +441,10 @@ namespace DRCHECKER {
 #ifdef DEBUG_CALL_INSTR
         dbgs() << "Propagating Taint To Arguments.\n";
 #endif
-        for(auto currArgNo: taintedArgs) {
+        for(auto currArgNo : taintedArgs) {
             Value *currArg = I.getArgOperand(currArgNo);
 #ifdef DEBUG_CALL_INSTR
-            dbgs() << "Current argument:";
-            currArg->print(dbgs());
-            dbgs() << "\n";
+            dbgs() << "Current argument: " << InstructionUtils::getValueStr(currArg) << "\n";
 #endif
             std::set<PointerPointsTo*>* dstPointsTo = PointsToUtils::getPointsToObjects(currState,
                                                                                         this->currFuncCallSites,
@@ -493,7 +472,7 @@ namespace DRCHECKER {
                 TaintFlag *newTaintFlag = new TaintFlag(this->makeInstLoc(currArg), true);
                 newTaintFlag->addInstructionToTrace(this->makeInstLoc(&I));
 
-                for(auto fieldObject:targetObjects) {
+                for(auto fieldObject : targetObjects) {
                     // if it is pointing to first field, then taint everything
                     // else taint only corresponding field.
                     if(fieldObject.first != 0) {
@@ -652,7 +631,7 @@ namespace DRCHECKER {
             allPointerTaint.clear();
             this->getPtrTaintInfo(I.getArgOperand(0), allPointerTaint);
             if(!allPointerTaint.empty()) {
-                std::set<TaintFlag *> *newTaintSet = this->makeTaintInfoCopy(&I, nullptr, &allPointerTaint);
+                std::set<TaintFlag*> *newTaintSet = this->makeTaintInfoCopy(&I, &allPointerTaint);
                 this->updateTaintInfo(&I, newTaintSet);
             }
 
@@ -663,9 +642,9 @@ namespace DRCHECKER {
             allPointerTaint.clear();
             this->getPtrTaintInfo(I.getArgOperand(0), allPointerTaint);
             if(!allPointerTaint.empty()) {
-                std::set<TaintFlag *> *newTaintSet = this->makeTaintInfoCopy(&I, nullptr, &allPointerTaint);
+                std::set<TaintFlag*> *newTaintSet = this->makeTaintInfoCopy(&I, &allPointerTaint);
 
-                std::set<TaintFlag *> addedTaints;
+                std::set<TaintFlag*> addedTaints;
 
                 // now add taint to all objects pointed by the arguments.
                 unsigned int arg_idx;
@@ -741,7 +720,7 @@ namespace DRCHECKER {
             // create new taint info.
             std::set<TaintFlag*>* newTaintInfo = new std::set<TaintFlag*>();
             for(auto currRetTaint:vis->retValTaints) {
-                TaintFlag *newTaintFlag = new TaintFlag(currRetTaint, this->makeInstLoc(&I), this->makeInstLoc(&I));
+                TaintFlag *newTaintFlag = new TaintFlag(currRetTaint, this->makeInstLoc(&I));
                 newTaintInfo->insert(newTaintInfo->end(), newTaintFlag);
             }
 
@@ -809,7 +788,7 @@ namespace DRCHECKER {
         }
         // if there exists some taintflags..propagate them
         if(srcTaintInfo != nullptr) {
-            std::set<TaintFlag*> *newTaintInfo = this->makeTaintInfoCopy(condition, &I, srcTaintInfo);
+            std::set<TaintFlag*> *newTaintInfo = this->makeTaintInfoCopy(&I, srcTaintInfo);
             if(newTaintInfo != nullptr) {
                 this->updateTaintInfo(&I, newTaintInfo);
             } else {
@@ -840,7 +819,7 @@ namespace DRCHECKER {
         }
         // if there exists some taintflags..propagate them
         if(srcTaintInfo != nullptr) {
-            std::set<TaintFlag*> *newTaintInfo = this->makeTaintInfoCopy(condition, &I, srcTaintInfo);
+            std::set<TaintFlag*> *newTaintInfo = this->makeTaintInfoCopy(&I, srcTaintInfo);
             if(newTaintInfo != nullptr) {
                 this->updateTaintInfo(&I, newTaintInfo);
             } else {
