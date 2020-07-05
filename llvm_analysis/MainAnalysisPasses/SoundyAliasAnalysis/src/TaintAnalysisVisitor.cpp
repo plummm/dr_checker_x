@@ -436,7 +436,7 @@ namespace DRCHECKER {
     }
 
     //hz: this function tries to init the taint from user arg for functions like copy_from_user().
-    void TaintAnalysisVisitor::propogateTaintToArguments(std::set<long> &taintedArgs, CallInst &I) {
+    void TaintAnalysisVisitor::propagateTaintToArguments(std::set<long> &taintedArgs, CallInst &I) {
         assert(taintedArgs.size() > 0);
 #ifdef DEBUG_CALL_INSTR
         dbgs() << "Propagating Taint To Arguments.\n";
@@ -460,6 +460,9 @@ namespace DRCHECKER {
                 for (PointerPointsTo *currPointsToObj:*dstPointsTo) {
                     long target_field = currPointsToObj->dstfieldId;
                     AliasObject *dstObj = currPointsToObj->targetObject;
+                    if (!dstObj) {
+                        continue;
+                    }
                     auto to_check = std::make_pair(target_field, dstObj);
                     if (std::find(targetObjects.begin(), targetObjects.end(), to_check) == targetObjects.end()) {
                         targetObjects.insert(targetObjects.end(), to_check);
@@ -469,59 +472,40 @@ namespace DRCHECKER {
                 bool is_added = false;
 
                 assert(targetObjects.size() > 0);
-                TaintFlag *newTaintFlag = new TaintFlag(this->makeInstLoc(currArg), true);
-                newTaintFlag->addInstructionToTrace(this->makeInstLoc(&I));
+                InstLoc *currInst = this->makeInstLoc(&I);
 
                 for(auto fieldObject : targetObjects) {
+                    //Taint Tag represents the taint source, here it's the user provided data passed by functions like copy_from_user()...
+                    //But we actually don't have value/type/AliasObject for this user input, so just create a dummy Tag to stand for a certain user input.
+                    TaintTag *tag = new TaintTag(0,(Type*)nullptr,false,nullptr);
+                    TaintFlag *tf = new TaintFlag(currInst,true,tag);
                     // if it is pointing to first field, then taint everything
                     // else taint only corresponding field.
-                    if(fieldObject.first != 0) {
+                    if (fieldObject.first != 0 && fieldObject.second->addFieldTaintFlag(fieldObject.first, tf)) {
 #ifdef DEBUG_CALL_INSTR
-                        dbgs() << "Adding Taint To field ID:"<< fieldObject.first << " of:" << fieldObject.second;
+                        dbgs() << "Adding Taint To field ID:"<< fieldObject.first << " of:" << fieldObject.second << ":Success\n";
 #endif
-                        TaintTag *tag = new TaintTag(fieldObject.first,fieldObject.second->getValue(),false,(void*)fieldObject.second);
-                        TaintFlag *tf = new TaintFlag(newTaintFlag,tag);
-
-                        if (fieldObject.second->addFieldTaintFlag(fieldObject.first, tf)) {
+                        is_added = true;
+                    } else if (fieldObject.first == 0 && fieldObject.second->taintAllFieldsWithTag(tf)) {
 #ifdef DEBUG_CALL_INSTR
-                            dbgs() << ":Success\n";
+                        dbgs() << "Adding Taint To All fields:"<< fieldObject.first << " of:" << fieldObject.second << ":Success\n";
 #endif
-                            is_added = true;
-                        } else {
+                        is_added = true;
+                    }else {
 #ifdef DEBUG_CALL_INSTR
-                            dbgs() << ":Failed\n";
+                        dbgs() << "Adding Arg Taint Failed.\n";
 #endif
-                            delete(tag);
-                            delete(tf);
-                        }
-                    } else {
-#ifdef DEBUG_CALL_INSTR
-                        dbgs() << "Adding Taint To All fields:"<< fieldObject.first << " of:" << fieldObject.second;
-#endif
-                        TaintTag *tag = new TaintTag(0,fieldObject.second->getValue(),false,(void*)fieldObject.second);
-                        TaintFlag *tf = new TaintFlag(newTaintFlag,tag);
-                        if(fieldObject.second->taintAllFieldsWithTag(tf)) {
-#ifdef DEBUG_CALL_INSTR
-                            dbgs() << ":Success\n";
-#endif
-                            is_added = true;
-                        } else {
-#ifdef DEBUG_CALL_INSTR
-                            dbgs() << ":Failed\n";
-#endif
-                            delete(tag);
-                            delete(tf);
-                        }
+                        delete(tag);
+                        delete(tf);
                     }
                 }
-                // if the current taint is not added to any object.
+                // if the current taint is not added to any object, free the memory.
                 // delete the newTaint object.
                 if(!is_added) {
-                    delete(newTaintFlag);
+                    delete(currInst);
                 }
 
             } else {
-                // TODO: raise warning that we do not have any points to information.
 #ifdef DEBUG_CALL_INSTR
                 dbgs() << "TaintAnalysis: Argument does not have points to information: " << InstructionUtils::getValueStr(currArg) << "\n";
 #endif
@@ -615,7 +599,7 @@ namespace DRCHECKER {
 #endif
             // handling __copy_from_user and its friends.
             std::set<long> taintedArgs = TaintAnalysisVisitor::functionChecker->get_tainted_arguments(currFunc);
-            this->propogateTaintToArguments(taintedArgs, I);
+            this->propagateTaintToArguments(taintedArgs, I);
 
         } else if(TaintAnalysisVisitor::functionChecker->is_memcpy_function(currFunc)) {
             // Handle memcpy function..

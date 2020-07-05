@@ -60,17 +60,18 @@ namespace DRCHECKER {
 #endif
         } else {
             // if all the contents are tainted?
-            if(this->all_contents_tainted) {
+            if (!this->all_contents_taint_flags.empty()) {
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
                 dbgs() << "AliasObject::taintSubObj(): Trying to get field from an object whose contents are fully tainted\n";
 #endif
-                assert(this->all_contents_taint_flag != nullptr);
-                TaintFlag *newTaint = new TaintFlag(this->all_contents_taint_flag,targetInstr);
-                newObj->taintAllFieldsWithTag(newTaint);
-                newObj->is_taint_src = true;
+                for (TaintFlag *tf : this->all_contents_taint_flags) {
+                    TaintFlag *newTaint = new TaintFlag(tf,targetInstr);
+                    newObj->taintAllFieldsWithTag(newTaint);
+                    newObj->is_taint_src = true;
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-                dbgs() << "##Set |is_taint_src| to true.\n";
+                    dbgs() << "##Set |is_taint_src| to true.\n";
 #endif
+                }
             }
         }
     }
@@ -97,8 +98,8 @@ namespace DRCHECKER {
         }
         std::set<ObjectPointsTo*> *srcPto = &(this->pointsTo[fid]);
         for (ObjectPointsTo *pto : *srcPto) {
-            if (pto && pto->propogatingInst) {
-                InstLoc *pil = pto->propogatingInst;
+            if (pto && pto->propagatingInst) {
+                InstLoc *pil = pto->propagatingInst;
                 if (pto->is_active && pil->hasCtx() && (*pil->ctx)[0] != entry) {
                     //Deactivate it.
                     this->activateFieldPto(pto,false);
@@ -137,8 +138,8 @@ namespace DRCHECKER {
         //The criteria: when there exists any active pto record whose update site belongs to a different level 0 entry than "loc".
         if (loc->hasCtx() && (*loc->ctx)[0]) {
             for (ObjectPointsTo *pto : *srcPto) {
-                if (pto && pto->is_active && pto->propogatingInst) {
-                    InstLoc *pil = pto->propogatingInst;
+                if (pto && pto->is_active && pto->propagatingInst) {
+                    InstLoc *pil = pto->propagatingInst;
                     if (pil->hasCtx() && (*pil->ctx)[0] && (*loc->ctx)[0] != (*pil->ctx)[0]) {
                         //Do the reactivation..
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
@@ -168,13 +169,13 @@ namespace DRCHECKER {
         //NOTE: here we need to consider the case where one pto is killed along its path to the destination by another strong pto update.
         std::set<InstLoc*> blocklist;
         for (ObjectPointsTo *pto : actPtos) {
-            if (pto->propogatingInst && !pto->is_weak) {
-                blocklist.insert(pto->propogatingInst);
+            if (pto->propagatingInst && !pto->is_weak) {
+                blocklist.insert(pto->propagatingInst);
             }
         }
         for (ObjectPointsTo *pto : actPtos) {
-            if (pto->propogatingInst) {
-                if (loc->reachable(pto->propogatingInst,&blocklist)) {
+            if (pto->propagatingInst) {
+                if (loc->reachable(pto->propagatingInst,&blocklist)) {
                     retPto->insert(pto);
                 }
             }else {
@@ -201,10 +202,10 @@ namespace DRCHECKER {
         if (retPto->size() > 0) {
             bool has_global_pto= false;
             for (ObjectPointsTo *pto : *srcPto) {
-                if (!pto->propogatingInst) {
+                if (!pto->propagatingInst) {
                     continue;
                 }
-                InstLoc *pil = pto->propogatingInst;
+                InstLoc *pil = pto->propagatingInst;
                 if (!pil->hasCtx()) {
                     has_global_pto = true;
                     break;
@@ -221,8 +222,8 @@ namespace DRCHECKER {
                 //Test whether current active ptos can cover all paths from entry to "loc".
                 blocklist.clear();
                 for (ObjectPointsTo *pto : *retPto) {
-                    if (pto && pto->propogatingInst) {
-                        blocklist.insert(pto->propogatingInst);
+                    if (pto && pto->propagatingInst) {
+                        blocklist.insert(pto->propagatingInst);
                     }
                 }
                 if (loc->chainable(0,&blocklist,true)) {
@@ -245,7 +246,7 @@ namespace DRCHECKER {
                         //We need to add these newly created pto (which are also live now) to the return set.
                         int cnt = 0;
                         for (ObjectPointsTo *pto : *srcPto) {
-                            if (pto && pto->propogatingInst == il && pto->is_active) {
+                            if (pto && pto->propagatingInst == il && pto->is_active) {
                                 retPto->insert(pto);
                                 ++cnt;
                             }
@@ -492,7 +493,7 @@ namespace DRCHECKER {
         return nullptr;
     }
 
-    void AliasObject::updateFieldPointsTo(long srcfieldId, std::set<PointerPointsTo*>* dstPointsTo, InstLoc *propogatingInstr, int is_weak) {
+    void AliasObject::updateFieldPointsTo(long srcfieldId, std::set<PointerPointsTo*>* dstPointsTo, InstLoc *propagatingInstr, int is_weak) {
         /***
          * Add all objects in the provided pointsTo set to be pointed by the provided srcFieldID
          */
@@ -534,11 +535,11 @@ namespace DRCHECKER {
             dbgs() << "!!! updateFieldPointsTo(): null type info for this host obj!\n";
 #endif
         }
-        host->updateFieldPointsTo_do(srcfieldId,dstPointsTo,propogatingInstr,is_weak);
+        host->updateFieldPointsTo_do(srcfieldId,dstPointsTo,propagatingInstr,is_weak);
     }
 
     //Do the real job of field pto update.
-    void AliasObject::updateFieldPointsTo_do(long srcfieldId, std::set<PointerPointsTo*> *dstPointsTo, InstLoc *propogatingInstr, int is_weak) {
+    void AliasObject::updateFieldPointsTo_do(long srcfieldId, std::set<PointerPointsTo*> *dstPointsTo, InstLoc *propagatingInstr, int is_weak) {
         if (!dstPointsTo || !dstPointsTo->size()) {
             return;
         }
@@ -550,7 +551,7 @@ namespace DRCHECKER {
             }
             bool unique = true;
             for (ObjectPointsTo *t : unique_pto) {
-                //NOTE: pto in "dstPointsTo" should all share the same "propogatingInstr", so we only need to care about their dst obj and field here.
+                //NOTE: pto in "dstPointsTo" should all share the same "propagatingInstr", so we only need to care about their dst obj and field here.
                 if (!t->pointsToSameObject(pto)) {
                     //Obviously different.
                     continue;
@@ -568,7 +569,7 @@ namespace DRCHECKER {
                 ObjectPointsTo *npto = pto->makeCopy();
                 //Before inserting the pto to the unique set, force set its "fieldId" and "propInst" to be correct.
                 npto->fieldId = srcfieldId;
-                npto->propogatingInst = propogatingInstr;
+                npto->propagatingInst = propagatingInstr;
                 //Insert
                 unique_pto.insert(npto);
             }
@@ -596,7 +597,7 @@ namespace DRCHECKER {
                 //NOTE that we only need to kill those active pto records, since inactive ones are already killed.
                 if (e->is_active && !pto->is_weak) {
                     //Ok, it's a strong update, decide whether it post-dominates "e", if so, delete "e" from existing pto set.
-                    if (pto->propogatingInst && pto->propogatingInst->postDom(e->propogatingInst)) {
+                    if (pto->propagatingInst && pto->propagatingInst->postDom(e->propagatingInst)) {
                         to_del.insert(e);
                         continue;
                     }
@@ -611,10 +612,10 @@ namespace DRCHECKER {
                     continue;
                 }
                 //(2) Update site should be the same.
-                if (!e->propogatingInst != !pto->propogatingInst) {
+                if (!e->propagatingInst != !pto->propagatingInst) {
                     continue;
                 }
-                if (e->propogatingInst && !e->propogatingInst->same(pto->propogatingInst)) {
+                if (e->propagatingInst && !e->propagatingInst->same(pto->propagatingInst)) {
                     continue;
                 }
                 //Ok, we can already say they are identical pto records and no need to insert "pto".
@@ -878,7 +879,7 @@ namespace DRCHECKER {
 #ifdef DEBUG_CREATE_EMB_OBJ
                     dbgs() << "createEmbObj(): try to taint the emb obj, #TaintFlag: " << src_taintFlags->size() << "\n";
 #endif
-                    for(TaintFlag *currTaintFlag:*src_taintFlags){
+                    for (TaintFlag *currTaintFlag : *src_taintFlags) {
                         newObj->taintAllFieldsWithTag(currTaintFlag);
                     }
                 }
@@ -948,10 +949,9 @@ namespace DRCHECKER {
             return nullptr;
         }
         AliasObject *hobj = nullptr;
-        if (targetObj->all_contents_taint_flag) {
-            std::set<TaintFlag*> *existingTaints = new std::set<TaintFlag*>();
-            existingTaints->insert(targetObj->all_contents_taint_flag);
-            hobj = DRCHECKER::createOutsideObj(hostTy, true, existingTaints);
+        if (!targetObj->all_contents_taint_flags.empty()) {
+            std::set<TaintFlag*> existingTaints(targetObj->all_contents_taint_flags);
+            hobj = DRCHECKER::createOutsideObj(hostTy, true, &existingTaints);
         }else{
             hobj = DRCHECKER::createOutsideObj(hostTy, false, nullptr);
         }

@@ -143,7 +143,7 @@ namespace DRCHECKER {
          * @param taintedArgs list containing indexes of tainted arguments.
          * @param I Call instruction responsible for this operation.
          */
-        void propogateTaintToArguments(std::set<long> &taintedArgs, CallInst &I);
+        void propagateTaintToArguments(std::set<long> &taintedArgs, CallInst &I);
 
         /***
          * Propagate taint to the arguments of a memcpy function.

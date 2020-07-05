@@ -137,7 +137,7 @@ namespace DRCHECKER {
          * So that all the information is propagated correctly.
          * @param currSCC vector of BBs in the Strongly connected component.
          * @return number of times all the BBs needs to be analyzed to ensure
-         * that all the information with in SCC is properly propogated.
+         * that all the information with in SCC is properly propagated.
          */
         static unsigned long getNumTimesToAnalyze(std::vector<BasicBlock *> *currSCC);
 

@@ -400,7 +400,7 @@ namespace DRCHECKER {
             // if the target object is not visited, then add into points to info.
             if(hostObj && visitedObjects.find(hostObj) == visitedObjects.end()) {
                 PointerPointsTo *newPointsToObj = new PointerPointsTo();
-                newPointsToObj->propogatingInst = new InstLoc(propInstruction,this->currFuncCallSites);
+                newPointsToObj->propagatingInst = new InstLoc(propInstruction,this->currFuncCallSites);
                 long host_dstFieldId = pto->dstfieldId;
                 //Get type information about current point-to object.
                 Type *host_type = hostObj->targetType;
@@ -674,7 +674,7 @@ void AliasAnalysisVisitor::visitCastInst(CastInst &I) {
         assert(srcPointsToInfo != nullptr);
         //Create new pointsTo info for the current instruction.
         std::set<PointerPointsTo*>* newPointsToInfo = new std::set<PointerPointsTo*>();
-        for(PointerPointsTo *currPointsToObj: *srcPointsToInfo) {
+        for(PointerPointsTo *currPointsToObj : *srcPointsToInfo) {
             if (!currPointsToObj->targetObject || !currPointsToObj->targetObject->targetType) {
 #ifdef DEBUG_CAST_INSTR
                 dbgs() << "AliasAnalysisVisitor::visitCastInst(): null targetObject or null type info!\n";
@@ -685,7 +685,7 @@ void AliasAnalysisVisitor::visitCastInst(CastInst &I) {
             //NOTE: the "targetObject" will not be copied (only the pointer to it will be copied).
             PointerPointsTo *newPointsToObj = (PointerPointsTo*)currPointsToObj->makeCopy();
             //TODO: do we need to keep the original InstLoc (i.e. that of the pointer to cast)?
-            newPointsToObj->propogatingInst = new InstLoc(&I,this->currFuncCallSites);
+            newPointsToObj->propagatingInst = new InstLoc(&I,this->currFuncCallSites);
             newPointsToObj->targetPointer = &I;
             //TODO: this may be unnecessary since the "targetObject" will not be copied.
             newPointsToObj->targetObject->is_taint_src = currPointsToObj->targetObject->is_taint_src;
@@ -749,14 +749,14 @@ void AliasAnalysisVisitor::visitCastInst(CastInst &I) {
                     //This is a little strange since we now have an non-composite AliasObject...
                     //Here we consider a case like a i8* is casted to struct*, where we can directly change the AliasObject's type and taint it properly.
                     //This is often the case for kmalloc'ed() memory region which is initially i8* and then used as a struct storage.
-                    if (dstPointeeTy && dyn_cast<CompositeType>(dstPointeeTy)) {
+                    if (dyn_cast<CompositeType>(dstPointeeTy)) {
 #ifdef DEBUG_CAST_INSTR
                         dbgs() << "AliasAnalysisVisitor::visitCastInst(): casting a non-composite pointer to a composite one, directly change the targetObject's type...\n";
 #endif
                         //We also need to re-taint the object (if necessary) since its type has changed.
                         std::set<TaintFlag*> *fieldTaint = newPointsToObj->targetObject->getFieldTaintInfo(0);
                         newPointsToObj->targetObject->reset(&I,dstPointeeTy);
-                        //TODO: fieldTaint or all_contents_taint_flag?
+                        //TODO: fieldTaint or all_contents_taint_flags?
                         if (fieldTaint) {
 #ifdef DEBUG_CAST_INSTR
                             dbgs() << "AliasAnalysisVisitor::visitCastInst(): trying to re-taint the converted AliasObject, #fieldTaint: " << fieldTaint->size() << "\n";
@@ -830,7 +830,7 @@ AliasObject* AliasAnalysisVisitor::x_type_obj_copy(AliasObject *srcObj, Type *ds
     unsigned srcElemNum = srcType->getStructNumElements();
     unsigned dstElemNum = dstType->getStructNumElements();
     newObj->all_contents_tainted = srcObj->all_contents_tainted;
-    newObj->all_contents_taint_flag = srcObj->all_contents_taint_flag;
+    newObj->all_contents_taint_flags = srcObj->all_contents_taint_flags;
     newObj->is_taint_src = srcObj->is_taint_src;
     //Copy field taint from src obj to dst obj, but we shouldn't copy taint for fields that don't exist in dst obj.
     for(auto currFieldTaint:srcObj->taintedFields){
@@ -842,12 +842,14 @@ AliasObject* AliasAnalysisVisitor::x_type_obj_copy(AliasObject *srcObj, Type *ds
     //No worry about repeatedly adding the same taint flags because "taintAllFields" has an existence test for taint flags.
     if (srcObj->all_contents_tainted){
         //Our heuristic is that if src object is all-content-tainted, then possibly we should also treat the dst object as all-field-tainted.
-        if (srcObj->all_contents_taint_flag){
-            newObj->taintAllFields(srcObj->all_contents_taint_flag);
-        }else{
+        if (!srcObj->all_contents_taint_flags.empty()) {
+            for (TaintFlag *tf : srcObj->all_contents_taint_flags) {
+                newObj->taintAllFields(tf);
+            }
+        } else {
             //Is this possible?
             //TODO
-            errs() << "AliasAnalysisVisitor::x_type_obj_copy: all contents tainted but w/o all_contents_taint_flag.\n";
+            errs() << "AliasAnalysisVisitor::x_type_obj_copy: all contents tainted but w/o all_contents_taint_flags.\n";
             if (srcElemNum < dstElemNum){
                 //We will possibly lose some field taint here, we'd better take a break and see what happened...
                 assert(false);
@@ -1148,7 +1150,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
                 continue;
             }
             PointerPointsTo *np = p->makeCopyP();
-            np->propogatingInst = new InstLoc(propInst,this->currFuncCallSites);
+            np->propagatingInst = new InstLoc(propInst,this->currFuncCallSites);
             np->targetPointer = I;
             srcPointsTo->insert(np);
         }

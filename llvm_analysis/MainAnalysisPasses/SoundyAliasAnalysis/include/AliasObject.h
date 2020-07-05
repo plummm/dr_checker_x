@@ -56,10 +56,10 @@ namespace DRCHECKER {
         // object to which we point to.
         AliasObject *targetObject;
         // instruction which resulted in this points to information.
-        //Value* propogatingInstruction;
-        InstLoc *propogatingInst;
+        //Value* propagatingInstruction;
+        InstLoc *propagatingInst;
         //Whether this pto record is a weak update (e.g. the original dst pointer points to multiple locations in multiple objects,
-        //so we are not sure whether this pto will be for sure updated for a certain object field at the 'propogatingInst').
+        //so we are not sure whether this pto will be for sure updated for a certain object field at the 'propagatingInst').
         //NOTE that this concept is only useful when updating the object fieldPointsTo (i.e. for address-taken llvm objects), while for top-level variables (e.g. %x),
         //when we update its pto record we always know which top-level variable is to be updated (i.e. always a strong update).
         bool is_weak = false;
@@ -81,17 +81,17 @@ namespace DRCHECKER {
             this->fieldId = srcObjPointsTo->fieldId;
             this->dstfieldId = srcObjPointsTo->dstfieldId;
             this->targetObject = srcObjPointsTo->targetObject;
-            this->propogatingInst = srcObjPointsTo->propogatingInst;
+            this->propagatingInst = srcObjPointsTo->propagatingInst;
             this->is_weak = srcObjPointsTo->is_weak;
             this->flag = 0;
             this->is_active = srcObjPointsTo->is_active;
         }
 
-        ObjectPointsTo(long fieldId, AliasObject *targetObject, long dstfieldId, InstLoc *propogatingInst = nullptr, bool is_Weak = false) {
+        ObjectPointsTo(long fieldId, AliasObject *targetObject, long dstfieldId, InstLoc *propagatingInst = nullptr, bool is_Weak = false) {
             this->fieldId = fieldId;
             this->targetObject = targetObject;
             this->dstfieldId = dstfieldId;
-            this->propogatingInst = propogatingInst;
+            this->propagatingInst = propagatingInst;
             this->is_weak = is_weak;
             this->flag = 0;
             this->is_active = true;
@@ -101,7 +101,7 @@ namespace DRCHECKER {
             return new ObjectPointsTo(this);
         }
 
-        //NOTE: this comparison doesn't consider the additional properties including "propogatingInst" and "is_weak"
+        //NOTE: this comparison doesn't consider the additional properties including "propagatingInst" and "is_weak"
         virtual bool isIdenticalPointsTo(const ObjectPointsTo *that) const {
             if (!that) {
                 return false;
@@ -152,8 +152,8 @@ namespace DRCHECKER {
         }
 
         PointerPointsTo(Value *targetPointer, long fieldId, AliasObject *targetObject, long dstfieldId, 
-                        InstLoc *propogatingInst = nullptr, bool is_Weak = false): 
-                        ObjectPointsTo(fieldId, targetObject, dstfieldId, propogatingInst, is_Weak) {
+                        InstLoc *propagatingInst = nullptr, bool is_Weak = false): 
+                        ObjectPointsTo(fieldId, targetObject, dstfieldId, propagatingInst, is_Weak) {
                             this->targetPointer = targetPointer;
                         }
 
@@ -236,10 +236,8 @@ namespace DRCHECKER {
 
         bool auto_generated = false;
 
-        // field to indicate that all contents of this object
-        // are tainted or not.
-        bool all_contents_tainted = false;
-        TaintFlag *all_contents_taint_flag = nullptr;
+        //Hold the taint flags that are effective for all fields.
+        std::set<TaintFlag*> all_contents_taint_flags;
 
         // flag which indicates whether the object is initialized or not.
         // by default every object is initialized.
@@ -654,12 +652,8 @@ namespace DRCHECKER {
             FieldTaint *targetFieldTaint = this->getFieldTaint(srcfieldId);
             if(targetFieldTaint != nullptr) {
                 return &(targetFieldTaint->targetTaint);
-            } else {
-                if (this->all_contents_taint_flag) {
-                    this->addFieldTaintFlag(srcfieldId, this->all_contents_taint_flag);
-                    // This cannot be null because we have just added it.
-                    return &(this->getFieldTaint(srcfieldId)->targetTaint);
-                }
+            } else if (!this->all_contents_taint_flags.empty()) {
+                return &(this->all_contents_taint_flags);
             }
             return nullptr;
         }
@@ -695,6 +689,22 @@ namespace DRCHECKER {
             return false;
         }
 
+        bool addAllContentTaintFlag(TaintFlag *tf) {
+            if (!tf) {
+                return false;
+            }
+            for (TaintFlag *t : this->all_contents_taint_flags) {
+                if (!t) {
+                    continue;
+                }
+                if (t == tf || t->isTaintEquals(tf)) {
+                    return false;
+                }
+            }
+            this->all_contents_taint_flags.insert(tf);
+            return true;
+        }
+
         /***
          * Add provided taint to all the fields of this object.
          * @param targetTaintFlag TaintFlag that need to be added to all the fields.
@@ -702,23 +712,18 @@ namespace DRCHECKER {
          * @return true if added else false if the taint flag is a duplicate.
          */
         bool taintAllFields(TaintFlag *targetTaintFlag) {
-            if(!this->all_contents_tainted) {
-                this->all_contents_tainted = true;
-                this->all_contents_taint_flag = targetTaintFlag;
+            if (this->addAllContentTaintFlag(targetTaintFlag)) {
                 std::set<long> allAvailableFields = getAllAvailableFields();
-
                 // add the taint to all available fields.
-                for (auto fieldId:allAvailableFields) {
+                for (auto fieldId : allAvailableFields) {
 #ifdef DEBUG_UPDATE_FIELD_TAINT
                     dbgs() << "AliasObject::taintAllFields(): Adding taint to field:" << fieldId << "\n";
 #endif
                     addFieldTaintFlag(fieldId, targetTaintFlag);
                 }
-
                 return true;
             }
             return false;
-
         }
 
         inline Value *getValue();
@@ -745,40 +750,33 @@ namespace DRCHECKER {
         //Return: negative: impossible, positive: the larger, the more likely.
         virtual int maybeAPointee(Value *p);
 
-        //hz: taint all fields and attach a different taint tag for each field in the TaintFlag.
-        bool taintAllFieldsWithTag(TaintFlag *targetTaintFlag) {
+        //Set this object as a (global) taint source, i.e., attach an inherent taint tag and flag for each field.
+        //The "loc" should usually be the creation site of "this" object.
+        bool setAsTaintSrc(InstLoc *loc, bool is_global = true) {
             Value *v = this->getValue();
-            if (v == nullptr && this->targetType == nullptr){
+            if (v == nullptr && this->targetType == nullptr) {
 #ifdef DEBUG_UPDATE_FIELD_TAINT
-                dbgs() << "AliasObject::taintAllFieldsWithTag(): Neither Value nor Type information available for obj: " << (const void*)this << "\n";
+                dbgs() << "AliasObject::setAsTaintSrc(): Neither Value nor Type information available for obj: " << (const void*)this << "\n";
 #endif
                 return false;
             }
-            assert(targetTaintFlag);
-            if(!this->all_contents_tainted) {
-                bool is_global = true;
-                if (targetTaintFlag->tag && !targetTaintFlag->tag->is_global) {
-                    is_global = false;
-                }
-                this->all_contents_tainted = true;
-                //"0" represents that we are not referring to a certain field.
-                TaintTag *all_taint_tag = nullptr;
-                if (v) {
-                    all_taint_tag = new TaintTag(0,v,is_global,(void*)this);
-                }else {
-                    all_taint_tag = new TaintTag(0,this->targetType,is_global,(void*)this);
-                }
-                this->all_contents_taint_flag = new TaintFlag(targetTaintFlag,all_taint_tag);
-                this->all_contents_taint_flag->is_inherent = true;
-                std::set<long> allAvailableFields = getAllAvailableFields();
-
-                // add the taint to all available fields.
+            TaintTag *atag = nullptr;
+            if (v) {
+                atag = new TaintTag(0,v,is_global,(void*)this);
+            }else {
+                atag = new TaintTag(0,this->targetType,is_global,(void*)this);
+            }
+            TaintFlag *atf = new TaintFlag(loc,true,atag);
+            atf->is_inherent = true;
+            if (this->addAllContentTaintFlag(atf)) {
+                //add the taint to all available fields.
+                std::set<long> allAvailableFields = this->getAllAvailableFields();
 #ifdef DEBUG_UPDATE_FIELD_TAINT
-                dbgs() << "AliasObject::taintAllFieldsWithTag(): Updating field taint for obj: " << (const void*)this << "\n";
+                dbgs() << "AliasObject::setAsTaintSrc(): Updating field taint for obj: " << (const void*)this << "\n";
 #endif
                 for (auto fieldId : allAvailableFields) {
 #ifdef DEBUG_UPDATE_FIELD_TAINT
-                    dbgs() << "AliasObject::taintAllFieldsWithTag(): Adding taint to field:" << fieldId << "\n";
+                    dbgs() << "AliasObject::setAsTaintSrc(): Adding taint to: " << (const void*)this << " | " << fieldId << "\n";
 #endif
                     TaintTag *tag = nullptr;
                     if (v) {
@@ -786,15 +784,13 @@ namespace DRCHECKER {
                     }else {
                         tag = new TaintTag(fieldId,this->targetType,is_global,(void*)this);
                     }
-                    TaintFlag *newFlag = new TaintFlag(targetTaintFlag,tag);
+                    TaintFlag *newFlag = new TaintFlag(loc,true,tag);
                     newFlag->is_inherent = true;
-                    addFieldTaintFlag(fieldId, newFlag);
+                    this->addFieldTaintFlag(fieldId, newFlag);
                 }
-
                 return true;
             }
             return false;
-
         }
 
         //In some situations we need to reset this AliasObject, e.g. the obj is originally allocated by kmalloc() w/ a type i8*, and then converted to a composite type.
@@ -808,8 +804,8 @@ namespace DRCHECKER {
                 }
             }
             this->targetType = ty;
-            this->all_contents_tainted = false;
-            delete this->all_contents_taint_flag;
+            //TODO: consider whether it's safe to also free the actual TaintFlag objects in "all_contents_taint_flags".
+            this->all_contents_taint_flags.clear();
             //TODO: whether need to clear the old field taints...
         }
 
@@ -980,7 +976,7 @@ namespace DRCHECKER {
         //in some cases, the arg "is_weak" can be set to 0 (strong update) or 1 (weak update) to override the "is_weak" field in "dstPointsTo".
         //NOTE: this function will make a copy of "dstPointsTo" and will not do any modifications to "dstPointsTo", the caller is responsible to free
         //"dstPointsTo" if necessary.
-        void updateFieldPointsTo(long srcfieldId, std::set<PointerPointsTo*>* dstPointsTo, InstLoc *propogatingInstr, int is_weak = -1);
+        void updateFieldPointsTo(long srcfieldId, std::set<PointerPointsTo*>* dstPointsTo, InstLoc *propagatingInstr, int is_weak = -1);
 
         FieldTaint* getFieldTaint(long srcfieldId) {
             for(auto currFieldTaint : taintedFields) {
@@ -994,7 +990,7 @@ namespace DRCHECKER {
     private:
 
         //NOTE: the arg "is_weak" has the same usage as updateFieldPointsTo().
-        void updateFieldPointsTo_do(long srcfieldId, std::set<PointerPointsTo*>* dstPointsTo, InstLoc *propogatingInstr, int is_weak = -1);
+        void updateFieldPointsTo_do(long srcfieldId, std::set<PointerPointsTo*>* dstPointsTo, InstLoc *propagatingInstr, int is_weak = -1);
 
     protected:
         void printPointsTo(llvm::raw_ostream& os) const {

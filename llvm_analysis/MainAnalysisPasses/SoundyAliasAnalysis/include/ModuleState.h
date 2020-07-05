@@ -604,8 +604,8 @@ namespace DRCHECKER {
             FieldTaint* ft = obj->getFieldTaint(fid);
             if (!ft || !ft->targetTaint.size()) {
                 //No field taint found, any all_content taint flag?
-                if (obj->all_contents_tainted && obj->all_contents_taint_flag) {
-                    tflgs.insert(obj->all_contents_taint_flag);
+                if (!obj->all_contents_taint_flags.empty()) {
+                    tflgs.insert(obj->all_contents_taint_flags.begin(),obj->all_contents_taint_flags.end());
                 }
             }else {
                 tflgs.insert(ft->targetTaint.begin(),ft->targetTaint.end());

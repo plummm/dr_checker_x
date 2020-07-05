@@ -63,10 +63,11 @@ namespace DRCHECKER {
             //We need to record current store instruction to the correlated taint tag.
             std::set<TaintFlag*> *fieldTaint = dstObj->getFieldTaintInfo(target_field);
             if(fieldTaint != nullptr) {
-                for(auto existingTaint:*fieldTaint) {
+                for (auto existingTaint : *fieldTaint) {
                     if (existingTaint && existingTaint->tag){
                         TaintTag *tag = existingTaint->tag;
                         //We should only record the mod inst to the original taint tag of the taint src object. 
+                        //TODO: consider to refer to the ->inherent flag.
                         if (tag->v != dstObj->getValue() || tag->fieldId != target_field) {
                             continue;
                         }
@@ -81,24 +82,20 @@ namespace DRCHECKER {
             } else {
                 //We have no taint flags for the individual fields, is this possible???
                 //Anyway, try to record the instruction in the shared taint flag then.
-                if(dstObj->all_contents_tainted) {
-                    //assert(this->all_contents_taint_flag != nullptr);
-                    if (!dstObj->all_contents_taint_flag){
+                if (!dstObj->all_contents_taint_flags.empty()) {
+                    for (auto existingTaint : dstObj->all_contents_taint_flags) {
+                        if (existingTaint && existingTaint->tag && existingTaint->tag->v == dstObj->getValue()) {
 #ifdef DEBUG_STORE_INST
-                        dbgs() << "ModAnalysisVisitor::visitStoreInst(): No all_contents_taint_flag!!\n";
+                            dbgs() << "Add to mod_inst_list (all_contents_taint_flag): " << InstructionUtils::getValueStr(&I) << "\n";
 #endif
-                        continue;
+                            existingTaint->tag->insertModInst(&I,this->actx->callSites);
+                        }
                     }
-                    if (!dstObj->all_contents_taint_flag->tag){
+                }else {
 #ifdef DEBUG_STORE_INST
-                        dbgs() << "ModAnalysisVisitor::visitStoreInst(): No tag in all_contents_taint_flag!!\n";
+                    dbgs() << "ModAnalysisVisitor::visitStoreInst(): No all_contents_taint_flags!!\n";
 #endif
-                        continue;
-                    }
-#ifdef DEBUG_STORE_INST
-                    dbgs() << "Add to mod_inst_list (all_contents_taint_flag): " << InstructionUtils::getValueStr(&I) << "\n";
-#endif
-                    dstObj->all_contents_taint_flag->tag->insertModInst(&I,this->actx->callSites);
+                    continue;
                 }
             }
         }
