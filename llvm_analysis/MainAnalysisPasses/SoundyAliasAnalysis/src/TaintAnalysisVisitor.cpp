@@ -55,6 +55,7 @@ namespace DRCHECKER {
     std::set<TaintFlag*>* TaintAnalysisVisitor::makeTaintInfoCopy(Instruction *targetInstruction, std::set<TaintFlag*> *srcTaintInfo, std::set<TaintFlag*> *dstTaintInfo) {
         if(srcTaintInfo != nullptr) {
             std::set<TaintFlag*> *newTaintInfo = new std::set<TaintFlag*>();
+            InstLoc *loc = this->makeInstLoc(targetInstruction);
             bool add_taint = false;
             for (auto currTaint : *srcTaintInfo) {
                 if (!currTaint) {
@@ -67,35 +68,34 @@ namespace DRCHECKER {
                 //However, we can rely on the post-processing to do the multi-entry fixed-point analysis, and here we still
                 //enforce the reachability test to avoid the taint explosion and have a better and cleaner summary of a single entry function.
 #ifdef ENFORCE_TAINT_PATH
-                if(currTaint->targetInstr != nullptr && !currTaint->is_inherent) {
-                    Instruction *srcInstruction = dyn_cast<Instruction>(currTaint->targetInstr->inst);
-                    if (srcInstruction != nullptr && targetInstruction != nullptr) {
-                        add_taint = BBTraversalHelper::isReachable(srcInstruction, targetInstruction,
-                                                                   this->currFuncCallSites);
+                if (currTaint->targetInstr != nullptr && !currTaint->is_inherent) {
+                    if (targetInstruction) {
+                        add_taint = loc->reachable(currTaint->targetInstr);
                     }
                 }
 #endif
                 if(add_taint) {
-                    TaintFlag *newTaintFlag = new TaintFlag(currTaint, this->makeInstLoc(targetInstruction));
+                    TaintFlag *newTaintFlag = new TaintFlag(currTaint, loc);
                     TaintAnalysisVisitor::addNewTaintFlag(newTaintInfo,newTaintFlag);
                 }else {
 #ifdef DEBUG_ENFORCE_TAINT_PATH
                     dbgs() << "TaintAnalysisVisitor::makeTaintInfoCopy(): Failed to pass the taint path test, the TaintFlag:\n";
                     currTaint->dumpInfo(dbgs());
-                    dbgs() << "Current Inst: ";
-                    InstructionUtils::printInst(targetInstruction,dbgs());
-                    dbgs() << "currTaint->targetInstr: ";
-                    if (currTaint->targetInstr != nullptr) {
-                        InstructionUtils::printInst(dyn_cast<Instruction>(currTaint->targetInstr),dbgs());
+                    dbgs() << "Src Inst: ";
+                    if (currTaint->targetInstr) {
+                        currTaint->targetInstr->print(dbgs());
                     }else {
-                        dbgs() << "nullptr\n";
+                        dbgs() << "\n";
                     }
+                    dbgs() << "Dst Inst: ";
+                    loc->print(dbgs());
 #endif
                 }
             }
             // if no taint info is propagated.
             if(newTaintInfo->empty()) {
                 delete(newTaintInfo);
+                delete(loc);
                 newTaintInfo = nullptr;
             }
             // if dstTaintInfo is not null.
