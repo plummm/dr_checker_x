@@ -174,7 +174,6 @@ namespace DRCHECKER {
             return PointerPointsTo::TYPE_CONST;
         }
 
-        /*
         bool isIdenticalPointsTo(const ObjectPointsTo *that) const {
             if (that && that->getTargetType() == PointerPointsTo::TYPE_CONST) {
                 PointerPointsTo* actualObj = (PointerPointsTo*)that;
@@ -185,7 +184,6 @@ namespace DRCHECKER {
             }
             return false;
         }
-        */
 
         /*std::ostream& operator<<(std::ostream& os, const ObjectPointsTo& obj) {
             PointerPointsTo* actualObj = (PointerPointsTo*)(&obj);
@@ -248,7 +246,7 @@ namespace DRCHECKER {
         unsigned long id;
 
         //hz: indicate whether this object is a taint source.
-        bool is_taint_src = false;
+        int is_taint_src = 0;
 
         //hz: This maps the field to the corresponding object (embedded) if the field is an embedded struct in the host object.
         std::map<long,AliasObject*> embObjs;
@@ -324,6 +322,34 @@ namespace DRCHECKER {
                 }
             }
             return num;
+        }
+
+        int addPointerPointsTo(Value *p, InstLoc *loc, long fid = 0, long dfid = 0) {
+            if (!p) {
+                return 0;
+            }
+            //NOTE: default is_Weak setting (i.e. strong update) is ok for top-level vars.
+            PointerPointsTo *newPointsTo = new PointerPointsTo(p,fid,this,dfid,loc,false);
+            //De-duplication
+            bool is_dup = false;
+            for (PointerPointsTo *pto : this->pointersPointsTo) {
+                if (!pto) {
+                    continue;
+                }
+                if (!loc != !pto->propagatingInst) {
+                    continue;
+                }
+                if (newPointsTo->isIdenticalPointsTo(pto) && (!loc || loc->same(pto->propagatingInst))) {
+                    is_dup = true;
+                    break;
+                }
+            }
+            if (is_dup) {
+                delete(newPointsTo);
+                return 0;
+            }
+            this->pointersPointsTo.insert(this->pointersPointsTo.end(),newPointsTo);
+            return 1;
         }
 
         //update the "pointsFrom" records.
@@ -648,12 +674,28 @@ namespace DRCHECKER {
          * @param srcfieldId field id for which taint need to be fetched.
          * @return set of taint flags.
          */
-        std::set<TaintFlag*> *getFieldTaintInfo(long srcfieldId) {
-            FieldTaint *targetFieldTaint = this->getFieldTaint(srcfieldId);
-            if(targetFieldTaint != nullptr) {
-                return &(targetFieldTaint->targetTaint);
-            } else if (!this->all_contents_taint_flags.empty()) {
-                return &(this->all_contents_taint_flags);
+        //NOTE: if "no_inherent" is "true", the "r" cannot be null.
+        std::set<TaintFlag*> *getFieldTaintInfo(long fid, std::set<TaintFlag*> *r = nullptr, bool no_inherent = false) {
+            FieldTaint *targetFieldTaint = this->getFieldTaint(fid);
+            if (!no_inherent) {
+                if(targetFieldTaint != nullptr) {
+                    return &(targetFieldTaint->targetTaint);
+                } else if (!this->all_contents_taint_flags.empty()) {
+                    return &(this->all_contents_taint_flags);
+                }
+            }else if (r) {
+                if(targetFieldTaint != nullptr) {
+                    r->insert(targetFieldTaint->targetTaint.begin(),targetFieldTaint->targetTaint.end());
+                } else if (!this->all_contents_taint_flags.empty()) {
+                    r->insert(this->all_contents_taint_flags.begin(),this->all_contents_taint_flags.end());
+                }
+                for (auto it = r->begin(); it != r->end(); ) {
+                    if ((*it)->is_inherent) {
+                        it = r->erase(it);
+                    }else {
+                        ++it;
+                    }
+                }
             }
             return nullptr;
         }
@@ -730,7 +772,7 @@ namespace DRCHECKER {
 
         inline void setValue(Value*);
 
-        virtual void taintSubObj(AliasObject *newObj, long srcfieldId, InstLoc *targetInstr);
+        virtual void taintPointeeObj(AliasObject *newObj, long srcfieldId, InstLoc *targetInstr);
 
         virtual void fetchPointsToObjects(long srcfieldId, std::set<std::pair<long, AliasObject*>> &dstObjects, InstLoc *currInst = nullptr);
 
@@ -738,7 +780,16 @@ namespace DRCHECKER {
 
         virtual void logFieldAccess(long srcfieldId, Instruction *targetInstr = nullptr, const std::string &msg = "");
 
-        AliasObject *getNestedObj(long fid);
+        //hz: A helper method to create and (taint) an embedded struct obj in the host obj.
+        //If not null, "v" is the pointer to the created embedded object, "loc" is the creation site.
+        AliasObject *createEmbObj(long fid, Value *v = nullptr, InstLoc *loc = nullptr);
+
+        //Given a embedded object ("this") and its #field within the host object, and the host type, create the host object
+        //and maintain their embedding relationships preperly.
+        //"loc" is the creation site.
+        AliasObject *createHostObj(Type *hostTy, long field, InstLoc *loc = nullptr);
+
+        AliasObject *getNestedObj(long fid, InstLoc *loc = nullptr);
 
         //Get the living field ptos at a certain InstLoc.
         virtual void getLivePtos(long fid, InstLoc *loc, std::set<ObjectPointsTo*> *retPto);
@@ -788,6 +839,7 @@ namespace DRCHECKER {
                     newFlag->is_inherent = true;
                     this->addFieldTaintFlag(fieldId, newFlag);
                 }
+                this->is_taint_src = (is_global ? 1 : -1);
                 return true;
             }
             return false;
@@ -795,7 +847,7 @@ namespace DRCHECKER {
 
         //In some situations we need to reset this AliasObject, e.g. the obj is originally allocated by kmalloc() w/ a type i8*, and then converted to a composite type.
         //NOTE: after invoking this we usually need to re-taint the changed object.
-        void reset(Value *v, Type *ty) {
+        void reset(Value *v, Type *ty, InstLoc *loc = nullptr) {
             this->setValue(v);
             if (v && v->getType() && !ty) {
                 ty = v->getType();
@@ -804,9 +856,19 @@ namespace DRCHECKER {
                 }
             }
             this->targetType = ty;
-            //TODO: consider whether it's safe to also free the actual TaintFlag objects in "all_contents_taint_flags".
-            this->all_contents_taint_flags.clear();
-            //TODO: whether need to clear the old field taints...
+            //Sync the "all_contents_taint_flags" w/ the newly available individual fields.
+            if (!this->all_contents_taint_flags.empty()) {
+                std::set<long> allAvailableFields = this->getAllAvailableFields();
+                for (auto fieldId : allAvailableFields) {
+                    for (TaintFlag *tf : this->all_contents_taint_flags) {
+#ifdef DEBUG_UPDATE_FIELD_TAINT
+                        dbgs() << "AliasObject::reset(): Adding taint to: " << (const void*)this << " | " << fieldId << "\n";
+#endif
+                        TaintFlag *ntf = new TaintFlag(tf, loc);
+                        this->addFieldTaintFlag(fieldId, ntf);
+                    }
+                }
+            }
         }
 
         std::set<long> getAllAvailableFields() {
@@ -1246,24 +1308,14 @@ namespace DRCHECKER {
         this->setObjectPtr(v);
     }
 
-    //hz: A helper method to create and (taint) a new OutsideObject according to a given type.
+    //hz: A helper method to create a new OutsideObject according to a given type.
     //Note that all we need is the type, in the program there may not exist any IR that can actually point to the newly created object,
     //thus this method is basically for the internal use (e.g. in multi-dimension GEP, or in fetchPointToObjects()).
-    extern OutsideObject* createOutsideObj(Type *ty, bool taint, std::set<TaintFlag*> *existingTaints);
+    extern OutsideObject* createOutsideObj(Type *ty);
 
-    extern int updatePointsToRecord(InstLoc *vloc, std::map<Value*,std::set<PointerPointsTo*>*> *currPointsTo, AliasObject *newObj, long fid = 0, long dfid = 0);
-
-    //hz: A helper method to create and (taint) a new OutsideObject according to a given pointer value (possibly an IR).
-    //The arg "currPointsTo" is the current global point-to state.
-    extern OutsideObject* createOutsideObj(InstLoc *vloc, std::map<Value*,std::set<PointerPointsTo*>*> *currPointsTo, bool taint, std::set<TaintFlag*> *existingTaints);
-
-    //hz: A helper method to create and (taint) an embedded struct obj in the host obj.
-    //The arg "currPointsTo" is the current global point-to state.
-    extern AliasObject *createEmbObj(AliasObject *hostObj, long host_dstFieldId, InstLoc *vloc = nullptr, std::map<Value*, std::set<PointerPointsTo*>*> *currPointsTo = nullptr);
-
-    //Given a embedded object and its #field within the host object, and the host type, create the host object
-    //and maintain their embedding relationships preperly.
-    extern AliasObject *createHostObj(AliasObject *targetObj, Type *hostTy, long field);
+    //hz: A helper method to create a new OutsideObject according to the given pointer "p" (possibly an IR).
+    //"loc" is the creation site.
+    extern OutsideObject* createOutsideObj(Value *p, InstLoc *loc = nullptr);
 
     extern int matchFieldsInDesc(Module *mod, Type *ty0, std::string& n0, Type *ty1, std::string& n1, int bitoff, std::vector<FieldDesc*> *fds, std::vector<unsigned> *res);
 
@@ -1295,9 +1347,9 @@ namespace DRCHECKER {
 
     //"fd" is a bit offset desc of "pto->targetObject", it can reside in nested composite fields, this function creates all nested composite fields
     //in order to access the bit offset of "fd", while "limit" is the lowest index we try to create an emb obj in fd->host_tys[].
-    extern int createEmbObjChain(FieldDesc *fd, PointerPointsTo *pto, int limit);
+    extern int createEmbObjChain(FieldDesc *fd, PointerPointsTo *pto, int limit, InstLoc *loc = nullptr);
 
-    extern int createHostObjChain(FieldDesc *fd, PointerPointsTo *pto, int limit);
+    extern int createHostObjChain(FieldDesc *fd, PointerPointsTo *pto, int limit, InstLoc *loc = nullptr);
 
 }
 

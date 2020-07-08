@@ -41,38 +41,34 @@ namespace DRCHECKER {
     }
 
     //Taint the point-to object by field "srcfieldId" according to the field taint info.
-    void AliasObject::taintSubObj(AliasObject *newObj, long srcfieldId, InstLoc *targetInstr) {
+    //NOTE: we assume this function is only called when a new field pointee object is created.
+    void AliasObject::taintPointeeObj(AliasObject *newObj, long srcfieldId, InstLoc *targetInstr) {
+        if (!newObj) {
+            return;
+        }
         std::set<TaintFlag*> *fieldTaint = this->getFieldTaintInfo(srcfieldId);
-#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-        dbgs() << "AliasObject::taintSubObj(): Trying to get taint for field:" << srcfieldId << " of host object: " << (const void*)this << "\n";
-#endif
         if(fieldTaint != nullptr) {
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-            dbgs() << "AliasObject::taintSubObj(): Adding taint of field:" << srcfieldId << " to sub object: " << (const void*)newObj << "\n";
+            dbgs() << "AliasObject::taintPointeeObj(): " << (const void*)this << " | " << srcfieldId << " (src) --> " << (const void*)newObj << " (sink)\n";
 #endif
-            for(auto existingTaint:*fieldTaint) {
+            for(auto existingTaint : *fieldTaint) {
                 TaintFlag *newTaint = new TaintFlag(existingTaint,targetInstr);
-                newObj->taintAllFieldsWithTag(newTaint);
+                newObj->taintAllFields(newTaint);
             }
-            newObj->is_taint_src = true;
+        } else if (!this->all_contents_taint_flags.empty()) {
+            //Use the all_contents_taint flags.
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-            dbgs() << "##Set |is_taint_src| to true.\n";
+            dbgs() << "AliasObject::taintPointeeObj(): " << (const void*)this << " | all_contents_taint (src) --> " << (const void*)newObj << " (sink)\n";
 #endif
-        } else {
-            // if all the contents are tainted?
-            if (!this->all_contents_taint_flags.empty()) {
-#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-                dbgs() << "AliasObject::taintSubObj(): Trying to get field from an object whose contents are fully tainted\n";
-#endif
-                for (TaintFlag *tf : this->all_contents_taint_flags) {
-                    TaintFlag *newTaint = new TaintFlag(tf,targetInstr);
-                    newObj->taintAllFieldsWithTag(newTaint);
-                    newObj->is_taint_src = true;
-#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-                    dbgs() << "##Set |is_taint_src| to true.\n";
-#endif
-                }
+            for (TaintFlag *tf : this->all_contents_taint_flags) {
+                TaintFlag *newTaint = new TaintFlag(tf,targetInstr);
+                newObj->taintAllFields(newTaint);
             }
+        }
+        //If the host object is a global taint source, then we also set the newly created field pointee object as so.
+        //TODO: justify this decision.
+        if (this->is_taint_src) {
+            newObj->setAsTaintSrc(targetInstr,(this->is_taint_src > 0));
         }
     }
 
@@ -293,7 +289,7 @@ namespace DRCHECKER {
 #endif
             srcfieldId = 0;
         }
-        AliasObject *host = this->getNestedObj(srcfieldId);
+        AliasObject *host = this->getNestedObj(srcfieldId,currInst);
         if (!host) {
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
             dbgs() << "AliasObject::fetchPointsToObjects: failed to obtain the innermost nested field!\n";
@@ -330,9 +326,10 @@ namespace DRCHECKER {
                         dbgs() << "AliasObject::fetchPointsToObjects: Change type of the HeapLocation.\n";
 #endif
                         //Change type.
-                        obj->targetObject->reset(targetInstr,expObjTy);
-                        //Do the taint accordingly.
-                        host->taintSubObj(obj->targetObject,srcfieldId,currInst);
+                        obj->targetObject->reset(targetInstr,expObjTy,currInst);
+                        //No need to call the "taintPointeeObj" again since we have already done that when creating the old (before type reset) object, and the TaintFlags
+                        //at that time will be propagated to new fields by "reset".
+                        //host->taintPointeeObj(obj->targetObject,srcfieldId,currInst);
                     }
                     //Anyway here we're sure that we have the point-to record and we don't need to create dummy pointees any more,
                     //although the recorded pointee may have already been included in the "dstObjects" (e.g. load src pointer can have
@@ -342,7 +339,7 @@ namespace DRCHECKER {
                     if (std::find(dstObjects.begin(), dstObjects.end(), p) == dstObjects.end()) {
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
                         dbgs() << "Found a new obj in |pointsTo| records, insert it to the dstObjects.\n";
-                        dbgs() << "Type: " << InstructionUtils::getTypeStr(obj->targetObject->targetType) << " | " << obj->dstfieldId << " | is_taint_src:" << obj->targetObject->is_taint_src << "\n";
+                        dbgs() << "Type: " << InstructionUtils::getTypeStr(obj->targetObject->targetType) << " | " << obj->dstfieldId << " | is_taint_src: " << obj->targetObject->is_taint_src << "\n";
                         dbgs() << "Val: " << InstructionUtils::getValueStr(obj->targetObject->getValue()) << " ID: " << (const void*)(obj->targetObject) << "\n";
 #endif
                         dstObjects.insert(dstObjects.end(), p);
@@ -385,7 +382,7 @@ namespace DRCHECKER {
         //TODO: deal with other types of insts that can invoke "fetchPointsToObjects" in its handler.
         Type *expObjTy = getLoadedPointeeTy(targetInstr);
         //Get the type of the field for which we want to get the pointee.
-        AliasObject *hostObj = this->getNestedObj(fid);
+        AliasObject *hostObj = this->getNestedObj(fid,siteInst);
         if (!hostObj) {
             return;
         }
@@ -435,7 +432,7 @@ namespace DRCHECKER {
 #endif
             newObj->auto_generated = true;
             // get the taint for the field and add that taint to the newly created object
-            hostObj->taintSubObj(newObj,fid,siteInst);
+            hostObj->taintPointeeObj(newObj,fid,siteInst);
             //Handle some special cases like mutual point-to in linked list node "list_head".
             hostObj->handleSpecialFieldPointTo(newObj,fid,siteInst);
             //Update points-to
@@ -450,7 +447,7 @@ namespace DRCHECKER {
 
     //The "fid" may be a composite field, if this is the case, we recursively get the inner most AliasObject whose field 0 is no more composite,
     //otherwise, just return "this" (i.e. its "fid" field is not composite by itself).
-    AliasObject *AliasObject::getNestedObj(long fid) {
+    AliasObject *AliasObject::getNestedObj(long fid, InstLoc *loc) {
         //Get the innermost non-somposite field.
         //There will be several cases here:
         //(1) The dst field is not composite, then we can return directly;
@@ -479,7 +476,7 @@ namespace DRCHECKER {
                 return hostObj;
             }
             //NOTE: this is actually getOrCreateEmbObj()
-            AliasObject *newObj = DRCHECKER::createEmbObj(hostObj, fid);
+            AliasObject *newObj = hostObj->createEmbObj(fid,nullptr,loc);
             if (!newObj) {
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
                 dbgs() << "\n!!! AliasObject::getNestedObj(): Failed to create the emb obj.\n"; 
@@ -517,7 +514,7 @@ namespace DRCHECKER {
                 srcfieldId = 0;
             }
             //If the "srcfieldId" is an embedded struct/array, we need to recursively update the fieldPointsTo in the embedded object instead of current host object.
-            host = host->getNestedObj(srcfieldId);
+            host = host->getNestedObj(srcfieldId,propagatingInstr);
             if (!host) {
                 //TODO: return or go ahead w/ "this"?
 #ifdef DEBUG_UPDATE_FIELD_POINT
@@ -679,7 +676,7 @@ namespace DRCHECKER {
         }
     }
 
-    OutsideObject* createOutsideObj(Type *ty, bool taint, std::set<TaintFlag*> *existingTaints) {
+    OutsideObject* createOutsideObj(Type *ty) {
 #ifdef DEBUG_CREATE_DUMMY_OBJ_IF_NULL
         dbgs() << "Type-based createOutsideObj(): " << InstructionUtils::getTypeStr(ty) << "\n";
 #endif
@@ -692,55 +689,10 @@ namespace DRCHECKER {
 #endif
         //All outside objects are generated automatically.
         newObj->auto_generated = true;
-        //Need taint?
-        if (taint) {
-            if (existingTaints && !existingTaints->empty()) {
-                for (TaintFlag *currTaint : *existingTaints) {
-                    newObj->taintAllFieldsWithTag(currTaint);
-                }
-                newObj->is_taint_src = true;
-#ifdef DEBUG_CREATE_DUMMY_OBJ_IF_NULL
-                dbgs() << "Type-based createOutsideObj(): set |is_taint_src| for the outside obj.\n";
-#endif
-            }else {
-                //We don't have a value/pointer here to generate a TaintFlag...
-                //TODO:
-#ifdef DEBUG_CREATE_DUMMY_OBJ_IF_NULL
-                dbgs() << "!!!Type-based createOutsideObj(): trying to taint w/o existingTaints...\n";
-#endif
-            }
-        }
         return newObj;
     }
 
-    //NOTE: this function is used to setup the pto record of a Value to its newly created dummy object, so there must be no existing pto
-    //records for this value before, otherwise we don't need to create dummy obj for it.
-    int updatePointsToRecord(InstLoc *vloc, std::map<Value*,std::set<PointerPointsTo*>*> *currPointsTo, AliasObject *newObj, long fid, long dfid) {
-        Value *p = nullptr;
-        if (vloc) {
-            p = vloc->inst;
-        }
-        if (!newObj || !p) {
-            return 0;
-        }
-        //NOTE: default is_Weak setting (i.e. strong update) is ok for top-level vars.
-        PointerPointsTo *newPointsTo = new PointerPointsTo(p,fid,newObj,dfid,vloc,false);
-        newObj->pointersPointsTo.insert(newObj->pointersPointsTo.end(),newPointsTo);
-        //Set up point-to records in the global state.
-        if (currPointsTo) {
-            std::set<PointerPointsTo *> *newPointsToSet = new std::set<PointerPointsTo *>();
-            newPointsToSet->insert(newPointsToSet->end(), newPointsTo);
-            (*currPointsTo)[p] = newPointsToSet;
-            return 1;
-        }
-        return 0;
-    }
-
-    OutsideObject* createOutsideObj(InstLoc *vloc, std::map<Value*,std::set<PointerPointsTo*>*> *currPointsTo, bool taint, std::set<TaintFlag*> *existingTaints) {
-        Value *p = nullptr;
-        if (vloc) {
-            p = vloc->inst;
-        }
+    OutsideObject* createOutsideObj(Value *p, InstLoc *loc) {
 #ifdef DEBUG_CREATE_DUMMY_OBJ_IF_NULL
         dbgs() << "createOutsideObj(): ";
         if(p){
@@ -774,77 +726,57 @@ namespace DRCHECKER {
         //All outside objects are generated automatically.
         newObj->auto_generated = true;
         //Set up point-to records inside the AliasObject.
-        updatePointsToRecord(vloc,currPointsTo,newObj);
-        //Need taint?
-        if (taint) {
-            if (existingTaints && !existingTaints->empty()) {
-                for (TaintFlag *currTaint : *existingTaints) {
-                    newObj->taintAllFieldsWithTag(currTaint);
-                }
-            }else {
-                //The original pointer is not tainted, treat it as a global state.
-                TaintFlag *currFlag = new TaintFlag(vloc, true);
-                newObj->taintAllFieldsWithTag(currFlag);
-            }
-            newObj->is_taint_src = true;
-#ifdef DEBUG_CREATE_DUMMY_OBJ_IF_NULL
-            dbgs() << "createOutsideObj(): set |is_taint_src| for the outside obj.\n";
-#endif
-        }
+        newObj->addPointerPointsTo(p,loc);
         return newObj;
     }
 
-    AliasObject *createEmbObj(AliasObject *hostObj, long host_dstFieldId, InstLoc *vloc, std::map<Value*, std::set<PointerPointsTo*>*> *currPointsTo) {
+    AliasObject *AliasObject::createEmbObj(long fid, Value *v, InstLoc *loc) {
 #ifdef DEBUG_CREATE_EMB_OBJ
-        dbgs() << "Start createEmbObj()\n";
+        dbgs() << "Start AliasObject::createEmbObj()\n";
 #endif
-        Value *v = vloc ? vloc->inst : nullptr;
         AliasObject *newObj = nullptr;
-        if (!hostObj || !hostObj->targetType) {
+        if (!this->targetType) {
 #ifdef DEBUG_CREATE_EMB_OBJ
-            dbgs() << "createEmbObj(): (!hostObj || !hostObj->targetType)\n";
+            dbgs() << "AliasObject::createEmbObj(): !this->targetType\n";
 #endif
             return nullptr;
         }
 #ifdef DEBUG_CREATE_EMB_OBJ
-        dbgs() << "createEmbObj(): host type: " << InstructionUtils::getTypeStr(hostObj->targetType) << " | " << host_dstFieldId << " ID: " << (const void*)(hostObj) << "\n";
+        dbgs() << "AliasObject::createEmbObj(): host type: " << InstructionUtils::getTypeStr(this->targetType) << " | " << fid << " ID: " << (const void*)(this) << "\n";
 #endif
-        if (dyn_cast<SequentialType>(hostObj->targetType)) {
+        if (dyn_cast<SequentialType>(this->targetType)) {
             //We collapse the array/vector to a single element.
 #ifdef DEBUG_CREATE_EMB_OBJ
-            dbgs() << "createEmbObj(): host is an array/vector, set host_dstFieldId to 0.\n";
+            dbgs() << "AliasObject::createEmbObj(): host is an array/vector, set fid to 0.\n";
 #endif
-            host_dstFieldId = 0;
+            fid = 0;
         }
-        Type *ety = nullptr;
-        if (dyn_cast<CompositeType>(hostObj->targetType) && InstructionUtils::isIndexValid(hostObj->targetType,host_dstFieldId)) {
-            ety = dyn_cast<CompositeType>(hostObj->targetType)->getTypeAtIndex(host_dstFieldId);
-        }
+        Type *ety = this->getFieldTy(fid);
         Type *expectedPointeeTy = nullptr;
         if (v && v->getType() && v->getType()->isPointerTy()) {
             expectedPointeeTy = v->getType()->getPointerElementType();
         }
 #ifdef DEBUG_CREATE_EMB_OBJ
-        dbgs() << "createEmbObj(): ety: " << InstructionUtils::getTypeStr(ety) << " expectedPointeeTy: " << InstructionUtils::getTypeStr(expectedPointeeTy) << "\n";
+        dbgs() << "AliasObject::createEmbObj(): ety: " << InstructionUtils::getTypeStr(ety) << " expectedPointeeTy: " << InstructionUtils::getTypeStr(expectedPointeeTy) << "\n";
 #endif
         if (v) {
             if (!ety || !InstructionUtils::same_types(ety,expectedPointeeTy)) {
 #ifdef DEBUG_CREATE_EMB_OBJ
-                dbgs() << "createEmbObj(): ety and expectedPointeeTy are different...\n";
+                dbgs() << "AliasObject::createEmbObj(): ety and expectedPointeeTy are different...\n";
 #endif
                 return nullptr;
             }
         }
-        if (hostObj->embObjs.find(host_dstFieldId) != hostObj->embObjs.end()){
+        if (this->embObjs.find(fid) != this->embObjs.end()) {
             //We have created that embedded object previously.
-            newObj = hostObj->embObjs[host_dstFieldId];
+            newObj = this->embObjs[fid];
 #ifdef DEBUG_CREATE_EMB_OBJ
-            dbgs() << "createEmbObj(): find the previosuly created embed object: " << (const void*)newObj << "\n";
+            dbgs() << "AliasObject::createEmbObj(): find the previosuly created embed object: " << (const void*)newObj << "\n";
 #endif
         }
         if (!newObj || !InstructionUtils::same_types(newObj->targetType,ety)) {
 #ifdef DEBUG_CREATE_EMB_OBJ
-            dbgs() << "createEmbObj(): try to create a new embed object because ";
+            dbgs() << "AliasObject::createEmbObj(): try to create a new embed object because ";
             if (!newObj) {
                 dbgs() << "there is no emb obj in cache...\n";
             }else{
@@ -853,9 +785,9 @@ namespace DRCHECKER {
 #endif
             if (newObj) {
                 //Erase the parent record of the existing emb obj.
-                if (newObj->parent == hostObj) {
+                if (newObj->parent == this) {
 #ifdef DEBUG_CREATE_EMB_OBJ
-                    dbgs() << "createEmbObj(): try to erase the existing emb obj's parent record since its parent is also this hostObj.\n";
+                    dbgs() << "AliasObject::createEmbObj(): try to erase the existing emb obj's parent record since its parent is also this hostObj.\n";
 #endif
                     newObj->parent = nullptr;
                     newObj->parent_field = 0;
@@ -863,108 +795,145 @@ namespace DRCHECKER {
             }
             //Need to create a new AliasObject for the embedded struct.
             if (v) {
-                newObj = DRCHECKER::createOutsideObj(vloc, currPointsTo, false, nullptr);
+                newObj = DRCHECKER::createOutsideObj(v,loc);
             }else {
-                newObj = DRCHECKER::createOutsideObj(ety, false, nullptr);
+                newObj = DRCHECKER::createOutsideObj(ety);
             }
-            //Properly taint it.
-            if(newObj){
 #ifdef DEBUG_CREATE_EMB_OBJ
-                dbgs() << "createEmbObj(): the embedded obj created: " << (const void*)newObj << " | set is_taint_src to: " << hostObj->is_taint_src << "\n"; 
+            dbgs() << "AliasObject::createEmbObj(): the embedded obj created: "  << (const void*)this << " | " << fid << " --> " << (const void*)newObj << "\n"; 
 #endif
-                newObj->is_taint_src = hostObj->is_taint_src;
-                //This new TargetObject should also be tainted according to the host object taint flags.
-                std::set<TaintFlag*> *src_taintFlags = hostObj->getFieldTaintInfo(host_dstFieldId);
-                if(src_taintFlags){
+            if (newObj) {
+                //Properly taint it.
+                //First if the host object is a taint source, then the emb obj is so too, we also need to set up the inherent taint flags for it,
+                //however, for the taint instruction trace in the flag we will just inherite from the host object instead of using the current one,
+                //because in theory, this emb object was immediately avaiable when creating the host object.
+                InstLoc *hloc = nullptr;
+                if (this->is_taint_src) {
 #ifdef DEBUG_CREATE_EMB_OBJ
-                    dbgs() << "createEmbObj(): try to taint the emb obj, #TaintFlag: " << src_taintFlags->size() << "\n";
+                    dbgs() << "AliasObject::createEmbObj(): set the emb obj as a taint source since its host obj is so, is_taint_src: " << this->is_taint_src << "\n"; 
 #endif
-                    for (TaintFlag *currTaintFlag : *src_taintFlags) {
-                        newObj->taintAllFieldsWithTag(currTaintFlag);
+                    for (TaintFlag *tf : this->all_contents_taint_flags) {
+                        if (tf && tf->is_inherent) {
+                            hloc = tf->targetInstr;
+                            break;
+                        }
                     }
+                    if (!hloc) {
+#ifdef DEBUG_CREATE_EMB_OBJ
+                        dbgs() << "!!! AliasObject::createEmbObj(): cannot find the InstLoc in host inherent taint flag!\n"; 
+#endif
+                        hloc = loc;
+                    }
+                    newObj->setAsTaintSrc(hloc,(this->is_taint_src>0));
                 }
-                //TODO: all contents taint flag.
+                //Now propagate non-inherent flags in the host object, no need to propagate inherent ones since emb obj is a part of the host. 
+                std::set<TaintFlag*> tfs;
+                this->getFieldTaintInfo(fid,&tfs,true);
+#ifdef DEBUG_CREATE_EMB_OBJ
+                dbgs() << "AliasObject::createEmbObj(): try to taint the emb obj (all fields), #TaintFlag: " << tfs.size() << "\n";
+#endif
+                for (TaintFlag *tf : tfs) {
+                    //NOTE: we don't need to add current "loc" into the taint trace since this emb obj was tainted as early as the field.
+                    newObj->taintAllFields(tf);
+                }
                 //Record it in the "embObjs".
-                hostObj->embObjs[host_dstFieldId] = newObj;
-                newObj->parent = hostObj;
-                newObj->parent_field = host_dstFieldId;
+                this->embObjs[fid] = newObj;
+                newObj->parent = this;
+                newObj->parent_field = fid;
             }else {
 #ifdef DEBUG_CREATE_EMB_OBJ
-                dbgs() << "createEmbObj(): Failed to create the outside object!\n";
+                dbgs() << "AliasObject::createEmbObj(): Failed to create the outside object!\n";
 #endif
             }
         }
         return newObj;
     }
 
-    AliasObject *createHostObj(AliasObject *targetObj, Type *hostTy, long field) {
-        if (!targetObj || !hostTy || !dyn_cast<CompositeType>(hostTy)) {
+    AliasObject *AliasObject::createHostObj(Type *hostTy, long field, InstLoc *loc) {
+        if (!hostTy || !dyn_cast<CompositeType>(hostTy)) {
 #ifdef DEBUG_CREATE_HOST_OBJ
-            dbgs() << "createHostObj(): !targetObj || !hostTy || !dyn_cast<CompositeType>(hostTy)\n";
+            dbgs() << "AliasObject::createHostObj(): !hostTy || !dyn_cast<CompositeType>(hostTy)\n";
 #endif
             return nullptr;
         }
 #ifdef DEBUG_CREATE_HOST_OBJ
-        dbgs() << "createHostObj(): targetObj ty: " << InstructionUtils::getTypeStr(targetObj->targetType) << "\n";
-        dbgs() << "createHostObj(): hostObj ty: " << InstructionUtils::getTypeStr(hostTy) << " | " << field << "\n";
+        dbgs() << "AliasObject::createHostObj(): curr emb ty: " << InstructionUtils::getTypeStr(this->targetType) << "\n";
+        dbgs() << "AliasObject::createHostObj(): hostObj ty: " << InstructionUtils::getTypeStr(hostTy) << " | " << field << "\n";
 #endif
         if (dyn_cast<SequentialType>(hostTy)) {
             field = 0;
         }
         //Have we already created this parent object?
-        if (targetObj->parent) {
-            if (InstructionUtils::same_types(targetObj->parent->targetType,hostTy) && targetObj->parent_field == field) {
+        if (this->parent) {
+            if (InstructionUtils::same_types(this->parent->targetType,hostTy) && this->parent_field == field) {
 #ifdef DEBUG_CREATE_HOST_OBJ
-                dbgs() << "createHostObj(): we have created this parent object before: " << (const void*)(targetObj->parent) << "\n";
+                dbgs() << "AliasObject::createHostObj(): we have created this parent object before: " << (const void*)(this->parent) << "\n";
 #endif
-                return targetObj->parent;
+                return this->parent;
             }else {
                 //NOTE: we should honor the original parent object, since it's static analysis and we can have multiple pointees for a same pointer
                 //and they may have multiple different parent objects, here we're possibly trying yo create a parent object for a wrong pointee, we should
                 //just skip.
 #ifdef DEBUG_CREATE_HOST_OBJ
-                dbgs() << "!!! createHostObj(): found a previously created parent object but w/ different field or type!\n";
-                dbgs() << "!!! createHostObj(): previous parent: " << InstructionUtils::getTypeStr(targetObj->parent->targetType) << " | " << targetObj->parent_field << ", id: " << (const void*)targetObj->parent << "\n";
+                dbgs() << "!!! AliasObject::createHostObj(): found a previously created parent object but w/ different field or type!\n";
+                dbgs() << "!!! AliasObject::createHostObj(): previous parent: " << InstructionUtils::getTypeStr(this->parent->targetType) << " | " << this->parent_field << ", id: " << (const void*)this->parent << "\n";
 #endif
                 return nullptr;
                 /*
-                if (targetObj->parent->embObjs.find(targetObj->parent_field) != targetObj->parent->embObjs.end()) {
-                    targetObj->parent->embObjs[targetObj->parent_field] = nullptr;
+                if (this->parent->embObjs.find(this->parent_field) != this->parent->embObjs.end()) {
+                    this->parent->embObjs[this->parent_field] = nullptr;
                 }
-                targetObj->parent = nullptr;
-                targetObj->parent_field = 0;
+                this->parent = nullptr;
+                this->parent_field = 0;
                 */
             }
         }
         if (!InstructionUtils::isIndexValid(hostTy,field)) {
 #ifdef DEBUG_CREATE_HOST_OBJ
-            dbgs() << "createHostObj(): field OOB!\n";
+            dbgs() << "AliasObject::createHostObj(): field OOB!\n";
 #endif
             return nullptr;
         }
-        if (!InstructionUtils::same_types(dyn_cast<CompositeType>(hostTy)->getTypeAtIndex(field),targetObj->targetType)) {
+        if (!InstructionUtils::same_types(dyn_cast<CompositeType>(hostTy)->getTypeAtIndex(field),this->targetType)) {
 #ifdef DEBUG_CREATE_HOST_OBJ
-            dbgs() << "createHostObj(): field type doesn't match the host!\n";
+            dbgs() << "AliasObject::createHostObj(): field type doesn't match the host!\n";
 #endif
             return nullptr;
         }
-        AliasObject *hobj = nullptr;
-        if (!targetObj->all_contents_taint_flags.empty()) {
-            std::set<TaintFlag*> existingTaints(targetObj->all_contents_taint_flags);
-            hobj = DRCHECKER::createOutsideObj(hostTy, true, &existingTaints);
-        }else{
-            hobj = DRCHECKER::createOutsideObj(hostTy, false, nullptr);
-        }
-        if (!hobj) {
+        AliasObject *hobj = DRCHECKER::createOutsideObj(hostTy);
+        if (hobj) {
+            //The taint logic here is: if the emb object has inherent taint flags, then it's likely that its host object should also be treated as
+            //a taint source, otherwise we just keep the newly available fields in the host untainted.
+            //NOTE: the logic here is similar to that in "createEmbObject". 
+            InstLoc *eloc = nullptr;
+            if (this->is_taint_src) {
 #ifdef DEBUG_CREATE_HOST_OBJ
-            dbgs() << "createHostObj(): fail to create the host obj!\n";
+                dbgs() << "AliasObject::createHostObj(): set the host obj as a taint source since its one emb is, is_taint_src: " << this->is_taint_src << "\n"; 
+#endif
+                for (TaintFlag *tf : this->all_contents_taint_flags) {
+                    if (tf && tf->is_inherent) {
+                        eloc = tf->targetInstr;
+                        break;
+                    }
+                }
+                if (!eloc) {
+#ifdef DEBUG_CREATE_HOST_OBJ
+                    dbgs() << "!!! AliasObject::createHostObj(): cannot find the InstLoc in emb inherent taint flag!\n"; 
+#endif
+                    eloc = loc;
+                }
+                hobj->setAsTaintSrc(eloc,(this->is_taint_src>0));
+            }
+        }else {
+#ifdef DEBUG_CREATE_HOST_OBJ
+            dbgs() << "AliasObject::createHostObj(): fail to create the host obj!\n";
 #endif
             return nullptr;
         }
         //Setup embed relationship.
-        hobj->embObjs[field] = targetObj;
-        targetObj->parent = hobj;
-        targetObj->parent_field = field;
+        hobj->embObjs[field] = this;
+        this->parent = hobj;
+        this->parent_field = field;
         return hobj;
     }
 
@@ -1514,7 +1483,7 @@ namespace DRCHECKER {
         return ro;
     }
 
-    int createEmbObjChain(FieldDesc *fd, PointerPointsTo *pto, int limit) {
+    int createEmbObjChain(FieldDesc *fd, PointerPointsTo *pto, int limit, InstLoc *loc) {
         if (!fd || !pto || !pto->targetObject) {
 #ifdef DEBUG_CREATE_EMB_OBJ_CHAIN
             dbgs() << "createEmbObjChain(): (!fd || !pto || !pto->targetObject)\n";
@@ -1545,7 +1514,7 @@ namespace DRCHECKER {
             }
             pto->targetObject = currHostObj;
             pto->dstfieldId = fd->fid[i];
-            AliasObject *newObj = DRCHECKER::createEmbObj(pto->targetObject, fd->fid[i]);
+            AliasObject *newObj = currHostObj->createEmbObj(fd->fid[i],nullptr,loc);
             if (!newObj) {
                 //TODO: what to do now...
 #ifdef DEBUG_CREATE_EMB_OBJ_CHAIN
@@ -1565,7 +1534,7 @@ namespace DRCHECKER {
         return -1;
     }
 
-    int createHostObjChain(FieldDesc *fd, PointerPointsTo *pto, int limit) {
+    int createHostObjChain(FieldDesc *fd, PointerPointsTo *pto, int limit, InstLoc *loc) {
         if (!fd || !pto || !pto->targetObject) {
 #ifdef DEBUG_CREATE_HOST_OBJ_CHAIN
             dbgs() << "createHostObjChain(): (!fd || !pto || !pto->targetObject)\n";
@@ -1584,7 +1553,7 @@ namespace DRCHECKER {
             dbgs() << "createHostObjChain(): current sub obj type: " << InstructionUtils::getTypeStr(pto->targetObject->targetType) << "\n";
             dbgs() << "createHostObjChain(): Index " << i << ", about to create its host obj: " << InstructionUtils::getTypeStr(fd->host_tys[i]) << " | " << fd->fid[i] << "\n";
 #endif
-            AliasObject *hObj = DRCHECKER::createHostObj(pto->targetObject, fd->host_tys[i], fd->fid[i]);
+            AliasObject *hObj = pto->targetObject->createHostObj(fd->host_tys[i], fd->fid[i], loc);
             if (hObj) {
                 //Successfully created.
                 pto->targetObject = hObj;

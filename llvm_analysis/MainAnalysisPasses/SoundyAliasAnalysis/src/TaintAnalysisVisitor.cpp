@@ -486,7 +486,7 @@ namespace DRCHECKER {
                         dbgs() << "Adding Taint To field ID:"<< fieldObject.first << " of:" << fieldObject.second << ":Success\n";
 #endif
                         is_added = true;
-                    } else if (fieldObject.first == 0 && fieldObject.second->taintAllFieldsWithTag(tf)) {
+                    } else if (fieldObject.first == 0 && fieldObject.second->taintAllFields(tf)) {
 #ifdef DEBUG_CALL_INSTR
                         dbgs() << "Adding Taint To All fields:"<< fieldObject.first << " of:" << fieldObject.second << ":Success\n";
 #endif

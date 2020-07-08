@@ -25,34 +25,66 @@ namespace DRCHECKER {
 //#define INFER_XENTRY_SHARED_OBJ
 
     //hz: A helper method to create and (taint) a new OutsideObject.
-    OutsideObject* AliasAnalysisVisitor::createOutsideObj(Value *p, bool taint) {
-        InstLoc *vloc = new InstLoc(p,this->currFuncCallSites);
+    //"p" is the pointer for which we need to create the object, "I" is the instruction as a creation site.
+    OutsideObject* AliasAnalysisVisitor::createOutsideObj(Value *p, Instruction *I, bool taint) {
+        if (!p) {
+            return nullptr;
+        }
+        InstLoc *loc = nullptr;
+        if (I) {
+            loc = new InstLoc(I,this->currFuncCallSites);
+        }else {
+            loc = new InstLoc(p,this->currFuncCallSites);
+        }
         std::map<Value *, std::set<PointerPointsTo*>*> *currPointsTo = this->currState.getPointsToInfo(this->currFuncCallSites);
 #ifdef INFER_XENTRY_SHARED_OBJ
         //Can we get a same-typed object from the global cache (generated when analyzing another entry function)?
         //NOTE: there are multiple places in the code that create a new OutsideObject, but we onlyd do this multi-entry cache mechanism here,
         //because other places create the object that is related to another object (emb/host/field point-to), while we only need to cache the
         //top-level outside obj here (so that other sub obj can be naturally obtained by the field records inside it).
-        if (p && p->getType() && p->getType()->isPointerTy() && dyn_cast<CompositeType>(p->getType()->getPointerElementType())) {
+        if (p->getType() && p->getType()->isPointerTy() && dyn_cast<CompositeType>(p->getType()->getPointerElementType())) {
             OutsideObject *obj = DRCHECKER::getSharedObjFromCache(p,p->getType()->getPointerElementType());
             if (obj) {
                 //We need to bind the shared object w/ current inst.
-                DRCHECKER::updatePointsToRecord(vloc,currPointsTo,obj);
+                obj->addPointerPointsTo(p,loc);
+                this->updatePointsToObjects(p,obj,loc);
                 return obj;
             }
         }
 #endif
-        std::set<TaintFlag*> *existingTaints = nullptr;
-        //Need to taint it?
-        if (taint) {
-            existingTaints = TaintUtils::getTaintInfo(this->currState,this->currFuncCallSites,p);
-        }
-        OutsideObject *robj = DRCHECKER::createOutsideObj(vloc, currPointsTo, taint, existingTaints);
-#ifdef INFER_XENTRY_SHARED_OBJ
+        //Ok, now we need to create a dummy object for the pointer "p"..
+        OutsideObject *robj = DRCHECKER::createOutsideObj(p,loc);
         if (robj) {
+            //Add it to the global pto record.
+            this->updatePointsToObjects(p,robj,loc);
+            //Then we should consider whether and how to taint it...
+            if (taint) {
+                //First set this new obj as a taint source, since it's very likely that this is a shared obj inited in other entry functions.
+                //TODO: consider whether it's possible that this obj is a user inited taint source, if so, how to recognize this?
+                //TODO: it's strange to consider the taint stuff in the AliasAnalysis.
+                robj->setAsTaintSrc(loc,true);
+                //Then propagate the taint flags from the pointer "p" to the obj.
+                std::set<TaintFlag*> *existingTaints = TaintUtils::getTaintInfo(this->currState,this->currFuncCallSites,p);
+                if (existingTaints) {
+                    for (TaintFlag *tf : *existingTaints) {
+                        if (!tf) {
+                            continue;
+                        }
+                        //TODO: in theory we need to test whether the new taint trace is valid (i.e. reachability), we omit it now since
+                        //it's less likely that the taint on the pointer cannot reach its pointee..
+                        TaintFlag *ntf = new TaintFlag(tf,loc);
+                        robj->taintAllFields(ntf);
+                    }
+                }
+            }
+#ifdef INFER_XENTRY_SHARED_OBJ
             DRCHECKER::addToSharedObjCache(robj);
-        }
 #endif
+        }else {
+#ifdef CREATE_DUMMY_OBJ_IF_NULL
+            dbgs() << "AliasAnalysisVisitor::createOutsideObj(): failed to create the dummy obj!\n";
+#endif
+        }
         return robj;
     }
 
@@ -123,8 +155,9 @@ namespace DRCHECKER {
 
     //Basically we try to see whether the pointee object type matches that of srcPointer, if not, we try adjust the PointerPointsTo, e.g.,
     //by walking through the embed/parent hierarchy of the pointee object.
+    //"loc" is the instruction site where we need to match the pto.
     //Return: whether the type is matched in the end.
-    bool AliasAnalysisVisitor::matchPtoTy(Value *srcPointer, PointerPointsTo *pto) {
+    bool AliasAnalysisVisitor::matchPtoTy(Value *srcPointer, PointerPointsTo *pto, Instruction *I) {
         if (!srcPointer || !pto || !pto->targetObject) {
             return false;
         }
@@ -133,11 +166,11 @@ namespace DRCHECKER {
             return false;
         }
         srcTy = srcTy->getPointerElementType();
-        return this->matchPtoTy(srcTy,pto);
+        return this->matchPtoTy(srcTy,pto,I);
     }
 
     //srcTy is the type we should point to.
-    bool AliasAnalysisVisitor::matchPtoTy(Type *srcTy, PointerPointsTo *pto) {
+    bool AliasAnalysisVisitor::matchPtoTy(Type *srcTy, PointerPointsTo *pto, Instruction *I) {
         if (!pto || !pto->targetObject) {
             return false;
         }
@@ -169,7 +202,8 @@ namespace DRCHECKER {
                 //A small hack in order to use "createEmbObjChain".
                 hd->host_tys.push_back(pTy);
                 hd->fid.push_back(dstfieldId);
-                return DRCHECKER::createEmbObjChain(hd,pto,limit) == limit;
+                InstLoc *loc = (I ? new InstLoc(I,this->currFuncCallSites) : nullptr);
+                return DRCHECKER::createEmbObjChain(hd,pto,limit,loc) == limit;
             }
         }
         //Then let's see whether the pto has any parent object (e.g. it's embedded in another object) that can match srcTy.
@@ -192,7 +226,17 @@ namespace DRCHECKER {
         return false;
     }
 
-    void AliasAnalysisVisitor::updatePointsToObjects(Value *srcPointer, std::set<PointerPointsTo*>* newPointsToInfo) {
+    void AliasAnalysisVisitor::updatePointsToObjects(Value *p, AliasObject *obj, InstLoc *propInst, long fid, long dfid, bool is_weak) {
+        if (!p || !obj) {
+            return;
+        }
+        std::set<PointerPointsTo*> ptos;
+        PointerPointsTo *pto = new PointerPointsTo(p,fid,obj,dfid,propInst,is_weak);
+        ptos.insert(pto);
+        return this->updatePointsToObjects(p,&ptos);
+    }
+
+    void AliasAnalysisVisitor::updatePointsToObjects(Value *srcPointer, std::set<PointerPointsTo*> *newPointsToInfo) {
         /***
          *  Update the pointsto objects of the srcPointer to newPointstoInfo
          *  At the current instruction.
@@ -227,7 +271,7 @@ namespace DRCHECKER {
 #ifdef DEBUG_UPDATE_POINTSTO
             dbgs() << " #existingPointsTo: " << existingPointsTo->size() << "\n";
 #endif
-            for(PointerPointsTo *currPointsTo: *newPointsToInfo) {
+            for(PointerPointsTo *currPointsTo : *newPointsToInfo) {
                 // Some basic sanity check.
                 if (!currPointsTo || !currPointsTo->targetObject) {
                     continue;
@@ -240,7 +284,11 @@ namespace DRCHECKER {
                         dbgs() << "############# Inserted!!!\n";
                     }
                     //handle the implicit type cast (i.e. type cast that is not explicitly performed by the 'cast' inst) if any.
-                    matchPtoTy(srcPointer,currPointsTo);
+                    Instruction *propInst = nullptr;
+                    if (currPointsTo->propagatingInst) {
+                        propInst = dyn_cast<Instruction>(currPointsTo->propagatingInst->inst);
+                    }
+                    matchPtoTy(srcPointer,currPointsTo,propInst);
 #ifdef DEBUG_UPDATE_POINTSTO
                     dbgs() << "Insert point-to: ";
                     currPointsTo->print(dbgs());
@@ -351,7 +399,7 @@ namespace DRCHECKER {
 #ifdef DEBUG_GET_ELEMENT_PTR
             dbgs() << "AliasAnalysisVisitor::makePointsToCopy_emb(): trying to get/create an object for the embedded struct/array..\n";
 #endif
-            AliasObject *newObj = this->createEmbObj(hostObj,dstField,srcPointer);
+            AliasObject *newObj = this->createEmbObj(hostObj,dstField,srcPointer,propInstruction);
             if(newObj){
                 PointerPointsTo *newPointsToObj = new PointerPointsTo(resPointer,0,newObj,fieldId,new InstLoc(propInstruction,this->currFuncCallSites),false);
                 newPointsToInfo->insert(newPointsToInfo->begin(), newPointsToObj);
@@ -364,9 +412,28 @@ namespace DRCHECKER {
         return newPointsToInfo;
     }
 
-    AliasObject *AliasAnalysisVisitor::createEmbObj(AliasObject *hostObj, long host_dstFieldId, Value *v) {
-        std::map<Value *, std::set<PointerPointsTo*>*> *currPointsTo = this->currState.getPointsToInfo(this->currFuncCallSites);
-        return DRCHECKER::createEmbObj(hostObj, host_dstFieldId, new InstLoc(v,this->currFuncCallSites), currPointsTo);
+    AliasObject *AliasAnalysisVisitor::createEmbObj(AliasObject *hostObj, long fid, Value *v, Instruction *I) {
+        if (!hostObj) {
+            return nullptr;
+        }
+        InstLoc *loc = nullptr;
+        if (I) {
+            loc = new InstLoc(I,this->currFuncCallSites);
+        }else if (v) {
+            loc = new InstLoc(v,this->currFuncCallSites);
+        }
+        AliasObject *eobj = hostObj->createEmbObj(fid,v,loc);
+        if (eobj) {
+            //We need to add it to the global pto records..
+            if (v) {
+                this->updatePointsToObjects(v,eobj,loc);
+            }
+        }else {
+#ifdef DEBUG_CREATE_EMB_OBJ
+            dbgs() << "AliasAnalysisVisitor::createEmbObj(): failed to create the emb object!\n";
+#endif
+        }
+        return eobj;
     }
 
     //NOTE: "is_var_fid" indicates whether the target fieldId is a variable instead of a constant.
@@ -395,7 +462,7 @@ namespace DRCHECKER {
         for (PointerPointsTo *currPointsToObj : *srcPointsTo) {
             //Try to match the pto w/ the GEP base pointer.
             PointerPointsTo *pto = currPointsToObj->makeCopyP();
-            this->matchPtoTy(basePointToType,pto);
+            this->matchPtoTy(basePointToType,pto,propInstruction);
             AliasObject *hostObj = pto->targetObject;
             // if the target object is not visited, then add into points to info.
             if(hostObj && visitedObjects.find(hostObj) == visitedObjects.end()) {
@@ -499,7 +566,7 @@ namespace DRCHECKER {
                     //(1) Create a separate TargetObject representing this embedded struct, then make the pointer operand in original GEP point to it.
                     //(2) Directly create an outside object for the resulted pointer of this GEP. (i.e. the parameter "srcPointer")
                     //Method (1):
-                    AliasObject *newObj = this->createEmbObj(hostObj,host_dstFieldId,gep->getPointerOperand());
+                    AliasObject *newObj = this->createEmbObj(hostObj,host_dstFieldId,gep->getPointerOperand(),propInstruction);
                     if(newObj){
                         newPointsToObj->targetObject = newObj;
                         newPointsToObj->dstfieldId = fieldId;
@@ -551,7 +618,7 @@ std::set<PointerPointsTo*>* AliasAnalysisVisitor::mergePointsTo(std::set<Value*>
     // Set of pairs of field and corresponding object.
     std::set<std::pair<long, AliasObject*>> targetObjects;
     targetObjects.clear();
-    for(Value *currVal:valuesToMerge) {
+    for(Value *currVal : valuesToMerge) {
         // if the value doesn't have points to information.
         // try to strip pointer casts.
         if(!hasPointsToObjects(currVal)) {
@@ -720,7 +787,7 @@ void AliasAnalysisVisitor::visitCastInst(CastInst &I) {
 #endif
                             int limit = fd->findHostTy(dstPointeeTy);
                             //"limit" can be -1 if the dstPointeeTy is not composite, in which case we will create embedded objects for all elements in fd->host_tys.
-                            DRCHECKER::createEmbObjChain(fd,newPointsToObj,limit);
+                            DRCHECKER::createEmbObjChain(fd,newPointsToObj,limit,new InstLoc(&I,this->currFuncCallSites));
                         }else if (dyn_cast<CompositeType>(dstPointeeTy)) {
                             //This means we cannot match the dstPointeeTy inside current host object, we possibly need to create the container object.
                             std::vector<FieldDesc*> *dst_tydesc = InstructionUtils::getCompTyDesc(this->currState.targetDataLayout, dyn_cast<CompositeType>(dstPointeeTy));
@@ -728,7 +795,7 @@ void AliasAnalysisVisitor::visitCastInst(CastInst &I) {
                                 FieldDesc *dst_fd = (*dst_tydesc)[0];
                                 int i_srcty = dst_fd->findHostTy(currTgtObjType);
                                 if (dst_fd->fid.size() == dst_fd->host_tys.size() && dst_fd->findTy(currTgtObjType) >= 0 && i_srcty >= 0) {
-                                    DRCHECKER::createHostObjChain(dst_fd, newPointsToObj, dst_fd->fid.size());
+                                    DRCHECKER::createHostObjChain(dst_fd, newPointsToObj, dst_fd->fid.size(), new InstLoc(&I,this->currFuncCallSites));
                                 }else {
 #ifdef DEBUG_CAST_INSTR
                                     dbgs() << "AliasAnalysisVisitor::visitCastInst(): dstPointeeTy's type desc is not correct, or it doesn't contain the srcPointeeTy at the head.\n";
@@ -755,16 +822,17 @@ void AliasAnalysisVisitor::visitCastInst(CastInst &I) {
 #endif
                         //We also need to re-taint the object (if necessary) since its type has changed.
                         std::set<TaintFlag*> *fieldTaint = newPointsToObj->targetObject->getFieldTaintInfo(0);
-                        newPointsToObj->targetObject->reset(&I,dstPointeeTy);
-                        //TODO: fieldTaint or all_contents_taint_flags?
+                        //Since there is only one field, the field taint should also be the all_content_taint, make sure this is true.
                         if (fieldTaint) {
-#ifdef DEBUG_CAST_INSTR
-                            dbgs() << "AliasAnalysisVisitor::visitCastInst(): trying to re-taint the converted AliasObject, #fieldTaint: " << fieldTaint->size() << "\n";
-#endif
                             for (TaintFlag *tf : *fieldTaint) {
-                                newPointsToObj->targetObject->taintAllFieldsWithTag(tf);
+                                newPointsToObj->targetObject->addAllContentTaintFlag(tf);
                             }
                         }
+                        //Change the object value and type, and sync the existing TaintFlag(s) to new fields.
+#ifdef DEBUG_CAST_INSTR
+                        dbgs() << "AliasAnalysisVisitor::visitCastInst(): trying to re-taint the casted AliasObject, #Taint: " << newPointsToObj->targetObject->all_contents_taint_flags.size() << "\n";
+#endif
+                        newPointsToObj->targetObject->reset(&I,dstPointeeTy,new InstLoc(&I,this->currFuncCallSites));
                     }else {
 #ifdef DEBUG_CAST_INSTR
                         dbgs() << "AliasAnalysisVisitor::visitCastInst(): try to cast a pointer to a non-composite type to another... simply propagate the point-to.\n";
@@ -807,58 +875,6 @@ void AliasAnalysisVisitor::visitCastInst(CastInst &I) {
     }
 }
 
-//hz: make a copy for the src AliasObject of a different type.
-AliasObject* AliasAnalysisVisitor::x_type_obj_copy(AliasObject *srcObj, Type *dstType) {
-    if (!srcObj || !dstType){
-        return nullptr;
-    }
-    Type *srcType = srcObj->targetType;
-#ifdef DEBUG_CAST_INSTR
-    dbgs() << "In AliasAnalysisVisitor::x_type_obj_copy, srcObj type: " << InstructionUtils::getTypeStr(srcType);
-    dbgs() << " dstType: " << InstructionUtils::getTypeStr(dstType) << "\n";
-#endif
-    if(!srcType->isStructTy() || !dstType->isStructTy()){
-        return nullptr;
-    }
-    //TODO: Should we add this new obj to the "pointsTo" or "embObjCache" of the parent object of the copied object?
-    AliasObject *newObj = srcObj->makeCopy();
-    //We are far from done...
-    //First, we need to change the object type.
-    newObj->targetType = dstType;
-    //Then, we need to properly propagate the field taint information.
-    //NOTE that the AliasObject member function makeCopy() doesn't copy the field taint information, we need to do it ourselves.
-    unsigned srcElemNum = srcType->getStructNumElements();
-    unsigned dstElemNum = dstType->getStructNumElements();
-    newObj->all_contents_tainted = srcObj->all_contents_tainted;
-    newObj->all_contents_taint_flags = srcObj->all_contents_taint_flags;
-    newObj->is_taint_src = srcObj->is_taint_src;
-    //Copy field taint from src obj to dst obj, but we shouldn't copy taint for fields that don't exist in dst obj.
-    for(auto currFieldTaint:srcObj->taintedFields){
-        if (currFieldTaint->fieldId < dstElemNum){
-            newObj->taintedFields.insert(newObj->taintedFields.end(),currFieldTaint);
-        }
-    }
-    //If srcElemNum < dstElemNum, below code will taint the extra fields automatically when necessary.
-    //No worry about repeatedly adding the same taint flags because "taintAllFields" has an existence test for taint flags.
-    if (srcObj->all_contents_tainted){
-        //Our heuristic is that if src object is all-content-tainted, then possibly we should also treat the dst object as all-field-tainted.
-        if (!srcObj->all_contents_taint_flags.empty()) {
-            for (TaintFlag *tf : srcObj->all_contents_taint_flags) {
-                newObj->taintAllFields(tf);
-            }
-        } else {
-            //Is this possible?
-            //TODO
-            errs() << "AliasAnalysisVisitor::x_type_obj_copy: all contents tainted but w/o all_contents_taint_flags.\n";
-            if (srcElemNum < dstElemNum){
-                //We will possibly lose some field taint here, we'd better take a break and see what happened...
-                assert(false);
-            }
-        }
-    }
-    return newObj;
-}
-
 //TODO: we need to handle the potential pointer arithmetic here...
 void AliasAnalysisVisitor::visitBinaryOperator(BinaryOperator &I) {
     /***
@@ -875,7 +891,7 @@ void AliasAnalysisVisitor::visitBinaryOperator(BinaryOperator &I) {
     if (!InstructionUtils::isAsanInst(&I)) {
         for (Value *v : allVals) {
             if (!InstructionUtils::isScalar(v) && !hasPointsToObjects(v)) {
-                this->createOutsideObj(v,true);
+                this->createOutsideObj(v,&I,true);
             }
         }
     }
@@ -915,7 +931,7 @@ void AliasAnalysisVisitor::visitPHINode(PHINode &I) {
     /*
     for (Value *v : allVals) {
         if (!InstructionUtils::isScalar(v) && !hasPointsToObjects(v)) {
-            this->createOutsideObj(v,true);
+            this->createOutsideObj(v,&I,true);
         }
     }
     */
@@ -947,7 +963,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
 #ifdef CREATE_DUMMY_OBJ_IF_NULL
     for (Value *v : allVals) {
         if (!InstructionUtils::isScalar(v) && !hasPointsToObjects(v)) {
-            this->createOutsideObj(v,true);
+            this->createOutsideObj(v,&I,true);
         }
     }
 #endif
@@ -1132,7 +1148,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
 #ifdef DEBUG_GET_ELEMENT_PTR
             dbgs() << "AliasAnalysisVisitor::processGEPFirstDimension(): Try to create an OutsideObject for srcPointer: " << InstructionUtils::getValueStr(srcPointer) << "\n";
 #endif
-            this->createOutsideObj(srcPointer,true);
+            this->createOutsideObj(srcPointer,propInst,true);
         }
 #endif
         if (!hasPointsToObjects(srcPointer)) {
@@ -1208,7 +1224,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
                 //By default it will the same as the original point-to.
                 PointerPointsTo *newPto = new PointerPointsTo(I, 0, currPto->targetObject, currPto->dstfieldId, new InstLoc(propInst,this->currFuncCallSites), false);
                 //Type match in the object parent/embed hierarchy.
-                bool ty_match = matchPtoTy(basePointeeTy,newPto);
+                bool ty_match = matchPtoTy(basePointeeTy,newPto,propInst);
                 if (newPto->inArray(basePointeeTy)) {
                     //We will not invoke bit2Field() to do the pointer arithmetic in one situation: host object is an array of the basePointeeTy (i.e. we are array-insensitive).
 #ifdef DEBUG_GET_ELEMENT_PTR
@@ -1382,7 +1398,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
 #endif
             //Ok, we may need to create the host object chain for the location pointed to by the GEP base pointer if necessary.
             int limit = (*tydesc)[i_dstfield]->host_tys.size();
-            DRCHECKER::createHostObjChain((*tydesc)[i_dstfield],pto,limit);
+            DRCHECKER::createHostObjChain((*tydesc)[i_dstfield],pto,limit,new InstLoc(propInst,this->currFuncCallSites));
             if (!InstructionUtils::same_types(pto->targetObject->targetType,targetObjTy)) {
 #ifdef DEBUG_GET_ELEMENT_PTR
                 dbgs() << "!!! AliasAnalysisVisitor::bit2Field(): incomplete creation of the host obj chain.\n";
@@ -1412,7 +1428,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
         //while we don't really want to create the embedded object up to the innermost heading composite field, instead we stop at the outermost
         //head composite field here.
         while (++limit < fd->fid.size() && !fd->fid[limit]);
-        int r = DRCHECKER::createEmbObjChain(fd,pto,limit);
+        int r = DRCHECKER::createEmbObjChain(fd,pto,limit,new InstLoc(propInst,this->currFuncCallSites));
         if (r > limit) {
             //There must be something wrong in the createEmbObjChain()...
 #ifdef DEBUG_GET_ELEMENT_PTR
@@ -1468,7 +1484,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
             //hz: try to create dummy objects if there is no point-to information about the pointer variable,
             //since it can be an outside global variable. (e.g. platform_device).
             if(!hasPointsToObjects(srcPointer)) {
-                this->createOutsideObj(srcPointer,true);
+                this->createOutsideObj(srcPointer,propInst,true);
             }
 #endif
             if (hasPointsToObjects(srcPointer)) {
@@ -1528,7 +1544,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
         //hz: try to create dummy objects if there is no point-to information about the pointer variable,
         //since it can be an outside global variable. (e.g. platform_device).
         if(!InstructionUtils::isAsanInst(&I) && !hasPointsToObjects(srcPointer)) {
-            this->createOutsideObj(srcPointer,true);
+            this->createOutsideObj(srcPointer,&I,true);
         }
 #endif
 
@@ -1658,7 +1674,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
 #ifdef DEBUG_STORE_INSTR
             dbgs() << "Still no point-to for targetValue, try to create an outside object for: " << InstructionUtils::getValueStr(targetValue_pre_strip) << "\n";
 #endif
-            if(this->createOutsideObj(targetValue_pre_strip,true)){
+            if(this->createOutsideObj(targetValue_pre_strip,&I,true)){
 #ifdef DEBUG_STORE_INSTR
                 dbgs() << "Created successfully.\n";
 #endif
@@ -1872,16 +1888,12 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
             return;
         }
         //Type based object creation.
-        //Since this will create a fd, we always treat it as a global taint source.
+        OutsideObject *newObj = DRCHECKER::createOutsideObj(file_ty);
         InstLoc *propInst = new InstLoc(&I,this->currFuncCallSites);
-        std::set<TaintFlag*> existingTaints;
-        TaintTag *tag = new TaintTag(0,file_ty,true);
-        TaintFlag *tf = new TaintFlag(propInst,true,tag);
-        existingTaints.insert(tf);
-        OutsideObject *newObj = DRCHECKER::createOutsideObj(file_ty,true,&existingTaints);
-        //Ok, now add it to the global object cache.
         if (newObj) {
-            //Update the field point-to according to the "fdFieldMap".
+            //Since this is a fd, we always treat it as a global taint source.
+            newObj->setAsTaintSrc(propInst,true);
+            //Update the field point-to according to the "fdFieldMap" and the global pto record if necessary.
             for (auto &e : fdFieldMap) {
                 long fid = e.first;
                 long arg_no = e.second;
@@ -1903,7 +1915,9 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
                     newObj->updateFieldPointsTo(fid,srcPointsTo,propInst,0);
                 }
             }
+#ifdef INFER_XENTRY_SHARED_OBJ
             DRCHECKER::addToSharedObjCache(newObj);
+#endif
         }else {
 #ifdef DEBUG_CALL_INSTR
             dbgs() << "AliasAnalysisVisitor::handleFdCreationFunction(): Cannot create the file struct!!!\n";

@@ -58,9 +58,7 @@ namespace DRCHECKER {
 
         //HZ: we also need to treat heap objects as taint source...
         InstLoc *propInst = new InstLoc(&callInst,callSitesContext);
-        TaintFlag *tf = new TaintFlag(propInst,true);
-        targetObj->taintAllFieldsWithTag(tf);
-        targetObj->is_taint_src = true;
+        targetObj->setAsTaintSrc(propInst,true);
 
         PointerPointsTo *newPointsTo = new PointerPointsTo(&callInst,0,targetObj,0,propInst,false);
         std::set<PointerPointsTo*> *newPointsToInfo = new std::set<PointerPointsTo*>();

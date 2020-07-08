@@ -45,10 +45,11 @@ namespace DRCHECKER {
         //Does it point to any taint-src objects (e.g. global objects and outside objects) ?
         //Target global states to modify.
         std::set<std::pair<long, Value*>> targetObjects;
-        for (PointerPointsTo *currPointsToObj:*dstPointsTo) {
+        for (PointerPointsTo *currPointsToObj : *dstPointsTo) {
             long target_field = currPointsToObj->dstfieldId;
             AliasObject *dstObj = currPointsToObj->targetObject;
-            if (!dstObj || !dstObj->is_taint_src || !dstObj->getValue()) {
+            //TODO: need we consider the write to a user inited taint source?
+            if (!dstObj || dstObj->is_taint_src <= 0 || !dstObj->getValue()) {
                 continue;
             }
             auto to_check = std::make_pair(target_field, dstObj->getValue());
@@ -86,7 +87,7 @@ namespace DRCHECKER {
                     for (auto existingTaint : dstObj->all_contents_taint_flags) {
                         if (existingTaint && existingTaint->tag && existingTaint->tag->v == dstObj->getValue()) {
 #ifdef DEBUG_STORE_INST
-                            dbgs() << "Add to mod_inst_list (all_contents_taint_flag): " << InstructionUtils::getValueStr(&I) << "\n";
+                            dbgs() << "Add to mod_inst_list (all_contents_taint_flags): " << InstructionUtils::getValueStr(&I) << "\n";
 #endif
                             existingTaint->tag->insertModInst(&I,this->actx->callSites);
                         }

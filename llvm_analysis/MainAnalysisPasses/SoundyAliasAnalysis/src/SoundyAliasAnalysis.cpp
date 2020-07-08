@@ -739,7 +739,12 @@ namespace DRCHECKER {
             assert(is_handled);
 
 
-            std::map<Value *, std::set<PointerPointsTo*>*> *currPointsTo = targetState.getPointsToInfo(callSites);
+            std::map<Value*, std::set<PointerPointsTo*>*> *currPointsTo = targetState.getPointsToInfo(callSites);
+            //Create the InstLoc for the function entry.
+            Instruction *ei = fi->func->getEntryBlock().getFirstNonPHIOrDbg();
+            std::vector<Instruction*> *ctx = new std::vector<Instruction*>();
+            ctx->push_back(ei);
+            InstLoc *loc = new InstLoc(ei,ctx);
             unsigned long arg_no=0;
             for(Function::arg_iterator arg_begin = fi->func->arg_begin(), arg_end = fi->func->arg_end(); arg_begin != arg_end; arg_begin++) {
                 Value *currArgVal = &(*arg_begin);
@@ -747,41 +752,38 @@ namespace DRCHECKER {
                     //hz: Add a taint tag indicating that the taint is from user-provided arg, instead of global states.
                     //This tag represents the "arg", at the function entry its point-to object hasn't been created yet, so no "pobjs" for the tag.
                     TaintTag *currTag = new TaintTag(0,currArgVal,false);
-                    TaintFlag *currFlag = new TaintFlag(new InstLoc(currArgVal,nullptr), true);
-                    currFlag->setTag(currTag);
-                    //currFlag->instructionTrace.push_back(fi->func->getEntryBlock().getFirstNonPHIOrDbg());
+                    TaintFlag *currFlag = new TaintFlag(loc, true, currTag);
                     std::set<TaintFlag*> *currTaintInfo = new std::set<TaintFlag*>();
                     currTaintInfo->insert(currFlag);
                     TaintUtils::updateTaintInfo(targetState, callSites, currArgVal, currTaintInfo);
                 }
                 if (pointerArgs.find(arg_no) != pointerArgs.end()) {
-                    AliasObject *obj = new FunctionArgument(currArgVal, currArgVal->getType(), fi->func,
-                                                            callSites);
-                    DRCHECKER::updatePointsToRecord(new InstLoc(currArgVal,nullptr),currPointsTo,obj,0,0);
+                    AliasObject *obj = new FunctionArgument(currArgVal, currArgVal->getType(), fi->func, callSites);
+                    obj->addPointerPointsTo(currArgVal,loc);
+                    //Record the pto in the global state.
+                    if (currPointsTo) {
+                        PointerPointsTo *pto = new PointerPointsTo(currArgVal,0,obj,0,loc,false);
+                        if (currPointsTo->find(currArgVal) == currPointsTo->end()) {
+                            (*currPointsTo)[currArgVal] = new std::set<PointerPointsTo*>();
+                        }
+                        (*currPointsTo)[currArgVal]->insert(pto);
+                    }
                     if(taintedArgData.find(arg_no) != taintedArgData.end()) {
-                        TaintTag *currTag = new TaintTag(0,currArgVal,false);
-                        TaintFlag *currFlag = new TaintFlag(new InstLoc(currArgVal,nullptr), true);
-                        currFlag->setTag(currTag);
-                        //currFlag->instructionTrace.push_back(fi->func->getEntryBlock().getFirstNonPHIOrDbg());
-                        obj->taintAllFields(currFlag);
+                        //In this case the arg obj should be treated as a user-initiated taint source.
+                        obj->setAsTaintSrc(loc,false);
                     }
                 } else {
                     assert(taintedArgData.find(arg_no) == taintedArgData.end());
                 }
                 arg_no++;
-
             }
         }
 
         //hz: try to set all global variables as taint source.
         void addGlobalTaintSource(GlobalState &targetState){
             //Type of globalVariables: std::map<Value *, std::set<PointerPointsTo*>*>
-            for(auto const &it : GlobalState::globalVariables){
+            for (auto const &it : GlobalState::globalVariables) {
                 Value *v = it.first;
-                TaintFlag *currFlag = new TaintFlag(new InstLoc(v,nullptr), true);
-                //Add a tag
-                TaintTag *currTag = new TaintTag(0,v);
-                currFlag->setTag(currTag);
                 std::set<PointerPointsTo*> *ps = it.second;
                 if (ps->size() <= 0) {
                     continue;
@@ -803,12 +805,12 @@ namespace DRCHECKER {
 #ifdef DEBUG_GLOBAL_TAINT
                 dbgs() << "addGlobalTaintSource(): Set the glob var as taint source: " << InstructionUtils::getValueStr(v) << "\n";
 #endif
+                InstLoc *loc = new InstLoc(v,nullptr);
                 for(auto const &p : *ps){
                     if (!p->targetObject) {
                         continue;
                     }
-                    p->targetObject->taintAllFieldsWithTag(currFlag);
-                    p->targetObject->is_taint_src = true;
+                    p->targetObject->setAsTaintSrc(loc,true);
 #ifdef DEBUG_GLOBAL_TAINT
                     dbgs() << "addGlobalTaintSource(): Set the alias obj as taint source:\n";
                     dbgs() << "Object Type: " << InstructionUtils::getTypeStr(p->targetObject->targetType) << "\n";

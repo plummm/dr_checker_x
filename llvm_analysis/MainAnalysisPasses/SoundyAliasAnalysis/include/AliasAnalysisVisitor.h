@@ -123,14 +123,16 @@ namespace DRCHECKER {
          */
         std::set<PointerPointsTo*>* getPointsToObjects(Value *srcPointer);
         bool isPtoDuplicated(const PointerPointsTo *p0, const PointerPointsTo *p1, bool dbg);
-        bool matchPtoTy(Value *srcPointer, PointerPointsTo *pto);
-        bool matchPtoTy(Type *srcTy, PointerPointsTo *pto);
+        bool matchPtoTy(Value *srcPointer, PointerPointsTo *pto, Instruction *I = nullptr);
+        bool matchPtoTy(Type *srcTy, PointerPointsTo *pto, Instruction *I = nullptr);
         /***
          * Update points to information for the provided pointer.
          * @param srcPointer pointer whose points to information need to be updated.
          * @param newPointsToInfo the set of points to information for the provided pointer.
          */
         void updatePointsToObjects(Value *srcPointer, std::set<PointerPointsTo*>* newPointsToInfo);
+        //This is a wrapper for the single pto case.
+        void updatePointsToObjects(Value *p, AliasObject *obj, InstLoc *propInst = nullptr, long fid = 0, long dfid = 0, bool is_weak = false);
         /***
          * This function checks if the provided pointer has points to information.
          * @param srcPointer Pointer which needs to be checked for points to information.
@@ -153,7 +155,7 @@ namespace DRCHECKER {
         std::set<PointerPointsTo*>* makePointsToCopy_emb(Instruction *propInstruction, Value *srcPointer, Value *resPointer,
                                                      std::set<PointerPointsTo*>* srcPointsTo, long fieldId=-1, bool is_var_fid = false);
 
-        AliasObject *createEmbObj(AliasObject *hostObj, long host_dstFieldId, Value *v);
+        AliasObject *createEmbObj(AliasObject *hostObj, long fid, Value *v, Instruction *I = nullptr);
 
         /***
          * Merge points-to information of all the provided values.
@@ -196,10 +198,7 @@ namespace DRCHECKER {
         void handleInlinePointerOperand(Instruction &currIns, Value **srcPointer);
 
         //hz: A helper method to create and (taint) a new OutsideObject.
-        OutsideObject* createOutsideObj(Value *p, bool taint);
-
-        //hz: make a copy for the src AliasObject of a different type. 
-        AliasObject* x_type_obj_copy(AliasObject *srcObj, Type *dstType);
+        OutsideObject* createOutsideObj(Value *p, Instruction *I, bool taint);
 
         //hz:
         void processOneDimensionGEP(Instruction *propInst, GEPOperator *I);
