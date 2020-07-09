@@ -46,24 +46,14 @@ namespace DRCHECKER {
         if (!newObj) {
             return;
         }
-        std::set<TaintFlag*> *fieldTaint = this->getFieldTaintInfo(srcfieldId);
-        if(fieldTaint != nullptr) {
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-            dbgs() << "AliasObject::taintPointeeObj(): " << (const void*)this << " | " << srcfieldId << " (src) --> " << (const void*)newObj << " (sink)\n";
+        dbgs() << "AliasObject::taintPointeeObj(): " << (const void*)this << " | " << srcfieldId << " (src) --> " << (const void*)newObj << " (sink)\n";
 #endif
-            for(auto existingTaint : *fieldTaint) {
-                TaintFlag *newTaint = new TaintFlag(existingTaint,targetInstr);
-                newObj->taintAllFields(newTaint);
-            }
-        } else if (!this->all_contents_taint_flags.empty()) {
-            //Use the all_contents_taint flags.
-#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-            dbgs() << "AliasObject::taintPointeeObj(): " << (const void*)this << " | all_contents_taint (src) --> " << (const void*)newObj << " (sink)\n";
-#endif
-            for (TaintFlag *tf : this->all_contents_taint_flags) {
-                TaintFlag *newTaint = new TaintFlag(tf,targetInstr);
-                newObj->taintAllFields(newTaint);
-            }
+        std::set<TaintFlag*> tfs;
+        this->getFieldTaintInfo(srcfieldId,tfs,targetInstr);
+        for (TaintFlag *tf : tfs) {
+            TaintFlag *ntf = new TaintFlag(tf,targetInstr);
+            newObj->taintAllFields(ntf);
         }
         //If the host object is a global taint source, then we also set the newly created field pointee object as so.
         //TODO: justify this decision.
@@ -170,17 +160,15 @@ namespace DRCHECKER {
             }
         }
         for (ObjectPointsTo *pto : actPtos) {
-            if (pto->propagatingInst) {
-                if (loc->reachable(pto->propagatingInst,&blocklist)) {
-                    retPto->insert(pto);
-                }
-            }else {
-                //TODO: is it correct to conservatively add the pto records w/o update sites to the live pto set?
+            if (loc->reachable(pto->propagatingInst,&blocklist)) {
+                retPto->insert(pto);
+            }
+            //Null pto->propagatingInst will make the "pto" be treated as a preset global pto record, the below is just for logging.
+            if (!pto->propagatingInst) {
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
                 dbgs() << "!!! AliasObject::getLivePtos(): pto w/o update site info: ";
                 pto->print(dbgs());
 #endif
-                retPto->insert(pto);
             }
         }
         //Step 2: post-dom test - some pto records may "kill" others due to post-dom relationship.
@@ -621,8 +609,10 @@ namespace DRCHECKER {
                 if (e->is_weak != pto->is_weak) {
                     e->is_weak = false;
                 }
-                //Re-activate the existing pto due to the fact that a duplicated one is freshly inserted.
-                this->activateFieldPto(e,true);
+                //Re-activate the existing pto to the latest state of the freshly inserted pto (should be "active").
+                if (e->is_active != pto->is_active) {
+                    this->activateFieldPto(e,pto->is_active);
+                }
             }
             if (!is_dup) {
                 to_add.insert(pto);
@@ -807,34 +797,34 @@ namespace DRCHECKER {
                 //First if the host object is a taint source, then the emb obj is so too, we also need to set up the inherent taint flags for it,
                 //however, for the taint instruction trace in the flag we will just inherite from the host object instead of using the current one,
                 //because in theory, this emb object was immediately avaiable when creating the host object.
-                InstLoc *hloc = nullptr;
                 if (this->is_taint_src) {
 #ifdef DEBUG_CREATE_EMB_OBJ
                     dbgs() << "AliasObject::createEmbObj(): set the emb obj as a taint source since its host obj is so, is_taint_src: " << this->is_taint_src << "\n"; 
 #endif
-                    for (TaintFlag *tf : this->all_contents_taint_flags) {
-                        if (tf && tf->is_inherent) {
-                            hloc = tf->targetInstr;
-                            break;
-                        }
-                    }
-                    if (!hloc) {
+                    //NOTE: since our goal here is to extract the "loc" of the inherent taint flag for the host obj, not to get the current live taint flags,
+                    //we do not use the "getTf()" interface.
+                    TaintFlag *itf = this->all_contents_taint_flags.getInherentTf();
+                    if (itf && itf->targetInstr) {
+                        newObj->setAsTaintSrc(itf->targetInstr,(this->is_taint_src>0));
+                    }else {
 #ifdef DEBUG_CREATE_EMB_OBJ
                         dbgs() << "!!! AliasObject::createEmbObj(): cannot find the InstLoc in host inherent taint flag!\n"; 
 #endif
-                        hloc = loc;
+                        newObj->setAsTaintSrc(loc,(this->is_taint_src>0));
                     }
-                    newObj->setAsTaintSrc(hloc,(this->is_taint_src>0));
                 }
                 //Now propagate non-inherent flags in the host object, no need to propagate inherent ones since emb obj is a part of the host. 
+                //NOTE: these propagated TFs may override the previously set-up inherent TFs ("setAsTaintSrc"), which is just the correct and expected bahavior.
                 std::set<TaintFlag*> tfs;
-                this->getFieldTaintInfo(fid,&tfs,true);
+                this->getFieldTaintInfo(fid,tfs,loc);
 #ifdef DEBUG_CREATE_EMB_OBJ
                 dbgs() << "AliasObject::createEmbObj(): try to taint the emb obj (all fields), #TaintFlag: " << tfs.size() << "\n";
 #endif
                 for (TaintFlag *tf : tfs) {
                     //NOTE: we don't need to add current "loc" into the taint trace since this emb obj was tainted as early as the field.
-                    newObj->taintAllFields(tf);
+                    if (tf && !tf->is_inherent) {
+                        newObj->taintAllFields(tf);
+                    }
                 }
                 //Record it in the "embObjs".
                 this->embObjs[fid] = newObj;
@@ -910,19 +900,15 @@ namespace DRCHECKER {
 #ifdef DEBUG_CREATE_HOST_OBJ
                 dbgs() << "AliasObject::createHostObj(): set the host obj as a taint source since its one emb is, is_taint_src: " << this->is_taint_src << "\n"; 
 #endif
-                for (TaintFlag *tf : this->all_contents_taint_flags) {
-                    if (tf && tf->is_inherent) {
-                        eloc = tf->targetInstr;
-                        break;
-                    }
-                }
-                if (!eloc) {
+                TaintFlag *itf = this->all_contents_taint_flags.getInherentTf();
+                if (itf && itf->targetInstr) {
+                    hobj->setAsTaintSrc(itf->targetInstr,(this->is_taint_src>0));
+                }else {
 #ifdef DEBUG_CREATE_HOST_OBJ
                     dbgs() << "!!! AliasObject::createHostObj(): cannot find the InstLoc in emb inherent taint flag!\n"; 
 #endif
-                    eloc = loc;
+                    hobj->setAsTaintSrc(loc,(this->is_taint_src>0));
                 }
-                hobj->setAsTaintSrc(eloc,(this->is_taint_src>0));
             }
         }else {
 #ifdef DEBUG_CREATE_HOST_OBJ

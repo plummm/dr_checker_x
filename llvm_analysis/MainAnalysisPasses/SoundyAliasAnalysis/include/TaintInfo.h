@@ -16,6 +16,8 @@
 #include "../../Utils/include/CFGUtils.h"
 #include <vector>
 
+#define DEBUG_UPDATE_FIELD_TAINT
+
 using namespace llvm;
 namespace DRCHECKER {
 
@@ -213,9 +215,11 @@ namespace DRCHECKER {
             OS << "Obj: " << (const void*)this->priv << " Value: " << InstructionUtils::getValueStr(this->v) << "\n";
         }
 
-        void dumpInfo_light(raw_ostream &OS) {
-            OS << "Tag: " << (const void *)this;
-            OS << " Type: " << InstructionUtils::getTypeName(this->type) << " | " << this->fieldId << " is_global: " << this->is_global << " obj: " << (const void*)this->priv << "\n";
+        void dumpInfo_light(raw_ostream &OS, bool lbreak = true) {
+            OS << "TAG(" << (const void *)this << "):" << InstructionUtils::getTypeName(this->type) << "|" << this->fieldId << "(OBJ:" << (const void*)this->priv << ",G:" << this->is_global << ")";
+            if (lbreak) {
+                OS << "\n";
+            }
         }
 
         void printModInsts(raw_ostream &OS, std::map<BasicBlock*,std::set<uint64_t>> *switchMap) {
@@ -252,12 +256,14 @@ namespace DRCHECKER {
 
     public:
         //Constructors
-        TaintFlag(InstLoc *targetInstr, bool is_tainted, TaintTag *tag = nullptr) {
+        TaintFlag(InstLoc *targetInstr, bool is_tainted = true, TaintTag *tag = nullptr, bool is_weak = false) {
             assert(targetInstr != nullptr && "Target Instruction cannot be NULL");
             this->targetInstr = targetInstr;
             this->instructionTrace.push_back(targetInstr);
             this->is_tainted = is_tainted;
             this->tag = tag;
+            this->is_weak = is_weak;
+            this->is_active = true;
         }
 
         TaintFlag(TaintFlag *copyTaint, InstLoc *targetInstr) {
@@ -270,6 +276,8 @@ namespace DRCHECKER {
             this->addInstructionToTrace(targetInstr);
             //hz: tag propagation.
             this->tag = copyTaint->tag;
+            this->is_weak = copyTaint->is_weak;
+            this->is_active = copyTaint->is_active;
         }
 
         //hz: A copy w/ a different tag.
@@ -280,9 +288,10 @@ namespace DRCHECKER {
             this->instructionTrace.insert(instructionTrace.begin(),
                                           copyTaint->instructionTrace.begin(), copyTaint->instructionTrace.end());
             this->tag = tag;
+            this->is_weak = copyTaint->is_weak;
+            this->is_active = copyTaint->is_active;
         }
 
-        TaintFlag(InstLoc *targetInstr) : TaintFlag(targetInstr, false) {}
         //Destructors
         ~TaintFlag() {}
 
@@ -294,12 +303,14 @@ namespace DRCHECKER {
             return is_tainted;
         }
 
+        //NOTE: we don't consider the "is_weak" and "is_active" properties in the comparison now.
         bool isTaintEquals(const TaintFlag *dstTaint) const {
             if(dstTaint != nullptr) {
                 //hz: we consider the below three properties:
                 //(1) the targetInst of this taintFlag
                 //(2) whether it's tainted or not
                 //(3) the taint source, which is wrapped in our TaintTag class.
+                //(4) the taint path/trace
                 //These are properties we consider when comparing two taint flags.
                 //Property (1)
                 if (!this->targetInstr != !dstTaint->targetInstr) {
@@ -316,8 +327,20 @@ namespace DRCHECKER {
                 if (!this->tag != !dstTaint->tag) {
                     return false;
                 }
-                if (this->tag) {
-                    return this->tag->isTagEquals(dstTaint->tag);
+                if (this->tag && !this->tag->isTagEquals(dstTaint->tag)) {
+                    return false;
+                }
+                //Property (4):
+                if (this->instructionTrace.size() != dstTaint->instructionTrace.size()) {
+                    return false;
+                }
+                for (int i = 0; i < this->instructionTrace.size(); ++i) {
+                    if (!this->instructionTrace[i] != !dstTaint->instructionTrace[i]) {
+                        return false;
+                    }
+                    if (this->instructionTrace[i] && !(this->instructionTrace[i])->same(dstTaint->instructionTrace[i])) {
+                        return false;
+                    }
                 }
                 return true;
             }
@@ -341,6 +364,7 @@ namespace DRCHECKER {
         InstLoc *targetInstr;
         // trace of instructions that resulted in this taint.
         std::vector<InstLoc*> instructionTrace;
+        
         void dumpInfo(raw_ostream &OS) {
             OS << " Instruction Trace: [\n";
             for (InstLoc *inst : this->instructionTrace) {
@@ -349,12 +373,32 @@ namespace DRCHECKER {
                 }
             }
             OS << "]\n";
-            OS << "is_inherent: " << this->is_inherent << "\n";
+            OS << "is_inherent: " << this->is_inherent << " is_active: " << this->is_active << " is_weak: " << this->is_weak << "\n";
             //hz: dump tag information if any.
             if (this->tag) {
                 this->tag->dumpInfo(OS);
             }
 
+        }
+
+        //Output a compact info line of this TF, omitting the trace.
+        void dumpInfo_light(raw_ostream &OS, bool lbreak = true) {
+            //Print the tag info.
+            if (this->tag) {
+                this->tag->dumpInfo_light(OS,false);
+            }else {
+                OS << "NULL"
+            }
+            OS << " @ ";
+            //Print the target inst.
+            if (this->targetInstr) {
+                this->targetInstr->print_light(OS,false);
+            }
+            //Print states.
+            OS << " i/a/w: " << (int)this->is_inherent << "/" << (int)this->is_active << "/" << (int)this->is_weak;
+            if (lbreak) {
+                OS << "\n";
+            }
         }
 
         //hz: add taint tag support.
@@ -364,8 +408,15 @@ namespace DRCHECKER {
         //that the value itself is a taint source (i.e. an OutsideObject).
         bool is_inherent = false;
 
+        //Indicates whether the flag is currently in effect (e.g. it may be overwritten by another taint).
+        bool is_active = true;
+
+        //Indicates whether this is a weak taint flag (i.e. it may or may not taint the target value/field since the "may point-to" results yielded by the pointer analysis).
+        bool is_weak = false;
+
     private:
         // flag to indicate the taint flag.
+        //NOTE that if this is "false", we may treat it as a taint kill (sanitizer)..
         bool is_tainted;
 
     };
@@ -376,7 +427,7 @@ namespace DRCHECKER {
     class FieldTaint {
     public:
         long fieldId;
-        std::set<TaintFlag *> targetTaint;
+        std::set<TaintFlag*> targetTaint;
 
         FieldTaint(long srcField) {
             this->fieldId = srcField;
@@ -389,17 +440,158 @@ namespace DRCHECKER {
             }*/
         }
 
-        bool addTaintFlag(TaintFlag *toAdd) {
-            // check if the set already contains same taint?
-            if(std::find_if(targetTaint.begin(), targetTaint.end(), [toAdd](const TaintFlag *n) {
-                return  n->isTaintEquals(toAdd);
-            }) == targetTaint.end()) {
-                // if not insert the new taint flag into the newTaintInfo.
-                targetTaint.insert(targetTaint.end(), toAdd);
+        bool empty() {
+            return (this->targetTaint.size() == 0);
+        }
+
+        //Insert a TaintFlag to the existing TF set, there are multiple things we need to consider:
+        //(1) duplication
+        //(2) whether the new TF will block/mask any old TFs (e.g. post-dominate).
+        //This is very similar to the logic of "updateFieldPointsTo" in the Alias Analysis, we also need to rely on memory SSA.
+        bool addTf(TaintFlag *ntf) {
+#ifdef DEBUG_UPDATE_FIELD_TAINT
+            dbgs() << "FieldTaint::addTf(): add TF for field " << this->fieldId << "\n";
+#endif
+            if (!ntf) {
+#ifdef DEBUG_UPDATE_FIELD_TAINT
+                dbgs() << "FieldTaint::addTf(): null new TF!\n";
+#endif
+                return false;
+            }
+            bool is_dup = false;
+            std::set<TaintFlag*> to_del;
+            for (TaintFlag *tf : this->targetTaint) {
+                if (!tf) {
+                    continue;
+                }
+                if (tf->is_active && ntf->is_active && !ntf->is_weak) {
+                    //Strong taint, see whether it will kill/override the existing taint.
+                    if (ntf->targetInstr && ntf->targetInstr->postDom(tf->targetInstr)) {
+                        to_del.insert(tf);
+                    }
+                }
+                if (is_dup || (tf != ntf && !ntf->isTaintEquals(tf))) {
+                    continue;
+                }
+                //Ok, we already have an exactly same taint flag.
+                is_dup = true;
+                //TODO: justify the decision to update the "is_weak" to the strongest value...
+                if (ntf->is_weak != tf->is_weak) {
+                    tf->is_weak = false;
+                }
+                //Update the active state to the latest.
+                tf->is_active = ntf->is_active;
+            }
+            if (!is_dup) {
+                //Insert the new TF.
+                this->targetTaint.insert(ntf);
+#ifdef DEBUG_UPDATE_FIELD_TAINT
+                dbgs() << "FieldTaint::addTf(): +++TF: ";
+                ntf->dumpInfo_light(dbgs());
+#endif
+            }
+            //De-activate the overriden TFs, if any.
+            for (TaintFlag *tf : to_del) {
+                tf->is_active = false;
+#ifdef DEBUG_UPDATE_FIELD_TAINT
+                dbgs() << "FieldTaint::addTf(): ---TF: ";
+                tf->dumpInfo_light(dbgs());
+#endif
+            }
+#ifdef DEBUG_UPDATE_FIELD_TAINT
+            dbgs() << "FieldTaint::addTf(): post-stats: ";
+            this->logFieldTaint(dbgs());
+#endif
+            return !is_dup;
+        }
+
+        //Get the TFs that are valid at the "loc" (e.g. some TFs may be overridden by the others).
+        //The logic is similar to "fetchFieldPointsTo" in the Alias Analysis.
+        bool getTf(InstLoc *loc, std::set<TaintFlag*> &r) {
+#ifdef DEBUG_UPDATE_FIELD_TAINT
+            dbgs() << "FieldTaint::getTf(): fetch taint for field: " << this->fieldId << "\n";
+#endif
+            //First get all active TFs and blockers.
+            std::set<InstLoc*> blocklist;
+            std::set<TaintFlag*> actTf;
+            for (TaintFlag *tf : this->targetTaint) {
+                if (!tf || !tf->is_active) {
+                    continue;
+                }
+                actTf.insert(tf);
+                if (tf->targetInstr && !tf->is_weak) {
+                    blocklist.insert(tf->targetInstr);
+                }
+            }
+            //Get the live TFs at the "loc"..
+            if (!loc) {
+#ifdef DEBUG_UPDATE_FIELD_TAINT
+                dbgs() << "FieldTaint::getTf(): null target loc! Return all active TFs: " << actTf.size() << "\n";
+#endif
+                r.insert(actTf.begin(),actTf.end());
                 return true;
             }
-            return false;
+            for (TaintFlag *tf : actTf) {
+                //NOTE that if "tf->targetInstr" is null, the TF will treated as a pre-set global TF.
+                if (loc->reachable(tf->targetInstr,&blocklist)) {
+                    r.insert(tf);
+                }
+                //For logging..
+                if (!tf->targetInstr) {
+#ifdef DEBUG_UPDATE_FIELD_TAINT
+                    dbgs() << "!!! FieldTaint::getTf(): TF w/o targetInstr: ";
+                    tf->dumpInfo_light(dbgs());
+#endif
+                }
+            }
+#ifdef DEBUG_UPDATE_FIELD_TAINT
+            dbgs() << "FieldTaint::getTf(): final stats: total/act/ret: " << this->targetTaint.size() << "/" << actTf.size() << "/" << r.size() << "\n";
+#endif
+            return true;
         }
+
+        //This method simply returns all inherent TFs w/o considering the current "loc" and memory SSA,
+        //this can be useful since inherent TFs are special and in some scenarios we may need access them.
+        //NOTE: in theory there can be only one inherent TF for each object or field, we use such a "return set" interface just for safe.
+        bool getInherentTf(std::set<TaintFlag*> &r) {
+            for (TaintFlag *tf : this->targetTaint) {
+                if (tf && tf->is_inherent) {
+                    r.insert(tf);
+                }
+            }
+            return !!r.size();
+        }
+
+        TaintFlag *getInherentTf() {
+            for (TaintFlag *tf : this->targetTaint) {
+                if (tf && tf->is_inherent) {
+                    return tf;
+                }
+            }
+            return nullptr;
+        }
+
+        void logFieldTaint(raw_ostream &O, bool lbreak = true) {
+            int act = inh = wea = 0;
+            for (TaintFlag *tf : this->targetTaint) {
+                if (!tf) {
+                    continue;
+                }
+                if (tf->is_active) {
+                    ++act;
+                }
+                if (tf->is_inherent) {
+                    ++inh;
+                }
+                if (tf->is_weak) {
+                    ++wea;
+                }
+            }
+            O << "total/act/inh/weak: " << this->targetTaint.size() << "/" << act << "/" << inh << "/" << wea;
+            if (lbreak) {
+                O << "\n";
+            }
+         }
 
     };
 

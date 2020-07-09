@@ -59,45 +59,36 @@ namespace DRCHECKER {
 #ifdef DEBUG_STORE_INST
             dbgs() << "ModAnalysisVisitor::visitStoreInst(): Found one taint-src objects!\n";
 #endif
-            //Ok, the dst pointer points to a taint-src object, which means current "store"
-            //instruction can potentially modify a global state.
-            //We need to record current store instruction to the correlated taint tag.
-            std::set<TaintFlag*> *fieldTaint = dstObj->getFieldTaintInfo(target_field);
-            if(fieldTaint != nullptr) {
-                for (auto existingTaint : *fieldTaint) {
-                    if (existingTaint && existingTaint->tag){
-                        TaintTag *tag = existingTaint->tag;
-                        //We should only record the mod inst to the original taint tag of the taint src object. 
-                        //TODO: consider to refer to the ->inherent flag.
-                        if (tag->v != dstObj->getValue() || tag->fieldId != target_field) {
-                            continue;
-                        }
-                        //Record current instruction in the tag mod inst list.
-#ifdef DEBUG_STORE_INST
-                        dbgs() << "Add to mod_inst_list (fieldTaint): " << InstructionUtils::getValueStr(&I) << "\n";
-                        tag->dumpInfo(dbgs());
-#endif
-                        tag->insertModInst(&I,this->actx->callSites);
-                    }
+            //Ok, the dst pointer points to a taint-src object, which means current "store" instruction can potentially modify a global state.
+            //We need to record current store instruction to the correlated taint tag representing this taint-src object|field.
+            //To get this "tag", we need to find the inherent taint flag of the taint-src object|field.
+            FieldTaint *ft = dstObj->getFieldTaint(target_field);
+            TaintTag *tag = nullptr;
+            if (ft) {
+                TaintFlag *tf = ft->getInherentTf();
+                if (tf) {
+                    tag = tf->tag;
                 }
-            } else {
-                //We have no taint flags for the individual fields, is this possible???
-                //Anyway, try to record the instruction in the shared taint flag then.
-                if (!dstObj->all_contents_taint_flags.empty()) {
-                    for (auto existingTaint : dstObj->all_contents_taint_flags) {
-                        if (existingTaint && existingTaint->tag && existingTaint->tag->v == dstObj->getValue()) {
+            }
+            if (!tag) {
 #ifdef DEBUG_STORE_INST
-                            dbgs() << "Add to mod_inst_list (all_contents_taint_flags): " << InstructionUtils::getValueStr(&I) << "\n";
+                dbgs() << "ModAnalysisVisitor::visitStoreInst(): Failed to get the tag from FieldTaint, try all_contents_taint_flags now...\n";
 #endif
-                            existingTaint->tag->insertModInst(&I,this->actx->callSites);
-                        }
-                    }
-                }else {
-#ifdef DEBUG_STORE_INST
-                    dbgs() << "ModAnalysisVisitor::visitStoreInst(): No all_contents_taint_flags!!\n";
-#endif
-                    continue;
+                TaintFlag *tf = dstObj->all_contents_taint_flags.getInherentTf();
+                if (tf) {
+                    tag = tf->tag;
                 }
+            }
+            if (tag) {
+#ifdef DEBUG_STORE_INST
+                dbgs() << "Add to mod_inst_list: " << InstructionUtils::getValueStr(&I) << "\n";
+                tag->dumpInfo(dbgs());
+#endif
+                tag->insertModInst(&I,this->actx->callSites);
+            }else {
+#ifdef DEBUG_STORE_INST
+                dbgs() << "ModAnalysisVisitor::visitStoreInst(): Cannot locate the Taint Tag for the dst object and field!!\n";
+#endif
             }
         }
         //Analyze the update pattern.

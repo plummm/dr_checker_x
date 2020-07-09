@@ -596,14 +596,13 @@ namespace DRCHECKER {
     }
 
     //Some code are borrowed from llvm 11.0, since lower version llvm may not have "dominates()" for two instructions. 
-    bool BBTraversalHelper::instPostDom(Instruction *src, Instruction *end) {
+    bool BBTraversalHelper::instPostDom(Instruction *src, Instruction *end, bool is_strict) {
         if (!end || !src || end->getFunction() != src->getFunction()) {
             return false;
         }
         BasicBlock *bsrc = src->getParent();
         BasicBlock *bend = end->getParent();
         if (bsrc != bend) {
-            //
             Function *func = end->getFunction();
             llvm::PostDominatorTree *pdom = BBTraversalHelper::getPostDomTree(func);
             if (!pdom) {
@@ -612,6 +611,9 @@ namespace DRCHECKER {
             return pdom->dominates(bend,bsrc);
         }
         //Ok they are within the same BB, we simply look at their relative order.
+        if (src == end) {
+            return !is_strict;
+        }
         // PHINodes in a block are unordered.
         if (isa<PHINode>(src) && isa<PHINode>(end))
             return false;
@@ -635,7 +637,7 @@ namespace DRCHECKER {
                 O << "[";
                 std::string lastFunc;
                 for (Instruction *inst : *this->ctx) {
-                    if (inst && inst->getFunction()) {
+                    if (inst && inst->getParent() && inst->getFunction()) {
                         std::string func = inst->getFunction()->getName().str();
                         //TODO: self-recursive invocation
                         if (func != lastFunc) {
@@ -649,11 +651,34 @@ namespace DRCHECKER {
         }
     }
 
+    void InstLoc::print_light(raw_ostream &O, bool lbreak) {
+        if (this->inst) {
+            O << InstructionUtils::getValueStr(this->inst);
+            O << " (";
+            if (this->ctx && this->ctx->size() > 0) {
+                std::string lastFunc;
+                for (Instruction *inst : *this->ctx) {
+                    if (inst && inst->getParent() && inst->getFunction()) {
+                        std::string func = inst->getFunction()->getName().str();
+                        if (func != lastFunc) {
+                            O << func << " -> ";
+                            lastFunc = func;
+                        }
+                    }
+                }
+            }
+            O << ")";
+        }
+        if (lbreak) {
+            O << "\n";
+        }
+    }
+
     //Different from the normal post-dom algorithm for two instructions within a same function, here we consider
     //the post-dom relationship for two InstLoc (i.e. instructions plus their full calling contexts), so if InstLoc A
     //post-dom InstLoc B, that means all execution flows from InstLoc B will eventually reach InstLoc A w/ its specific
     //calling contexts.
-    bool InstLoc::postDom(InstLoc *other) {
+    bool InstLoc::postDom(InstLoc *other, bool is_strict) {
         if (!other) {
             return false;
         }
@@ -699,7 +724,9 @@ namespace DRCHECKER {
 #endif
                     return false;
                 }
-                return BBTraversalHelper::instPostDom(src,end);
+                //NOTE: the "is_strict" only makes sense when two InstLoc are exactly the same, if that happens here is the only point we can reach
+                //and need to honor the "is_strict" flag in "instPostDom".
+                return BBTraversalHelper::instPostDom(src,end,is_strict);
             }
             if (ip >= other->ctx->size()) {
                 //This must be case 1.3. We may still need to inspect the remaining "this" context.
@@ -802,10 +829,8 @@ namespace DRCHECKER {
 
     //Whether "other" can reach "this", inter-procedually.
     bool InstLoc::reachable(InstLoc *other, std::set<InstLoc*> *blocklist) {
-        if (!other) {
-            return false;
-        }
-        if (!other->hasCtx()) {
+        //NOTE: if "other" is nullptr or has a null ctx, we treat it as a global position.
+        if (!other || !other->hasCtx()) {
             //This means the "other" is a global var and and in theory can reach every inst inside functions,
             //but still we need to consider whether the blocklist (if any) is in the way.
             if (!blocklist || blocklist->empty()) {

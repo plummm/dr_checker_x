@@ -99,8 +99,11 @@ namespace DRCHECKER {
 
         void print(raw_ostream &O);
 
+        //One line compact output of this InstLoc.
+        void print_light(raw_ostream &O, bool lbreak = true);
+
         //Return true if this InstLoc post-dominates the "other" InstLoc.
-        bool postDom(InstLoc *other);
+        bool postDom(InstLoc *other, bool is_strict = true);
 
         //Return true if this is reachable from the "other" InstLoc, under the presence of the blocking instructions in the "blocklist".
         bool reachable(InstLoc *other, std::set<InstLoc*> *blocklist = nullptr);
@@ -162,7 +165,7 @@ namespace DRCHECKER {
         static llvm::PostDominatorTree *getPostDomTree(llvm::Function*);
 
         //We assume src and end are within the same function.
-        static bool instPostDom(Instruction *src, Instruction *end);
+        static bool instPostDom(Instruction *src, Instruction *end, bool is_strict = false);
 
         //Get all dom nodes for all return sites (i.e. in order to return we must pass these nodes).
         static void getDomsForRet(llvm::Function* pfunc, std::set<llvm::BasicBlock*> &ret);

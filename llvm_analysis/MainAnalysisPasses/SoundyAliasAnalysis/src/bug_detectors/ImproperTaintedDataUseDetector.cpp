@@ -190,9 +190,10 @@ namespace DRCHECKER {
                         if (!currPtTo || !currPtTo->targetObject) {
                             continue;
                         }
-                        std::set<TaintFlag*> *currTaintSet = currPtTo->targetObject->getFieldTaintInfo(currPtTo->dstfieldId);
-                        if(currTaintSet != nullptr) {
-                            for(TaintFlag *currTaint : *currTaintSet) {
+                        std::set<TaintFlag*> currTaintSet;
+                        currPtTo->targetObject->getFieldTaintInfo(currPtTo->dstfieldId,currTaintSet,new InstLoc(&I,this->currFuncCallSites1));
+                        if (currTaintSet.size()) {
+                            for(TaintFlag *currTaint : currTaintSet) {
                                 if (!currTaint) {
                                     continue;
                                 }

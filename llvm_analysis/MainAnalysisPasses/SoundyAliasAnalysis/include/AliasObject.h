@@ -29,7 +29,6 @@ using namespace llvm;
 #define DEBUG_FETCH_POINTS_TO_OBJECTS
 #define DEBUG_CHANGE_HEAPLOCATIONTYPE
 #define DEBUG_UPDATE_FIELD_POINT
-#define DEBUG_UPDATE_FIELD_TAINT
 #define DEBUG_CREATE_DUMMY_OBJ_IF_NULL
 #define DEBUG_CREATE_EMB_OBJ
 #define DEBUG_CREATE_EMB_OBJ
@@ -234,8 +233,8 @@ namespace DRCHECKER {
 
         bool auto_generated = false;
 
-        //Hold the taint flags that are effective for all fields.
-        std::set<TaintFlag*> all_contents_taint_flags;
+        //Hold the taint flags that are effective for all fields, we use a special "FieldTaint" (fid=-1) for it.
+        FieldTaint all_contents_taint_flags(-1);
 
         // flag which indicates whether the object is initialized or not.
         // by default every object is initialized.
@@ -669,35 +668,15 @@ namespace DRCHECKER {
 
         //TaintInfo helpers start
 
-        /***
-         * Get the set of taint flag of the provided field.
-         * @param srcfieldId field id for which taint need to be fetched.
-         * @return set of taint flags.
-         */
-        //NOTE: if "no_inherent" is "true", the "r" cannot be null.
-        std::set<TaintFlag*> *getFieldTaintInfo(long fid, std::set<TaintFlag*> *r = nullptr, bool no_inherent = false) {
+        //This is basically a wrapper of "getTf" in FieldTaint..
+        void getFieldTaintInfo(long fid, std::set<TaintFlag*> &r, InstLoc *loc = nullptr) {
             FieldTaint *targetFieldTaint = this->getFieldTaint(fid);
-            if (!no_inherent) {
-                if(targetFieldTaint != nullptr) {
-                    return &(targetFieldTaint->targetTaint);
-                } else if (!this->all_contents_taint_flags.empty()) {
-                    return &(this->all_contents_taint_flags);
-                }
-            }else if (r) {
-                if(targetFieldTaint != nullptr) {
-                    r->insert(targetFieldTaint->targetTaint.begin(),targetFieldTaint->targetTaint.end());
-                } else if (!this->all_contents_taint_flags.empty()) {
-                    r->insert(this->all_contents_taint_flags.begin(),this->all_contents_taint_flags.end());
-                }
-                for (auto it = r->begin(); it != r->end(); ) {
-                    if ((*it)->is_inherent) {
-                        it = r->erase(it);
-                    }else {
-                        ++it;
-                    }
-                }
+            if (targetFieldTaint) {
+                targetFieldTaint->getTf(loc,r);
+            }else if (!this->all_contents_taint_flags.empty()) {
+                this->all_contents_taint_flags.getTf(loc,r);
             }
-            return nullptr;
+            return;
         }
 
         /***
@@ -712,39 +691,22 @@ namespace DRCHECKER {
             dbgs() << "AliasObject::addFieldTaintFlag(): " << InstructionUtils::getTypeStr(this->targetType) << " | " << srcfieldId << " obj: " << (const void*)this << "\n";
 #endif
             FieldTaint *targetFieldTaint = this->getFieldTaint(srcfieldId);
-            if(targetFieldTaint == nullptr) {
+            if (targetFieldTaint == nullptr) {
 #ifdef DEBUG_UPDATE_FIELD_TAINT
                 dbgs() << "AliasObject::addFieldTaintFlag(): No field taint exists for this field.\n";
 #endif
                 targetFieldTaint = new FieldTaint(srcfieldId);
                 this->taintedFields.push_back(targetFieldTaint);
             }
-            if (targetFieldTaint->addTaintFlag(targetTaintFlag)) {
-#ifdef DEBUG_UPDATE_FIELD_TAINT
-                if (targetTaintFlag->tag) {
-                    dbgs() << "++++TAG: ";
-                    targetTaintFlag->tag->dumpInfo_light(dbgs());
-                }
-#endif
-                return true;
-            }
-            return false;
+            return targetFieldTaint->addTf(targetTaintFlag);
         }
 
+        //This is just a wrapper for convenience and compatibility.
         bool addAllContentTaintFlag(TaintFlag *tf) {
             if (!tf) {
                 return false;
             }
-            for (TaintFlag *t : this->all_contents_taint_flags) {
-                if (!t) {
-                    continue;
-                }
-                if (t == tf || t->isTaintEquals(tf)) {
-                    return false;
-                }
-            }
-            this->all_contents_taint_flags.insert(tf);
-            return true;
+            return this->all_contents_taint_flags.addTf(tf);
         }
 
         /***
@@ -761,7 +723,7 @@ namespace DRCHECKER {
 #ifdef DEBUG_UPDATE_FIELD_TAINT
                     dbgs() << "AliasObject::taintAllFields(): Adding taint to field:" << fieldId << "\n";
 #endif
-                    addFieldTaintFlag(fieldId, targetTaintFlag);
+                    this->addFieldTaintFlag(fieldId, targetTaintFlag);
                 }
                 return true;
             }
@@ -858,9 +820,18 @@ namespace DRCHECKER {
             this->targetType = ty;
             //Sync the "all_contents_taint_flags" w/ the newly available individual fields.
             if (!this->all_contents_taint_flags.empty()) {
+                std::set<TaintFlag*> all_tfs;
+                this->all_contents_taint_flags.getTf(loc,all_tfs);
+                if (all_tfs.empty()) {
+                    return;
+                }
+#ifdef DEBUG_UPDATE_FIELD_TAINT
+                dbgs() << "AliasObject::reset(): re-sync the all_contents_taint_flags to each field in reset obj: " << (const void*)this << "\n";
+#endif
+                //NOTE that we cannot directly use "taintAllFields" here since it requires that the TF is not previously in "all_contents_taint_flags".
                 std::set<long> allAvailableFields = this->getAllAvailableFields();
                 for (auto fieldId : allAvailableFields) {
-                    for (TaintFlag *tf : this->all_contents_taint_flags) {
+                    for (TaintFlag *tf : all_tfs) {
 #ifdef DEBUG_UPDATE_FIELD_TAINT
                         dbgs() << "AliasObject::reset(): Adding taint to: " << (const void*)this << " | " << fieldId << "\n";
 #endif

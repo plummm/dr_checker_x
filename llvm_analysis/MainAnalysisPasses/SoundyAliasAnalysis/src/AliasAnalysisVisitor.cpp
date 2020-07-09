@@ -818,19 +818,8 @@ void AliasAnalysisVisitor::visitCastInst(CastInst &I) {
                     //This is often the case for kmalloc'ed() memory region which is initially i8* and then used as a struct storage.
                     if (dyn_cast<CompositeType>(dstPointeeTy)) {
 #ifdef DEBUG_CAST_INSTR
-                        dbgs() << "AliasAnalysisVisitor::visitCastInst(): casting a non-composite pointer to a composite one, directly change the targetObject's type...\n";
-#endif
-                        //We also need to re-taint the object (if necessary) since its type has changed.
-                        std::set<TaintFlag*> *fieldTaint = newPointsToObj->targetObject->getFieldTaintInfo(0);
-                        //Since there is only one field, the field taint should also be the all_content_taint, make sure this is true.
-                        if (fieldTaint) {
-                            for (TaintFlag *tf : *fieldTaint) {
-                                newPointsToObj->targetObject->addAllContentTaintFlag(tf);
-                            }
-                        }
-                        //Change the object value and type, and sync the existing TaintFlag(s) to new fields.
-#ifdef DEBUG_CAST_INSTR
-                        dbgs() << "AliasAnalysisVisitor::visitCastInst(): trying to re-taint the casted AliasObject, #Taint: " << newPointsToObj->targetObject->all_contents_taint_flags.size() << "\n";
+                        dbgs() << "AliasAnalysisVisitor::visitCastInst(): casting a non-composite obj to a composite one, directly change obj's type...\n";
+                        dbgs() << "AliasAnalysisVisitor::visitCastInst(): reset the casted obj, w/ new type/value, and sync all_content_taint flags to newly available fields.\n";
 #endif
                         newPointsToObj->targetObject->reset(&I,dstPointeeTy,new InstLoc(&I,this->currFuncCallSites));
                     }else {

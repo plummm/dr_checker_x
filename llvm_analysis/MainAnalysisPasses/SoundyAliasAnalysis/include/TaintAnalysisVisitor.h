@@ -110,8 +110,9 @@ namespace DRCHECKER {
          *
          * @param targetVal
          * @param retTaintFlag
+         * @param I
          */
-        void getPtrTaintInfo(Value *targetVal, std::set<TaintFlag*> &retTaintFlag);
+        void getPtrTaintInfo(Value *targetVal, std::set<TaintFlag*> &retTaintFlag, Instruction *I);
 
         /***
          * Update the taint information of the provided value by the the set of flags.

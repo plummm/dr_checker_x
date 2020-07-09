@@ -26,17 +26,20 @@ namespace DRCHECKER {
         return TaintUtils::getTaintInfo(this->currState, this->currFuncCallSites, targetVal);
     }
 
-    void TaintAnalysisVisitor::getPtrTaintInfo(Value *targetVal, std::set<TaintFlag*> &retTaintFlag) {
+    //"I" is the inst site where need the ptr taint info. 
+    void TaintAnalysisVisitor::getPtrTaintInfo(Value *targetVal, std::set<TaintFlag*> &retTaintFlag, Instruction *I) {
         std::set<PointerPointsTo*> currValPointsTo;
         std::set<PointerPointsTo*> *currPtsTo = PointsToUtils::getPointsToObjects(this->currState, this->currFuncCallSites, targetVal);
         if(currPtsTo != nullptr) {
             currValPointsTo.insert(currPtsTo->begin(), currPtsTo->end());
         }
 
-        for(PointerPointsTo *currPtTo: currValPointsTo) {
-            std::set<TaintFlag *> *currTaintSet = currPtTo->targetObject->getFieldTaintInfo(currPtTo->dstfieldId);
-            if(currTaintSet != nullptr) {
-                for(auto a: *currTaintSet) {
+        InstLoc *loc = this->makeInstLoc(I);
+        for(PointerPointsTo *currPtTo : currValPointsTo) {
+            std::set<TaintFlag*> currTaintSet;
+            currPtTo->targetObject->getFieldTaintInfo(currPtTo->dstfieldId,currTaintSet,loc);
+            if (currTaintSet.size()) {
+                for(auto a : currTaintSet) {
                     if(std::find_if(retTaintFlag.begin(), retTaintFlag.end(), [a](const TaintFlag *n) {
                         return  n->isTaintEquals(a);
                     }) == retTaintFlag.end()) {
@@ -320,14 +323,15 @@ namespace DRCHECKER {
                 long currFieldID = fieldObject.first;
                 AliasObject *currObject = fieldObject.second;
                 // get the taint info of the field.
-                std::set<TaintFlag *> *fieldTaintInfo = currObject->getFieldTaintInfo(currFieldID);
+                std::set<TaintFlag*> fieldTaintInfo;
+                currObject->getFieldTaintInfo(currFieldID,fieldTaintInfo,this->makeInstLoc(&I));
 #ifdef DEBUG_LOAD_INSTR
                 dbgs() << "Trying to get taint from object: " << (const void*)currObject << " fieldID:" << currFieldID << "\n";
 #endif
                 // if the field is tainted, add the taint from the field
                 // to the result of this instruction.
-                if (fieldTaintInfo != nullptr) {
-                    this->makeTaintInfoCopy(&I, fieldTaintInfo, newTaintInfo);
+                if (fieldTaintInfo.size()) {
+                    this->makeTaintInfoCopy(&I, &fieldTaintInfo, newTaintInfo);
                 } else {
 #ifdef DEBUG_LOAD_INSTR
                     dbgs() << "No taint information available!\n";
@@ -613,7 +617,7 @@ namespace DRCHECKER {
             // propagate that to the return value.
             std::set<TaintFlag*> allPointerTaint;
             allPointerTaint.clear();
-            this->getPtrTaintInfo(I.getArgOperand(0), allPointerTaint);
+            this->getPtrTaintInfo(I.getArgOperand(0), allPointerTaint, &I);
             if(!allPointerTaint.empty()) {
                 std::set<TaintFlag*> *newTaintSet = this->makeTaintInfoCopy(&I, &allPointerTaint);
                 this->updateTaintInfo(&I, newTaintSet);
@@ -624,7 +628,7 @@ namespace DRCHECKER {
             // if yes? get the taint of the object pointed by the first argument.
             std::set<TaintFlag*> allPointerTaint;
             allPointerTaint.clear();
-            this->getPtrTaintInfo(I.getArgOperand(0), allPointerTaint);
+            this->getPtrTaintInfo(I.getArgOperand(0), allPointerTaint, &I);
             if(!allPointerTaint.empty()) {
                 std::set<TaintFlag*> *newTaintSet = this->makeTaintInfoCopy(&I, &allPointerTaint);
 
@@ -723,7 +727,7 @@ namespace DRCHECKER {
             }
             std::set<TaintFlag*> *currRetTaintInfo = getTaintInfo(targetRetVal);
 
-            for(auto a:*currRetTaintInfo) {
+            for(auto a : *currRetTaintInfo) {
                 if(std::find_if(this->retValTaints.begin(), this->retValTaints.end(), [a](const TaintFlag *n) {
                     return  n->isTaintEquals(a);
                 }) == this->retValTaints.end()) {
@@ -734,9 +738,7 @@ namespace DRCHECKER {
 
         } else {
 #ifdef DEBUG_RET_INSTR
-            dbgs() << "Return value:";
-            I.print(dbgs());
-            dbgs() << ", does not have TaintFlag.\n";
+            dbgs() << "Return value: " << InstructionUtils::getValueStr(&I) << ", does not have TaintFlag.\n";
 #endif
         }
     }
