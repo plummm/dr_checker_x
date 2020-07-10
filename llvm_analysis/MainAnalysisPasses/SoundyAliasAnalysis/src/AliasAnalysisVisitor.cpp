@@ -72,6 +72,7 @@ namespace DRCHECKER {
                         }
                         //TODO: in theory we need to test whether the new taint trace is valid (i.e. reachability), we omit it now since
                         //it's less likely that the taint on the pointer cannot reach its pointee..
+                        //NOTE: "is_weak" is inherited.
                         TaintFlag *ntf = new TaintFlag(tf,loc);
                         robj->taintAllFields(ntf);
                     }

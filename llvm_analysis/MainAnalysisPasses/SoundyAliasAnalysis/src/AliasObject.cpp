@@ -52,7 +52,9 @@ namespace DRCHECKER {
         std::set<TaintFlag*> tfs;
         this->getFieldTaintInfo(srcfieldId,tfs,targetInstr);
         for (TaintFlag *tf : tfs) {
+            //NOTE: no need to check taint path again here since "getFieldTaintInfo" already ensure its validity.
             TaintFlag *ntf = new TaintFlag(tf,targetInstr);
+            //NOTE: "is_weak" is inherited.
             newObj->taintAllFields(ntf);
         }
         //If the host object is a global taint source, then we also set the newly created field pointee object as so.
@@ -73,12 +75,24 @@ namespace DRCHECKER {
     }
 
     //We have switched to a different level 0 entry function, need to reset the activation status of the ptos.
+    //(1) deactivate those active pto records set up when analyzing the previous entry functions.
+    //(2) re-activate those inactive preset pto records (e.g. global struct definition) killed by last entry function.
     void AliasObject::resetPtos(long fid, Instruction *entry) {
+        assert(entry && "reset must be invoked w/ a non-null entry inst!!!");
+        if (this->lastPtoReset.find(fid) == this->lastPtoReset.end()) {
+            this->lastPtoReset[fid] = entry;
+        }
+        if (this->lastPtoReset[fid] == entry) {
+            //We're still within the same top-level entry function, no need to reset.
+            return;
+        }
+        //Ok, we need to do the reactivation..
 #ifdef DEBUG_UPDATE_FIELD_POINT
         dbgs() << "AliasObject::resetPtos(): Reset field pto for: " << (const void*)this << " | " << fid;
         dbgs() << ", switch entry to: ";
         InstructionUtils::printInst(entry,dbgs());
 #endif
+        this->lastPtoReset[fid] = entry;
         if (this->pointsTo.find(fid) == this->pointsTo.end()) {
             return;
         }
@@ -93,6 +107,7 @@ namespace DRCHECKER {
                     dbgs() << "AliasObject::resetPtos(): de-activate point-to: ";
                     pto->print(dbgs());
 #endif
+                    continue;
                 }
                 if (!pto->is_active && !pil->hasCtx()) {
                     //This is a deactivated global preset pto, need to re-activate it since we're on a new entry.
@@ -116,26 +131,6 @@ namespace DRCHECKER {
             dbgs() << "AliasObject::getLivePtos(): !srcPto || !retPto || !loc\n";
 #endif
             return;
-        }
-        //Reactivation check: if there has been a level 0 entry function change (e.g. we have finished analyzing ioctl_0 and started
-        //ioctl_1) since last update to the field pto set, we then need to:
-        //(1) deactivate those active pto records set up when analyzing the previous entry functions.
-        //(2) re-activate those inactive preset pto records (e.g. global struct definition) killed by last entry function.
-        //The criteria: when there exists any active pto record whose update site belongs to a different level 0 entry than "loc".
-        if (loc->hasCtx() && (*loc->ctx)[0]) {
-            for (ObjectPointsTo *pto : *srcPto) {
-                if (pto && pto->is_active && pto->propagatingInst) {
-                    InstLoc *pil = pto->propagatingInst;
-                    if (pil->hasCtx() && (*pil->ctx)[0] && (*loc->ctx)[0] != (*pil->ctx)[0]) {
-                        //Do the reactivation..
-#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-                        dbgs() << "AliasObject::getLivePtos(): Reset the field pto due to level 0 entry switch!\n";
-#endif
-                        this->resetPtos(fid,(*loc->ctx)[0]);
-                        break;
-                    }
-                }
-            }
         }
         int stCnt = retPto->size();
         //Preliminary processing: filter out the inactive pto records.
@@ -287,6 +282,11 @@ namespace DRCHECKER {
         if (host != this) {
             //This means what we need to fetch is in an embedded field obj at the original "srcfieldId", so the new field should be 0 in the emb obj.
             srcfieldId = 0;
+        }
+        //Reactivation check: if there has been a level 0 entry function change (e.g. we have finished analyzing ioctl_0 and started
+        //ioctl_1) since last update to the field pto set, we then need a reset.
+        if (currInst && currInst->hasCtx() && (*currInst->ctx)[0]) {
+            host->resetPtos(srcfieldId,(*currInst->ctx)[0]);
         }
         //Fetch the pto from the specified field...
         bool hasObjects = false;
@@ -520,6 +520,12 @@ namespace DRCHECKER {
             dbgs() << "!!! updateFieldPointsTo(): null type info for this host obj!\n";
 #endif
         }
+        //Reactivation check: if there has been a level 0 entry function change (e.g. we have finished analyzing ioctl_0 and started
+        //ioctl_1) since last update to the field pto set, we then need a reset.
+        if (propagatingInstr && propagatingInstr->hasCtx() && (*propagatingInstr->ctx)[0]) {
+            host->resetPtos(srcfieldId,(*propagatingInstr->ctx)[0]);
+        }
+        //Do the dirty work..
         host->updateFieldPointsTo_do(srcfieldId,dstPointsTo,propagatingInstr,is_weak);
     }
 
@@ -822,7 +828,9 @@ namespace DRCHECKER {
 #endif
                 for (TaintFlag *tf : tfs) {
                     //NOTE: we don't need to add current "loc" into the taint trace since this emb obj was tainted as early as the field.
+                    //And no worry that "newObj" will be tainted by an inherent TF not belonging to itself, since we only propagate non-inherent ones here.
                     if (tf && !tf->is_inherent) {
+                        //NOTE: "is_weak" is inherited.
                         newObj->taintAllFields(tf);
                     }
                 }

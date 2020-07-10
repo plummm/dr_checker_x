@@ -361,6 +361,15 @@ namespace DRCHECKER {
             this->instructionTrace.push_back(toAdd);
         }
 
+        //Decide whether this TF can be propagated to a target inst location, used to validate a taint path.
+        //This is just a wrapper for convenience.
+        bool canReach(InstLoc *dest) {
+            if (!dest) {
+                return false;
+            }
+            return dest->reachable(this->targetInstr);
+        }
+
         InstLoc *targetInstr;
         // trace of instructions that resulted in this taint.
         std::vector<InstLoc*> instructionTrace;
@@ -387,7 +396,7 @@ namespace DRCHECKER {
             if (this->tag) {
                 this->tag->dumpInfo_light(OS,false);
             }else {
-                OS << "NULL"
+                OS << "NULL";
             }
             OS << " @ ";
             //Print the target inst.
@@ -433,6 +442,10 @@ namespace DRCHECKER {
             this->fieldId = srcField;
         }
 
+        FieldTaint() {
+            this->fieldId = -1;
+        }
+
         ~FieldTaint() {
             //TODO: implement this in a smart way.
             /*for(auto currT:targetTaint) {
@@ -458,6 +471,12 @@ namespace DRCHECKER {
 #endif
                 return false;
             }
+            //Reactivation phase: if the entry function has changed, we need to deactivate the TFs propagated in the previous entry,
+            //and then re-activate the inherent TF if present.
+            InstLoc *loc = ntf->targetInstr;
+            if (loc && loc->hasCtx() && (*loc->ctx)[0]) {
+                this->resetTfs((*loc->ctx)[0]);
+            }
             bool is_dup = false;
             std::set<TaintFlag*> to_del;
             for (TaintFlag *tf : this->targetTaint) {
@@ -466,7 +485,7 @@ namespace DRCHECKER {
                 }
                 if (tf->is_active && ntf->is_active && !ntf->is_weak) {
                     //Strong taint, see whether it will kill/override the existing taint.
-                    if (ntf->targetInstr && ntf->targetInstr->postDom(tf->targetInstr)) {
+                    if (loc && loc->postDom(tf->targetInstr)) {
                         to_del.insert(tf);
                     }
                 }
@@ -505,12 +524,53 @@ namespace DRCHECKER {
             return !is_dup;
         }
 
+        //Reset the TFs due to the top entry function switch.
+        void resetTfs(Instruction *entry) {
+            assert(entry);
+            if (!this->lastReset) {
+                this->lastReset = entry;
+            }
+            if (this->lastReset == entry) {
+                //Still within the same top-level entry func, no need to reset.
+                return;
+            }
+            //Ok, do the reset...
+#ifdef DEBUG_UPDATE_FIELD_TAINT
+            dbgs() << "FieldTaint::resetTfs(): reset field (" << this->fieldId << ") taint since we have switched to a new entry: ";
+            InstructionUtils::printInst(entry,dbgs());
+#endif
+            this->lastReset = entry;
+            //We need to:
+            //(1) deactivate those TFs propagated under different entry functions.
+            //(2) reactivate the inherent TFs if any. (it will be strange if we don't have one...)
+            for (TaintFlag *tf : this->targetTaint) {
+                if (!tf) {
+                    continue;
+                }
+                InstLoc *loc = tf->targetInstr;
+                //TODO: whether to treat the TF w/ null targetInstr the same as an inherent TF.
+                if (tf->is_inherent || !loc) {
+                    tf->is_active = true;
+                    continue;
+                }
+                if (tf->is_active && loc && loc->hasCtx() && (*loc->ctx)[0] && (*loc->ctx)[0] != entry) {
+                    tf->is_active = false;
+                }
+            }
+            return;
+        }
+
         //Get the TFs that are valid at the "loc" (e.g. some TFs may be overridden by the others).
         //The logic is similar to "fetchFieldPointsTo" in the Alias Analysis.
         bool getTf(InstLoc *loc, std::set<TaintFlag*> &r) {
 #ifdef DEBUG_UPDATE_FIELD_TAINT
             dbgs() << "FieldTaint::getTf(): fetch taint for field: " << this->fieldId << "\n";
 #endif
+            //Reactivation phase: if the entry function has changed, we need to deactivate the TFs propagated in the previous entry,
+            //and then re-activate the inherent TF if present.
+            if (loc && loc->hasCtx() && (*loc->ctx)[0]) {
+                this->resetTfs((*loc->ctx)[0]);
+            }
             //First get all active TFs and blockers.
             std::set<InstLoc*> blocklist;
             std::set<TaintFlag*> actTf;
@@ -572,7 +632,7 @@ namespace DRCHECKER {
         }
 
         void logFieldTaint(raw_ostream &O, bool lbreak = true) {
-            int act = inh = wea = 0;
+            int act = 0, inh = 0,  wea = 0;
             for (TaintFlag *tf : this->targetTaint) {
                 if (!tf) {
                     continue;
@@ -593,6 +653,9 @@ namespace DRCHECKER {
             }
          }
 
+        private:
+        //This is the first inst of the entry function for which we have already swicthed to and done the TF reset.
+        Instruction *lastReset = nullptr;
     };
 
 }

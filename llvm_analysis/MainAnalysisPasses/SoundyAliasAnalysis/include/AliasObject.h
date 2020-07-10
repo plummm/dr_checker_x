@@ -234,7 +234,7 @@ namespace DRCHECKER {
         bool auto_generated = false;
 
         //Hold the taint flags that are effective for all fields, we use a special "FieldTaint" (fid=-1) for it.
-        FieldTaint all_contents_taint_flags(-1);
+        FieldTaint all_contents_taint_flags;
 
         // flag which indicates whether the object is initialized or not.
         // by default every object is initialized.
@@ -266,6 +266,7 @@ namespace DRCHECKER {
             this->pointsFrom = srcAliasObject->pointsFrom;
             this->pointsTo = srcAliasObject->pointsTo;
             this->id = getCurrID();
+            this->lastPtoReset = srcAliasObject->lastPtoReset;
 
             this->is_initialized = srcAliasObject->is_initialized;
             this->initializingInstructions.insert(srcAliasObject->initializingInstructions.begin(),
@@ -692,9 +693,6 @@ namespace DRCHECKER {
 #endif
             FieldTaint *targetFieldTaint = this->getFieldTaint(srcfieldId);
             if (targetFieldTaint == nullptr) {
-#ifdef DEBUG_UPDATE_FIELD_TAINT
-                dbgs() << "AliasObject::addFieldTaintFlag(): No field taint exists for this field.\n";
-#endif
                 targetFieldTaint = new FieldTaint(srcfieldId);
                 this->taintedFields.push_back(targetFieldTaint);
             }
@@ -779,7 +777,11 @@ namespace DRCHECKER {
             }else {
                 atag = new TaintTag(0,this->targetType,is_global,(void*)this);
             }
-            TaintFlag *atf = new TaintFlag(loc,true,atag);
+            //NOTE: inehrent TF is born w/ the object who might be accessed in different entry functions, so the "targetInstr" of its
+            //inherent TF should be set to "nullptr" to indicate that it's effective globally from the very beginning, so that it can
+            //also easily pass the taint path check when being propagated.
+            //TODO: justify this decision.
+            TaintFlag *atf = new TaintFlag(nullptr,true,atag);
             atf->is_inherent = true;
             if (this->addAllContentTaintFlag(atf)) {
                 //add the taint to all available fields.
@@ -797,7 +799,8 @@ namespace DRCHECKER {
                     }else {
                         tag = new TaintTag(fieldId,this->targetType,is_global,(void*)this);
                     }
-                    TaintFlag *newFlag = new TaintFlag(loc,true,tag);
+                    //We're sure that we want to set "this" object as the taint source, so it's a strong TF.
+                    TaintFlag *newFlag = new TaintFlag(nullptr,true,tag);
                     newFlag->is_inherent = true;
                     this->addFieldTaintFlag(fieldId, newFlag);
                 }
@@ -835,6 +838,8 @@ namespace DRCHECKER {
 #ifdef DEBUG_UPDATE_FIELD_TAINT
                         dbgs() << "AliasObject::reset(): Adding taint to: " << (const void*)this << " | " << fieldId << "\n";
 #endif
+                        //TODO: enforce taint path check.
+                        //NOTE: we just inherite the "is_weak" of the previousn TF here.
                         TaintFlag *ntf = new TaintFlag(tf, loc);
                         this->addFieldTaintFlag(fieldId, ntf);
                     }
@@ -1024,6 +1029,9 @@ namespace DRCHECKER {
 
         //NOTE: the arg "is_weak" has the same usage as updateFieldPointsTo().
         void updateFieldPointsTo_do(long srcfieldId, std::set<PointerPointsTo*>* dstPointsTo, InstLoc *propagatingInstr, int is_weak = -1);
+
+        //This records the first inst of an entry function we have just swicthed to and reset the field (key is the field ID) pto.
+        std::map<long,Instruction*> lastPtoReset;
 
     protected:
         void printPointsTo(llvm::raw_ostream& os) const {

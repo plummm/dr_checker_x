@@ -405,9 +405,12 @@ namespace DRCHECKER {
                         targetObjects.insert(targetObjects.end(), to_check);
                     }
                 }
+                bool multi_pto = (targetObjects.size() > 1); 
                 bool is_added;
                 // Now try to store the newTaintInfo into all of these objects.
                 for (auto newTaintFlag : *newTaintInfo) {
+                    //First of all, set the "is_weak" flag in the TF indicating whether it's a strong or weak taint.
+                    newTaintFlag->is_weak = multi_pto;
                     is_added = false;
                     for (auto fieldObject : targetObjects) {
                         if (fieldObject.second->addFieldTaintFlag(fieldObject.first, newTaintFlag)) {
@@ -424,7 +427,6 @@ namespace DRCHECKER {
             // clean up
             delete(newTaintInfo);
         }
-
     }
 
     // The following instructions are ignored.
@@ -473,6 +475,7 @@ namespace DRCHECKER {
                     }
                 }
 
+                bool multi_pto = (targetObjects.size() > 1);
                 bool is_added = false;
 
                 assert(targetObjects.size() > 0);
@@ -482,7 +485,8 @@ namespace DRCHECKER {
                     //Taint Tag represents the taint source, here it's the user provided data passed by functions like copy_from_user()...
                     //But we actually don't have value/type/AliasObject for this user input, so just create a dummy Tag to stand for a certain user input.
                     TaintTag *tag = new TaintTag(0,(Type*)nullptr,false,nullptr);
-                    TaintFlag *tf = new TaintFlag(currInst,true,tag);
+                    //NOTE: "is_weak" is decided by whether there are multiple pointees.
+                    TaintFlag *tf = new TaintFlag(currInst,true,tag,multi_pto);
                     // if it is pointing to first field, then taint everything
                     // else taint only corresponding field.
                     if (fieldObject.first != 0 && fieldObject.second->addFieldTaintFlag(fieldObject.first, tf)) {
@@ -642,8 +646,15 @@ namespace DRCHECKER {
                                                                                               this->currFuncCallSites,
                                                                                               argVal);
                     if(currPtsTo != nullptr) {
-                        for(auto currP:*currPtsTo) {
-                            for(auto currT:*newTaintSet) {
+                        //Set "is_weak"
+                        bool multi_pto = (currPtsTo->size() > 1);
+                        for(auto currT : *newTaintSet) {
+                            if (currT) {
+                                currT->is_weak = multi_pto;
+                            }
+                        }
+                        for(auto currP : *currPtsTo) {
+                            for(auto currT : *newTaintSet) {
                                 if(currP->targetObject->addFieldTaintFlag(currP->dstfieldId, currT)) {
                                     addedTaints.insert(currT);
                                 }
@@ -651,13 +662,12 @@ namespace DRCHECKER {
                         }
                     }
                 }
-
+                //Free memory.
                 for(auto currT:*newTaintSet) {
                     if(addedTaints.find(currT) == addedTaints.end()) {
                         delete(currT);
                     }
                 }
-
                 delete(newTaintSet);
             }
 
@@ -708,6 +718,7 @@ namespace DRCHECKER {
             // create new taint info.
             std::set<TaintFlag*>* newTaintInfo = new std::set<TaintFlag*>();
             for(auto currRetTaint:vis->retValTaints) {
+                //NOTE: ret taint must be able to reach this call site, so no need for the taint path check.
                 TaintFlag *newTaintFlag = new TaintFlag(currRetTaint, this->makeInstLoc(&I));
                 newTaintInfo->insert(newTaintInfo->end(), newTaintFlag);
             }
