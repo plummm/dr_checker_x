@@ -597,7 +597,13 @@ namespace DRCHECKER {
             }
             int r = 0;
             //Find out who can taint this obj/field...
+            //NOTE: now we only consider the taint paths valid in the single-thread execution setting (e.g. one TF may be masked by another
+            //during the execution, in which case we only consider the TF that can last to the function return).
+            //TODO: try to detect the concurrency bugs (e.g. just before a TF is masked in one entry, we can invoke another entry function 
+            //in which the obj|field still bear the effect of that TF...)
             std::set<TaintFlag*> tflgs;
+            obj->getWinnerTfs(fid,tflgs);
+            /*
             FieldTaint* ft = obj->getFieldTaint(fid);
             if (!ft || !ft->targetTaint.size()) {
                 //No field taint found, any all_content taint flag?
@@ -607,6 +613,7 @@ namespace DRCHECKER {
             }else {
                 tflgs.insert(ft->targetTaint.begin(),ft->targetTaint.end());
             }
+            */
             for (TaintFlag *flg : tflgs) {
                 if (!flg || !flg->isTainted() || !flg->tag) {
                     continue;

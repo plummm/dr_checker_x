@@ -573,6 +573,23 @@ namespace DRCHECKER {
             }
         }
 
+        //Return all winner TFs (i.e. as long as it can survivie one entry function).
+        //NOTE: this function should only be invoked after we finish all main analyses and in the bug detection phase. 
+        void getWinners(std::set<TaintFlag*> &r) {
+            //First we need to make sure the winner TFs in the last entry function have been collected, e.g. if it's the
+            //last entry function in the analysis sequence, we don't have the opportunity to resetTfs() and thus collect the winners.
+            this->collectWinnerTfs();
+            //Now simply return all winner TFs.
+            for (auto &e : this->winnerTfs) {
+                for (TaintFlag *tf : e.second) {
+                    if (tf) {
+                        r.insert(tf);
+                    }
+                }
+            }
+            return;
+        }
+
         //Reset the TFs due to the top entry function switch.
         void resetTfs(Instruction *entry) {
             assert(entry);
@@ -590,9 +607,9 @@ namespace DRCHECKER {
 #endif
             //Before the actual reset, let's first record the winner TFs in the previous entry function.
             this->collectWinnerTfs();
-            //Do the reset.
+            //Update the last reset inst to the current.
             this->lastReset = entry;
-            //We need to:
+            //Do the reset, we need to:
             //(1) deactivate those TFs propagated under different entry functions.
             //(2) reactivate the inherent TFs if any. (it will be strange if we don't have one...)
             for (TaintFlag *tf : this->targetTaint) {

@@ -564,7 +564,7 @@ namespace DRCHECKER {
         BBTraversalHelper::getRetBBs(pfunc,bbs);
         for (llvm::BasicBlock *bb : bbs) {
             if (bb) {
-                r.insert(&(bb.back()));
+                r.insert(&(bb->back()));
             }
         }
         return;

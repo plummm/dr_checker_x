@@ -680,6 +680,17 @@ namespace DRCHECKER {
             return;
         }
 
+        //Get the winner TFs of a certain field.
+        void getWinnerTfs(long fid, std::set<TaintFlag*> &r) {
+            FieldTaint *ft = this->getFieldTaint(fid);
+            if (ft) {
+                ft->getWinners(r);
+            }else if (!this->all_contents_taint_flags.empty()) {
+                this->all_contents_taint_flags.getWinners(r);
+            }
+            return;
+        }
+
         /***
          * Add provided taint flag to the object at the provided field.
          * @param srcfieldId field to which taint needs to be added.
