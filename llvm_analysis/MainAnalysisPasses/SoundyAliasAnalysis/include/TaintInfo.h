@@ -423,10 +423,10 @@ namespace DRCHECKER {
         //Indicates whether this is a weak taint flag (i.e. it may or may not taint the target value/field since the "may point-to" results yielded by the pointer analysis).
         bool is_weak = false;
 
-    private:
         // flag to indicate the taint flag.
-        //NOTE that if this is "false", we may treat it as a taint kill (sanitizer)..
+        //NOTE that if this is "false", we treat it as a taint kill (sanitizer)..
         bool is_tainted;
+    private:
 
     };
 
@@ -457,6 +457,15 @@ namespace DRCHECKER {
             return (this->targetTaint.size() == 0);
         }
 
+        bool hasActiveTaint() {
+            for (auto tf : this->targetTaint) {
+                if (tf && tf->is_active && tf->is_tainted) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         //Insert a TaintFlag to the existing TF set, there are multiple things we need to consider:
         //(1) duplication
         //(2) whether the new TF will block/mask any old TFs (e.g. post-dominate).
@@ -476,6 +485,10 @@ namespace DRCHECKER {
             InstLoc *loc = ntf->targetInstr;
             if (loc && loc->hasCtx() && (*loc->ctx)[0]) {
                 this->resetTfs((*loc->ctx)[0]);
+            }
+            //If the to_add is a taint kill but we actually don't have any active taints (i.e. not tainted now), we can just return. 
+            if (!ntf->is_tainted && !this->hasActiveTaint()) {
+                return false;
             }
             bool is_dup = false;
             std::set<TaintFlag*> to_del;
@@ -571,38 +584,40 @@ namespace DRCHECKER {
             if (loc && loc->hasCtx() && (*loc->ctx)[0]) {
                 this->resetTfs((*loc->ctx)[0]);
             }
-            //First get all active TFs and blockers.
+            //First get all active non-kill TFs and blockers.
             std::set<InstLoc*> blocklist;
             std::set<TaintFlag*> actTf;
             for (TaintFlag *tf : this->targetTaint) {
                 if (!tf || !tf->is_active) {
                     continue;
                 }
-                actTf.insert(tf);
+                if (tf->is_tainted) {
+                    actTf.insert(tf);
+                }
                 if (tf->targetInstr && !tf->is_weak) {
                     blocklist.insert(tf->targetInstr);
                 }
             }
             //Get the live TFs at the "loc"..
-            if (!loc) {
+            if (loc) {
+                for (TaintFlag *tf : actTf) {
+                    //NOTE that if "tf->targetInstr" is null, the TF will treated as a pre-set global TF.
+                    if (loc->reachable(tf->targetInstr,&blocklist)) {
+                        r.insert(tf);
+                    }
+                    //For logging..
+                    if (!tf->targetInstr) {
+#ifdef DEBUG_UPDATE_FIELD_TAINT
+                        dbgs() << "!!! FieldTaint::getTf(): TF w/o targetInstr: ";
+                        tf->dumpInfo_light(dbgs());
+#endif
+                    }
+                }
+            }else {
 #ifdef DEBUG_UPDATE_FIELD_TAINT
                 dbgs() << "FieldTaint::getTf(): null target loc! Return all active TFs: " << actTf.size() << "\n";
 #endif
                 r.insert(actTf.begin(),actTf.end());
-                return true;
-            }
-            for (TaintFlag *tf : actTf) {
-                //NOTE that if "tf->targetInstr" is null, the TF will treated as a pre-set global TF.
-                if (loc->reachable(tf->targetInstr,&blocklist)) {
-                    r.insert(tf);
-                }
-                //For logging..
-                if (!tf->targetInstr) {
-#ifdef DEBUG_UPDATE_FIELD_TAINT
-                    dbgs() << "!!! FieldTaint::getTf(): TF w/o targetInstr: ";
-                    tf->dumpInfo_light(dbgs());
-#endif
-                }
             }
 #ifdef DEBUG_UPDATE_FIELD_TAINT
             dbgs() << "FieldTaint::getTf(): final stats: total/act/ret: " << this->targetTaint.size() << "/" << actTf.size() << "/" << r.size() << "\n";
@@ -632,10 +647,13 @@ namespace DRCHECKER {
         }
 
         void logFieldTaint(raw_ostream &O, bool lbreak = true) {
-            int act = 0, inh = 0,  wea = 0;
+            int act = 0, inh = 0, wea = 0, tan = 0;
             for (TaintFlag *tf : this->targetTaint) {
                 if (!tf) {
                     continue;
+                }
+                if (tf->is_tainted) {
+                    ++tan;
                 }
                 if (tf->is_active) {
                     ++act;
@@ -647,7 +665,7 @@ namespace DRCHECKER {
                     ++wea;
                 }
             }
-            O << "total/act/inh/weak: " << this->targetTaint.size() << "/" << act << "/" << inh << "/" << wea;
+            O << "total/tan/act/inh/weak: " << this->targetTaint.size() << "/" << tan << "/" << act << "/" << inh << "/" << wea;
             if (lbreak) {
                 O << "\n";
             }

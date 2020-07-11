@@ -688,10 +688,19 @@ namespace DRCHECKER {
          * @return true if added else false if the taint flag is a duplicate.
          */
         bool addFieldTaintFlag(long srcfieldId, TaintFlag *targetTaintFlag) {
+            if (!targetTaintFlag) {
+                return false;
+            }
 #ifdef DEBUG_UPDATE_FIELD_TAINT
             dbgs() << "AliasObject::addFieldTaintFlag(): " << InstructionUtils::getTypeStr(this->targetType) << " | " << srcfieldId << " obj: " << (const void*)this << "\n";
 #endif
             FieldTaint *targetFieldTaint = this->getFieldTaint(srcfieldId);
+            if (!targetTaintFlag->is_tainted && (!targetFieldTaint || targetFieldTaint->empty())) {
+#ifdef DEBUG_UPDATE_FIELD_TAINT
+                dbgs() << "AliasObject::addFieldTaintFlag(): try to add a taint kill flag, but the target field hasn't been tainted yet, so no action...\n";
+#endif
+                return false;
+            }
             if (targetFieldTaint == nullptr) {
                 targetFieldTaint = new FieldTaint(srcfieldId);
                 this->taintedFields.push_back(targetFieldTaint);

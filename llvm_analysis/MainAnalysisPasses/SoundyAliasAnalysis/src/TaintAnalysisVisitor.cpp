@@ -361,71 +361,83 @@ namespace DRCHECKER {
         dbgs() << "TaintAnalysisVisitor::visitStoreInst(): " << InstructionUtils::getValueStr(&I) << "\n";
 #endif
         Value *srcPointer = I.getValueOperand();
-        std::set<TaintFlag *> *srcTaintInfo = getTaintInfo(srcPointer);
+        std::set<TaintFlag*> *srcTaintInfo = getTaintInfo(srcPointer);
         if(srcTaintInfo == nullptr) {
             srcPointer = srcPointer->stripPointerCasts();
             srcTaintInfo = getTaintInfo(srcPointer);
         }
 
-        // if the value, we are trying to store is tainted? Then process, else
-        // ignore.
-        if(srcTaintInfo != nullptr) {
+        //Get the mem locations to store.
+        Value *dstPointer = I.getPointerOperand();
+        //HZ: besides deciding whether we need to strip the pointer, the "dstTaintInfo" in the original code actually has no usage later...
+        //HZ: so rewrite the original logic as below:
+        //TODO: why do we need to even consider the "dstTaintInfo" when making the strip decision?
+        if (!getTaintInfo(dstPointer)) {
+            if (getTaintInfo(dstPointer->stripPointerCasts()) || 
+                !PointsToUtils::hasPointsToObjects(currState, this->currFuncCallSites, dstPointer))
+            {
+                dstPointer = dstPointer->stripPointerCasts();
+            }
+        }
+        std::set<PointerPointsTo*>* dstPointsTo = PointsToUtils::getPointsToObjects(currState, this->currFuncCallSites, dstPointer);
+        // this set stores the <fieldid, targetobject> of all the objects to which the dstPointer points to.
+        std::set<std::pair<long, AliasObject *>> targetObjects;
+        if(dstPointsTo != nullptr) {
+            for (PointerPointsTo *currPointsToObj : *dstPointsTo) {
+                long target_field = currPointsToObj->dstfieldId;
+                AliasObject *dstObj = currPointsToObj->targetObject;
+                auto to_check = std::make_pair(target_field, dstObj);
+                if (std::find(targetObjects.begin(), targetObjects.end(), to_check) == targetObjects.end()) {
+                    targetObjects.insert(targetObjects.end(), to_check);
+                }
+            }
+        }
 #ifdef DEBUG_STORE_INSTR
-            dbgs() << "TaintAnalysisVisitor::visitStoreInst: #srcTaintInfo: " << srcTaintInfo->size() << "\n";
+        dbgs() << "TaintAnalysisVisitor::visitStoreInst: #targetMemLoc: " << targetObjects.size() << "\n";
 #endif
-            // create newTaintInfo set.
-            std::set<TaintFlag*> *newTaintInfo = new std::set<TaintFlag*>();
+        if (targetObjects.empty()) {
+            //Nowhere to taint..
+            return;
+        }
+        bool multi_pto = (targetObjects.size() > 1); 
 
-            TaintAnalysisVisitor::makeTaintInfoCopy(&I,srcTaintInfo,newTaintInfo);
-
-            Value *dstPointer = I.getPointerOperand();
-
-            //HZ: besides deciding whether we need to strip the pointer, the "dstTaintInfo" in the original code actually has no usage later...
-            //HZ: so rewrite the original logic as below:
-            //TODO: why do we need to even consider the "dstTaintInfo" when making the strip decision?
-            if (!getTaintInfo(dstPointer)) {
-                if (getTaintInfo(dstPointer->stripPointerCasts()) || 
-                    !PointsToUtils::hasPointsToObjects(currState, this->currFuncCallSites, dstPointer))
-                {
-                    dstPointer = dstPointer->stripPointerCasts();
+        //There are 2 situations here:
+        //1. the src value is tainted, then we need to propagate the taint flags;
+        //2. it's not tainted, then this is actually a taint kill if (1) there is only one target mem location (otherwise this is a weak taint kill that we will not honor to be conservative). 
+        //and (2) the target mem location is tainted now (otherwise no need to kill). If so then we also need to propagate the taint kill flag.
+        std::set<TaintFlag*> newTaintInfo;
+        if (srcTaintInfo && !srcTaintInfo->empty()) {
+            TaintAnalysisVisitor::makeTaintInfoCopy(&I,srcTaintInfo,&newTaintInfo);
+        }else {
+            if (!multi_pto) {
+                //Create a taint kill flag.
+                TaintFlag *tf = new TaintFlag(this->makeInstLoc(&I),false,nullptr,false);
+                newTaintInfo.insert(tf);
+            }
+        }
+#ifdef DEBUG_STORE_INSTR
+        dbgs() << "TaintAnalysisVisitor::visitStoreInst: #srcTaintInfo: " << newTaintInfo.size() << "\n";
+#endif
+        if (newTaintInfo.empty()) {
+            return;
+        }
+        //Ok now propagate the taint flags.
+        bool is_added;
+        // Now try to store the newTaintInfo into all of these objects.
+        for (auto newTaintFlag : newTaintInfo) {
+            //First of all, set the "is_weak" flag in the TF indicating whether it's a strong or weak taint.
+            newTaintFlag->is_weak = multi_pto;
+            is_added = false;
+            for (auto fieldObject : targetObjects) {
+                if (fieldObject.second->addFieldTaintFlag(fieldObject.first, newTaintFlag)) {
+                    is_added = true;
                 }
             }
-
-            std::set<PointerPointsTo*>* dstPointsTo = PointsToUtils::getPointsToObjects(currState, this->currFuncCallSites, dstPointer);
-
-            if(dstPointsTo != nullptr) {
-                // Now store the taint into correct fields.
-                // this set stores the <fieldid, targetobject> of all the objects to which the dstPointer points to.
-                std::set<std::pair<long, AliasObject *>> targetObjects;
-                for (PointerPointsTo *currPointsToObj : *dstPointsTo) {
-                    long target_field = currPointsToObj->dstfieldId;
-                    AliasObject *dstObj = currPointsToObj->targetObject;
-                    auto to_check = std::make_pair(target_field, dstObj);
-                    if (std::find(targetObjects.begin(), targetObjects.end(), to_check) == targetObjects.end()) {
-                        targetObjects.insert(targetObjects.end(), to_check);
-                    }
-                }
-                bool multi_pto = (targetObjects.size() > 1); 
-                bool is_added;
-                // Now try to store the newTaintInfo into all of these objects.
-                for (auto newTaintFlag : *newTaintInfo) {
-                    //First of all, set the "is_weak" flag in the TF indicating whether it's a strong or weak taint.
-                    newTaintFlag->is_weak = multi_pto;
-                    is_added = false;
-                    for (auto fieldObject : targetObjects) {
-                        if (fieldObject.second->addFieldTaintFlag(fieldObject.first, newTaintFlag)) {
-                            is_added = true;
-                        }
-                    }
-                    // if the current taint is not added to any object.
-                    // delete the newTaint object.
-                    if (!is_added) {
-                        delete(newTaintFlag);
-                    }
-                }
+            // if the current taint is not added to any object.
+            // delete the newTaint object.
+            if (!is_added) {
+                delete(newTaintFlag);
             }
-            // clean up
-            delete(newTaintInfo);
         }
     }
 
