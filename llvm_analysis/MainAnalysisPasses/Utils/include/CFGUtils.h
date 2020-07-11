@@ -68,6 +68,32 @@ namespace DRCHECKER {
             return (this->ctx && !this->ctx->empty());
         }
 
+        //Whether this InstLoc is in an entry function.
+        bool inEntry() {
+            if (!this->hasCtx()) {
+                return false;
+            }
+            Instruction *e = (*this->ctx)[0];
+            if (!e || !e->getParent()) {
+                return false;
+            }
+            return true;
+        }
+
+        //Return the first inst in the calling context (i.e. the first inst of the top-level entry function).
+        Instruction *getEntryInst() {
+            return (this->hasCtx() ? (*this->ctx)[0] : nullptr);
+        }
+
+        //Return true if this is in an entry func and is in a same one as "e".
+        //We assume that "e" is also in an entry block, just as those insts in the calling context.
+        bool sameEntry(Instruction *e) {
+            if (!e || !e->getParent() || !this->inEntry()) {
+                return false;
+            }
+            return this->getEntryInst()->getParent() == e->getParent();
+        }
+
         //Whether "this"'s ctx is a prefix of "other"'s.
         //Identical ctx: return 0, prefix: return the 1st index after the prefix, otherwise -1.
         int isCtxPrefix(InstLoc *other) {
@@ -169,6 +195,10 @@ namespace DRCHECKER {
 
         //Get all dom nodes for all return sites (i.e. in order to return we must pass these nodes).
         static void getDomsForRet(llvm::Function* pfunc, std::set<llvm::BasicBlock*> &ret);
+
+        static void getRetBBs(llvm::Function* pfunc, std::set<llvm::BasicBlock*> &r);
+        
+        static void getRetInsts(llvm::Function* pfunc, std::set<llvm::Instruction*> &r);
     };
 }
 #endif //PROJECT_CFGUTILS_H

@@ -544,6 +544,32 @@ namespace DRCHECKER {
         return domMap[pfunc];
     }
 
+    void BBTraversalHelper::getRetBBs(llvm::Function* pfunc, std::set<llvm::BasicBlock*> &r) {
+        if (!pfunc) {
+            return;
+        }
+        for (llvm::BasicBlock &bb : *pfunc) {
+            if (getSuccNum(&bb) == 0) {
+                r.insert(&bb);
+            }
+        }
+        return;
+    }
+
+    void BBTraversalHelper::getRetInsts(llvm::Function* pfunc, std::set<llvm::Instruction*> &r) {
+        if (!pfunc) {
+            return;
+        }
+        std::set<llvm::BasicBlock*> bbs;
+        BBTraversalHelper::getRetBBs(pfunc,bbs);
+        for (llvm::BasicBlock *bb : bbs) {
+            if (bb) {
+                r.insert(&(bb.back()));
+            }
+        }
+        return;
+    }
+
     void BBTraversalHelper::getDomsForRet(llvm::Function* pfunc, std::set<llvm::BasicBlock*> &r) {
         llvm::DominatorTree *domT = BBTraversalHelper::getDomTree(pfunc);
         if (!domT) {
@@ -551,11 +577,7 @@ namespace DRCHECKER {
         }
         //Ok, first get all ret nodes (i.e. #succ = 0).
         std::set<llvm::BasicBlock*> rets;
-        for (llvm::BasicBlock &bb : *pfunc) {
-            if (getSuccNum(&bb) == 0) {
-                rets.insert(&bb);
-            }
-        }
+        BBTraversalHelper::getRetBBs(pfunc,rets);
         //Get dominators for all ret nodes.
         r.clear();
         std::set<llvm::BasicBlock*> t;

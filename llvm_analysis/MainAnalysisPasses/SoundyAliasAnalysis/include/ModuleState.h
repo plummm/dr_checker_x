@@ -586,13 +586,10 @@ namespace DRCHECKER {
 
         //Return all taint paths from the user input to the specified field of an object.
         int getAllUserTaintPaths(TypeField *tf, std::vector<TypeField*> &history, std::set<std::vector<InstLoc*>*> &res) {
-            if (!tf) {
+            if (!tf || !tf->priv) {
                 return 0;
             }
             AliasObject *obj = (AliasObject*)(tf->priv);
-            if (!obj) {
-                return 0;
-            }
             long fid = tf->fid;
             if (this->in_taint_history(tf,history,true)) {
                 //A taint loop, stop here.
@@ -763,8 +760,8 @@ namespace DRCHECKER {
                             continue;
                         }
                         history.clear();
-                        TypeField tf(obj->targetType,tag->fieldId,obj);
-                        getAllUserTaintPaths(&tf,history,tagPathMap[tag]);
+                        TypeField t(obj->targetType,tag->fieldId,obj);
+                        getAllUserTaintPaths(&t,history,tagPathMap[tag]);
                     }
                 }
             }

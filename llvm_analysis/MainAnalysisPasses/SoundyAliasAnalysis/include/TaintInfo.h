@@ -537,6 +537,42 @@ namespace DRCHECKER {
             return !is_dup;
         }
 
+        //This function needs to be called (and only called) when we have just finished analyzing an top-level entry function
+        //and want to record which non-inherent TFs can last to the end.
+        void collectWinnerTfs() {
+            //First get the current entry function we are in.
+            if (!this->lastReset || !this->lastReset->getParent()) {
+                return;
+            }
+            Function *efunc = this->lastReset->getFunction();
+            if (!efunc) {
+                return;
+            }
+            if (this->winnerTfs.find(this->lastReset) != this->winnerTfs.end()) {
+                return;
+            }
+            //Then get all return sites of the entry function.
+            std::set<Instruction*> rets;
+            BBTraversalHelper::getRetInsts(efunc, rets);
+            //Now caculate the winners..
+            std::vector<Instruction*> ctx;
+            ctx.push_back(this->lastReset);
+            for (Instruction *ri : rets) {
+                if (!ri) {
+                    continue;
+                }
+                InstLoc rloc(ri,&ctx);
+                std::set<TaintFlag*> wtfs;
+                this->doGetTf(&rloc,wtfs);
+                //Exclude the inherent TFs..
+                for (TaintFlag *wtf : wtfs) {
+                    if (wtf && !wtf->is_inherent) {
+                        this->winnerTfs[this->lastReset].insert(wtf);
+                    }
+                }
+            }
+        }
+
         //Reset the TFs due to the top entry function switch.
         void resetTfs(Instruction *entry) {
             assert(entry);
@@ -547,11 +583,14 @@ namespace DRCHECKER {
                 //Still within the same top-level entry func, no need to reset.
                 return;
             }
-            //Ok, do the reset...
+            //Ok, we need to do the reset...
 #ifdef DEBUG_UPDATE_FIELD_TAINT
             dbgs() << "FieldTaint::resetTfs(): reset field (" << this->fieldId << ") taint since we have switched to a new entry: ";
             InstructionUtils::printInst(entry,dbgs());
 #endif
+            //Before the actual reset, let's first record the winner TFs in the previous entry function.
+            this->collectWinnerTfs();
+            //Do the reset.
             this->lastReset = entry;
             //We need to:
             //(1) deactivate those TFs propagated under different entry functions.
@@ -566,7 +605,7 @@ namespace DRCHECKER {
                     tf->is_active = true;
                     continue;
                 }
-                if (tf->is_active && loc && loc->hasCtx() && (*loc->ctx)[0] && (*loc->ctx)[0] != entry) {
+                if (tf->is_active && loc && !loc->sameEntry(entry)) {
                     tf->is_active = false;
                 }
             }
@@ -584,45 +623,7 @@ namespace DRCHECKER {
             if (loc && loc->hasCtx() && (*loc->ctx)[0]) {
                 this->resetTfs((*loc->ctx)[0]);
             }
-            //First get all active non-kill TFs and blockers.
-            std::set<InstLoc*> blocklist;
-            std::set<TaintFlag*> actTf;
-            for (TaintFlag *tf : this->targetTaint) {
-                if (!tf || !tf->is_active) {
-                    continue;
-                }
-                if (tf->is_tainted) {
-                    actTf.insert(tf);
-                }
-                if (tf->targetInstr && !tf->is_weak) {
-                    blocklist.insert(tf->targetInstr);
-                }
-            }
-            //Get the live TFs at the "loc"..
-            if (loc) {
-                for (TaintFlag *tf : actTf) {
-                    //NOTE that if "tf->targetInstr" is null, the TF will treated as a pre-set global TF.
-                    if (loc->reachable(tf->targetInstr,&blocklist)) {
-                        r.insert(tf);
-                    }
-                    //For logging..
-                    if (!tf->targetInstr) {
-#ifdef DEBUG_UPDATE_FIELD_TAINT
-                        dbgs() << "!!! FieldTaint::getTf(): TF w/o targetInstr: ";
-                        tf->dumpInfo_light(dbgs());
-#endif
-                    }
-                }
-            }else {
-#ifdef DEBUG_UPDATE_FIELD_TAINT
-                dbgs() << "FieldTaint::getTf(): null target loc! Return all active TFs: " << actTf.size() << "\n";
-#endif
-                r.insert(actTf.begin(),actTf.end());
-            }
-#ifdef DEBUG_UPDATE_FIELD_TAINT
-            dbgs() << "FieldTaint::getTf(): final stats: total/act/ret: " << this->targetTaint.size() << "/" << actTf.size() << "/" << r.size() << "\n";
-#endif
-            return true;
+            return this->doGetTf(loc,r);
         }
 
         //This method simply returns all inherent TFs w/o considering the current "loc" and memory SSA,
@@ -674,6 +675,53 @@ namespace DRCHECKER {
         private:
         //This is the first inst of the entry function for which we have already swicthed to and done the TF reset.
         Instruction *lastReset = nullptr;
+
+        //"winner" means that a non-inherent field taint TF can last until the top-level entry function returns, 
+        //w/o being killed or masked by other TFs, we count on these "winner" TFs to construct reliable single-thread user-taint chain.
+        //NOTE that if we want to detect the concurrency bugs, we can extend our scope to those killed/masked TFs on the half way.
+        std::map<Instruction*,std::set<TaintFlag*>> winnerTfs;
+
+        bool doGetTf(InstLoc *loc, std::set<TaintFlag*> &r) {
+            //First get all active non-kill TFs and blockers.
+            std::set<InstLoc*> blocklist;
+            std::set<TaintFlag*> actTf;
+            for (TaintFlag *tf : this->targetTaint) {
+                if (!tf || !tf->is_active) {
+                    continue;
+                }
+                if (tf->is_tainted) {
+                    actTf.insert(tf);
+                }
+                if (tf->targetInstr && !tf->is_weak) {
+                    blocklist.insert(tf->targetInstr);
+                }
+            }
+            //Get the live TFs at the "loc"..
+            if (loc) {
+                for (TaintFlag *tf : actTf) {
+                    //NOTE that if "tf->targetInstr" is null, the TF will treated as a pre-set global TF.
+                    if (loc->reachable(tf->targetInstr,&blocklist)) {
+                        r.insert(tf);
+                    }
+                    //For logging..
+                    if (!tf->targetInstr) {
+#ifdef DEBUG_UPDATE_FIELD_TAINT
+                        dbgs() << "!!! FieldTaint::getTf(): TF w/o targetInstr: ";
+                        tf->dumpInfo_light(dbgs());
+#endif
+                    }
+                }
+            }else {
+#ifdef DEBUG_UPDATE_FIELD_TAINT
+                dbgs() << "FieldTaint::getTf(): null target loc! Return all active TFs: " << actTf.size() << "\n";
+#endif
+                r.insert(actTf.begin(),actTf.end());
+            }
+#ifdef DEBUG_UPDATE_FIELD_TAINT
+            dbgs() << "FieldTaint::getTf(): final stats: total/act/ret: " << this->targetTaint.size() << "/" << actTf.size() << "/" << r.size() << "\n";
+#endif
+            return true;
+        }
     };
 
 }
