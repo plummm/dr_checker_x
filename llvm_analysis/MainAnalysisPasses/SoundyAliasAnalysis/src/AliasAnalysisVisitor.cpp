@@ -695,14 +695,10 @@ void AliasAnalysisVisitor::visitAllocaInst(AllocaInst &I) {
         return;
     }
     AliasObject *targetObj = new FunctionLocalVariable(I, this->currFuncCallSites);
-    PointerPointsTo *newPointsTo = new PointerPointsTo(&I, 0, targetObj, 0, new InstLoc(&I,this->currFuncCallSites), false);
-    std::set<PointerPointsTo*>* newPointsToInfo = new std::set<PointerPointsTo*>();
-    newPointsToInfo->insert(newPointsToInfo->end(), newPointsTo);
 #ifdef DEBUG_ALLOCA_INSTR
     dbgs() << "Processed Alloca Instruction, Created new points to information:" << (*newPointsTo) << "\n";
 #endif
-    this->updatePointsToObjects(&I, newPointsToInfo);
-
+    this->updatePointsToObjects(&I, targetObj, new InstLoc(&I,this->currFuncCallSites));
 }
 
 void AliasAnalysisVisitor::visitCastInst(CastInst &I) {

@@ -1117,8 +1117,6 @@ namespace DRCHECKER {
             obj.printPointsTo(os);
             return os;
         }
-
-
     };
 
     class GlobalObject : public AliasObject {

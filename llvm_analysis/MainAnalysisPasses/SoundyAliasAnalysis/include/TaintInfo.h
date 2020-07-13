@@ -257,7 +257,8 @@ namespace DRCHECKER {
     public:
         //Constructors
         TaintFlag(InstLoc *targetInstr, bool is_tainted = true, TaintTag *tag = nullptr, bool is_weak = false) {
-            assert(targetInstr != nullptr && "Target Instruction cannot be NULL");
+            //Inherent TF may have a null targetInstr indicating that the taint is from the very beginning.
+            //assert(targetInstr != nullptr && "Target Instruction cannot be NULL");
             this->targetInstr = targetInstr;
             this->instructionTrace.push_back(targetInstr);
             this->is_tainted = is_tainted;
@@ -721,9 +722,9 @@ namespace DRCHECKER {
                         r.insert(tf);
                     }
                     //For logging..
-                    if (!tf->targetInstr) {
+                    if (!tf->is_inherent && !tf->targetInstr) {
 #ifdef DEBUG_UPDATE_FIELD_TAINT
-                        dbgs() << "!!! FieldTaint::getTf(): TF w/o targetInstr: ";
+                        dbgs() << "!!! FieldTaint::getTf(): TF (non-inherent) w/o targetInstr: ";
                         tf->dumpInfo_light(dbgs());
 #endif
                     }

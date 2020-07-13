@@ -394,7 +394,10 @@ namespace DRCHECKER {
 
             //The main analysis has finished, now dump the results for manual analysis and debugging.
             //Print the main analysis results (e.g. AliasAnalysis and TaintAnalysis) and debug info.
-            std::string rid = (checkFunctionName.size() > 0 ? checkFunctionName : entryConfig);
+            std::string rid = checkFunctionName;
+            if (checkFunctionName.size() == 0) {
+                rid = entryConfig.substr(entryConfig.rfind("/") + 1);
+            }
             auto t_now = std::chrono::system_clock::now();
             std::chrono::duration<double> elapsed_seconds = t_now - t_start;
             dbgs() << "[TIMING] All anlysis done in : " << elapsed_seconds.count() << "s\n";
