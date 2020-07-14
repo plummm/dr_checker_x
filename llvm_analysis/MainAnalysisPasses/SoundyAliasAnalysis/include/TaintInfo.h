@@ -405,7 +405,7 @@ namespace DRCHECKER {
                 this->targetInstr->print_light(OS,false);
             }
             //Print states.
-            OS << " i/a/w: " << (int)this->is_inherent << "/" << (int)this->is_active << "/" << (int)this->is_weak;
+            OS << " tan/inh/act/wea: " << (int)this->is_tainted << "/" << (int)this->is_inherent << "/" << (int)this->is_active << "/" << (int)this->is_weak;
             if (lbreak) {
                 OS << "\n";
             }
@@ -438,13 +438,17 @@ namespace DRCHECKER {
     public:
         long fieldId;
         std::set<TaintFlag*> targetTaint;
+        //This should be the host AliasObject*
+        void *priv = nullptr;
 
-        FieldTaint(long srcField) {
+        FieldTaint(long srcField, void *priv = nullptr) {
             this->fieldId = srcField;
+            this->priv = priv;
         }
 
-        FieldTaint() {
+        FieldTaint(void *priv = nullptr) {
             this->fieldId = -1;
+            this->priv = priv;
         }
 
         ~FieldTaint() {
@@ -473,7 +477,7 @@ namespace DRCHECKER {
         //This is very similar to the logic of "updateFieldPointsTo" in the Alias Analysis, we also need to rely on memory SSA.
         bool addTf(TaintFlag *ntf) {
 #ifdef DEBUG_UPDATE_FIELD_TAINT
-            dbgs() << "FieldTaint::addTf(): add TF for field " << this->fieldId << "\n";
+            dbgs() << "FieldTaint::addTf(): add TF for field " << this->fieldId << ", FieldTaint: " << (const void*)this << ", Host: " << this->priv << "\n";
 #endif
             if (!ntf) {
 #ifdef DEBUG_UPDATE_FIELD_TAINT
@@ -603,7 +607,7 @@ namespace DRCHECKER {
             }
             //Ok, we need to do the reset...
 #ifdef DEBUG_UPDATE_FIELD_TAINT
-            dbgs() << "FieldTaint::resetTfs(): reset field (" << this->fieldId << ") taint since we have switched to a new entry: ";
+            dbgs() << "FieldTaint::resetTfs(): reset field (" << this->fieldId << ", FieldTaint: " << (const void*)this << ", Host: " << this->priv << ") taint since we have switched to a new entry: ";
             InstructionUtils::printInst(entry,dbgs());
 #endif
             //Before the actual reset, let's first record the winner TFs in the previous entry function.
@@ -634,7 +638,7 @@ namespace DRCHECKER {
         //The logic is similar to "fetchFieldPointsTo" in the Alias Analysis.
         bool getTf(InstLoc *loc, std::set<TaintFlag*> &r) {
 #ifdef DEBUG_UPDATE_FIELD_TAINT
-            dbgs() << "FieldTaint::getTf(): fetch taint for field: " << this->fieldId << "\n";
+            dbgs() << "FieldTaint::getTf(): fetch taint for field: " << this->fieldId << ", FieldTaint: " << (const void*)this << ", Host: " << this->priv << "\n";
 #endif
             //Reactivation phase: if the entry function has changed, we need to deactivate the TFs propagated in the previous entry,
             //and then re-activate the inherent TF if present.
@@ -736,7 +740,7 @@ namespace DRCHECKER {
                 r.insert(actTf.begin(),actTf.end());
             }
 #ifdef DEBUG_UPDATE_FIELD_TAINT
-            dbgs() << "FieldTaint::getTf(): final stats: total/act/ret: " << this->targetTaint.size() << "/" << actTf.size() << "/" << r.size() << "\n";
+            dbgs() << "FieldTaint::getTf(): final stats: total/act_tan/ret: " << this->targetTaint.size() << "/" << actTf.size() << "/" << r.size() << "\n";
 #endif
             return true;
         }

@@ -291,7 +291,7 @@ namespace DRCHECKER {
                     }
                     matchPtoTy(srcPointer,currPointsTo,propInst);
 #ifdef DEBUG_UPDATE_POINTSTO
-                    dbgs() << "Insert point-to: ";
+                    dbgs() << "+ PTO: ";
                     currPointsTo->print(dbgs());
 #endif
                     existingPointsTo->insert(existingPointsTo->end(), currPointsTo);

@@ -713,7 +713,7 @@ namespace DRCHECKER {
                 return false;
             }
             if (targetFieldTaint == nullptr) {
-                targetFieldTaint = new FieldTaint(srcfieldId);
+                targetFieldTaint = new FieldTaint(srcfieldId,this);
                 this->taintedFields.push_back(targetFieldTaint);
             }
             return targetFieldTaint->addTf(targetTaintFlag);

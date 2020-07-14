@@ -309,9 +309,7 @@ namespace DRCHECKER {
                         expObjTy && dyn_cast<CompositeType>(expObjTy) && obj->targetObject->targetType != expObjTy) 
                     {
 #ifdef DEBUG_CHANGE_HEAPLOCATIONTYPE
-                        dbgs() << "AliasObject::fetchPointsToObjects: isHeapLocation: " << (obj->targetObject && obj->targetObject->isHeapLocation()) << " dstField: " << obj->dstfieldId;
-                        dbgs() << " expObjTy: " << InstructionUtils::getTypeStr(expObjTy) << "\n";
-                        dbgs() << "AliasObject::fetchPointsToObjects: Change type of the HeapLocation.\n";
+                        dbgs() << "AliasObject::fetchPointsToObjects: Change type of the HeapLocation obj to: " << InstructionUtils::getTypeStr(expObjTy) << "\n"; 
 #endif
                         //Change type.
                         obj->targetObject->reset(targetInstr,expObjTy,currInst);
@@ -326,9 +324,8 @@ namespace DRCHECKER {
                     auto p = std::make_pair(obj->dstfieldId, obj->targetObject);
                     if (std::find(dstObjects.begin(), dstObjects.end(), p) == dstObjects.end()) {
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-                        dbgs() << "Found a new obj in |pointsTo| records, insert it to the dstObjects.\n";
-                        dbgs() << "Type: " << InstructionUtils::getTypeStr(obj->targetObject->targetType) << " | " << obj->dstfieldId << " | is_taint_src: " << obj->targetObject->is_taint_src << "\n";
-                        dbgs() << "Val: " << InstructionUtils::getValueStr(obj->targetObject->getValue()) << " ID: " << (const void*)(obj->targetObject) << "\n";
+                        dbgs() << "-> " << InstructionUtils::getTypeStr(obj->targetObject->targetType) << " | " << obj->dstfieldId << ", obj: " << (const void*)(obj->targetObject);
+                        dbgs() << ", is_taint_src: " << obj->targetObject->is_taint_src << ", Val: " << InstructionUtils::getValueStr(obj->targetObject->getValue()) << "\n";
 #endif
                         dstObjects.insert(dstObjects.end(), p);
                     }
@@ -1564,19 +1561,19 @@ namespace DRCHECKER {
 
     void PointerPointsTo::print(llvm::raw_ostream& OS) {
         if (this->targetObject) {
-            OS << InstructionUtils::getTypeStr(this->targetObject->targetType) << " | " << this->dstfieldId << " ,is_taint_src: " << this->targetObject->is_taint_src;
-            OS << ", Obj ID: " << (const void*)(this->targetObject) << "\n";
             Value *tv = this->targetObject->getValue();
+            OS << InstructionUtils::getTypeStr(this->targetObject->targetType) << " | " << this->dstfieldId << " ,is_taint_src: " << this->targetObject->is_taint_src;
+            OS << ", Obj ID: " << (const void*)(this->targetObject) << ", Inst/Val: " << InstructionUtils::getValueStr(tv) << "\n";
+            /*
             if (tv){
                 dbgs() << "Inst/Val: " << InstructionUtils::getValueStr(tv) << "\n";
-                /*
                 if (dyn_cast<Instruction>(tv)){
                     InstructionUtils::printInst(dyn_cast<Instruction>(tv),dbgs());
                 }else{
                     dbgs() << InstructionUtils::getValueStr(tv) << "\n";
                 }
-                */
             }
+            */
         }else {
             OS << "Null targetObject!\n";
         }

@@ -76,6 +76,21 @@ int ioctl0(int cmd, void *p) {
     return 0;
 }
 
+int ioctl2(int cmd, void *p) {
+    int res;
+    data *ui = (data*)p;
+    switch(cmd) {
+        case 0:
+            //g6.p->a = ui->a;
+            d2.a = ui->a;
+            break;
+        default:
+            break;
+    }
+    return 0;
+}
+
+
 int ioctl1(int cmd, void *p) {
     int res;
     G *pg;
@@ -112,5 +127,6 @@ int main(int argc, char **argv){
     g6.p = &d0;
     ioctl0(argc,0);
     ioctl1(argc,0);
+    ioctl2(argc,0);
     return 0;
 }

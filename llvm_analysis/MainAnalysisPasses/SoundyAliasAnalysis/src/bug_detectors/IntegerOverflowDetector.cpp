@@ -38,13 +38,12 @@ HANDLE_BINARY_INST(21, FDiv , BinaryOperator)
 */
 #define BIN_OP_START 13
 #define BIN_OP_END 18
-#define ONLY_ONE_WARNING
+//#define ONLY_ONE_WARNING
+#define DEBUG_VISIT_BIN_OP
 
     void IntegerOverflowDetector::visitBinaryOperator(BinaryOperator &I) {
         unsigned long opCode = I.getOpcode();
-        //TODO: what if there are different warnings for the same inst but w/ different calling contexts?
-        //What if some of these warnings are true and some are FP, but we only keep the FP ones due to the below filtering?
-        // warning already raised for this instruction.
+        // warning already raised for this instruction in the current calling context. 
         if (this->warnedInstructions.find(&I) != this->warnedInstructions.end()) {
             return;
         }
@@ -64,6 +63,12 @@ HANDLE_BINARY_INST(21, FDiv , BinaryOperator)
                     resultingTaintInfo.insert(srcTaintInfo->begin(), srcTaintInfo->end());
                 }
             }
+            if (resultingTaintInfo.empty()) {
+                return;
+            }
+#ifdef DEBUG_VISIT_BIN_OP
+            dbgs() << "IntegerOverflowDetector::visitBinaryOperator(): visit a bin op w/ TFs: " << InstructionUtils::getValueStr(&I) << "\n";
+#endif
             // raise warning for each of the tainted values.
             for (TaintFlag *currFlag : resultingTaintInfo) {
                 //We want to detect high-order taint style vulnerabilities here, so we cannot only simply look at the current TaintFlag,
@@ -73,12 +78,19 @@ HANDLE_BINARY_INST(21, FDiv , BinaryOperator)
                 if (!currFlag || !currFlag->isTainted()) {
                     continue;
                 }
+#ifdef DEBUG_VISIT_BIN_OP
+                dbgs() << "IntegerOverflowDetector::visitBinaryOperator(): got a TF: ";
+                currFlag->dumpInfo_light(dbgs());
+#endif
                 std::set<std::vector<InstLoc*>*> tchains;
                 this->currState.getAllUserTaintChains(currFlag,tchains);
                 if (tchains.empty()) {
                     //No taint from user inputs.
                     continue;
                 }
+#ifdef DEBUG_VISIT_BIN_OP
+                dbgs() << "IntegerOverflowDetector::visitBinaryOperator(): we can construct a user taint chain for this TF, fire a warning!\n";
+#endif
                 std::string warningMsg = "Potential overflow, using tainted value in binary operation.";
                 VulnerabilityWarning *currWarning = new VulnerabilityWarning(this->currFuncCallSites,
                                                                              &tchains,
