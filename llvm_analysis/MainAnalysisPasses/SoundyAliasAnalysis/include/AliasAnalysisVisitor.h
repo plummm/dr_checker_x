@@ -130,7 +130,7 @@ namespace DRCHECKER {
          * @param srcPointer pointer whose points to information need to be updated.
          * @param newPointsToInfo the set of points to information for the provided pointer.
          */
-        void updatePointsToObjects(Value *srcPointer, std::set<PointerPointsTo*>* newPointsToInfo);
+        void updatePointsToObjects(Value *srcPointer, std::set<PointerPointsTo*>* newPointsToInfo, bool free);
         //This is a wrapper for the single pto case.
         void updatePointsToObjects(Value *p, AliasObject *obj, InstLoc *propInst = nullptr, long fid = 0, long dfid = 0, bool is_weak = false);
         /***

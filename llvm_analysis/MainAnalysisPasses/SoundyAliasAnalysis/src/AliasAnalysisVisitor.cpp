@@ -234,10 +234,10 @@ namespace DRCHECKER {
         std::set<PointerPointsTo*> ptos;
         PointerPointsTo *pto = new PointerPointsTo(p,fid,obj,dfid,propInst,is_weak);
         ptos.insert(pto);
-        return this->updatePointsToObjects(p,&ptos);
+        return this->updatePointsToObjects(p,&ptos,false);
     }
 
-    void AliasAnalysisVisitor::updatePointsToObjects(Value *srcPointer, std::set<PointerPointsTo*> *newPointsToInfo) {
+    void AliasAnalysisVisitor::updatePointsToObjects(Value *srcPointer, std::set<PointerPointsTo*> *newPointsToInfo, bool free = true) {
         /***
          *  Update the pointsto objects of the srcPointer to newPointstoInfo
          *  At the current instruction.
@@ -246,81 +246,50 @@ namespace DRCHECKER {
          */
 #ifdef DEBUG_UPDATE_POINTSTO
         dbgs() << "updatePointsToObjects for : " << InstructionUtils::getValueStr(srcPointer) << "\n";
-        dbgs() << "#newPointsToInfo: " << newPointsToInfo->size();
 #endif
-        if(!newPointsToInfo || newPointsToInfo->size() <= 0){
+        if(!newPointsToInfo || newPointsToInfo->size() == 0){
             //nothing to update.
             return;
         }
-#ifdef DEBUG_UPDATE_POINTSTO
-        //bool dbg = (newPointsToInfo->size() > 2);
-        bool dbg = false;
-#else
-        bool dbg = false;
-#endif
-        std::map<Value *, std::set<PointerPointsTo*>*>* targetPointsToMap = this->currState.getPointsToInfo(this->currFuncCallSites);
-        auto prevPointsToSet = targetPointsToMap->find(srcPointer);
-        //hz: slightly change the logic here in case that "newPointsToInfo" contains some duplicated items.
-        if(prevPointsToSet == targetPointsToMap->end()) {
+        std::map<Value*, std::set<PointerPointsTo*>*> *targetPointsToMap = this->currState.getPointsToInfo(this->currFuncCallSites);
+        if (targetPointsToMap->find(srcPointer) == targetPointsToMap->end()) {
             (*targetPointsToMap)[srcPointer] = new std::set<PointerPointsTo*>();
         }
-        prevPointsToSet = targetPointsToMap->find(srcPointer);
-        if(prevPointsToSet != targetPointsToMap->end()) {
-            // OK, there are some previous values for this
-            std::set<PointerPointsTo*>* existingPointsTo = prevPointsToSet->second;
-            assert(existingPointsTo != nullptr);
+        std::set<PointerPointsTo*>* existingPointsTo = (*targetPointsToMap)[srcPointer];
 #ifdef DEBUG_UPDATE_POINTSTO
-            dbgs() << " #existingPointsTo: " << existingPointsTo->size() << "\n";
+        dbgs() << "#newPointsToInfo: " << newPointsToInfo->size() << " #existingPointsTo: " << existingPointsTo->size() << "\n";
 #endif
-            for(PointerPointsTo *currPointsTo : *newPointsToInfo) {
-                // Some basic sanity check.
-                if (!currPointsTo || !currPointsTo->targetObject) {
-                    continue;
-                }
-                // for each points to, see if we already have that information, if yes, ignore it.
-                if(std::find_if(existingPointsTo->begin(), existingPointsTo->end(), [currPointsTo,dbg,this](const PointerPointsTo *n) {
-                    return this->isPtoDuplicated(currPointsTo,n,dbg);
-                }) == existingPointsTo->end()) {
-                    if(dbg){
-                        dbgs() << "############# Inserted!!!\n";
-                    }
-                    //handle the implicit type cast (i.e. type cast that is not explicitly performed by the 'cast' inst) if any.
-                    Instruction *propInst = nullptr;
-                    if (currPointsTo->propagatingInst) {
-                        propInst = dyn_cast<Instruction>(currPointsTo->propagatingInst->inst);
-                    }
-                    matchPtoTy(srcPointer,currPointsTo,propInst);
-#ifdef DEBUG_UPDATE_POINTSTO
-                    dbgs() << "+ PTO: ";
-                    currPointsTo->print(dbgs());
-#endif
-                    existingPointsTo->insert(existingPointsTo->end(), currPointsTo);
-                } else {
-                    //delete the points to object, as we already have a similar pointsTo object.
-                    if(dbg){
-                        dbgs() << "############# Duplicated!!!\n";
-                    }
-                    delete (currPointsTo);
-                }
+        for(PointerPointsTo *currPointsTo : *newPointsToInfo) {
+            // Some basic sanity check.
+            if (!currPointsTo || !currPointsTo->targetObject) {
+                continue;
             }
-            // delete the set pointer.
+            // for each points to, see if we already have that information, if yes, ignore it.
+            if(std::find_if(existingPointsTo->begin(), existingPointsTo->end(), [currPointsTo,this](const PointerPointsTo *n) {
+                return this->isPtoDuplicated(currPointsTo,n,false);
+            }) == existingPointsTo->end()) {
+                //handle the implicit type cast (i.e. type cast that is not explicitly performed by the 'cast' inst) if any.
+                Instruction *propInst = nullptr;
+                if (currPointsTo->propagatingInst) {
+                    propInst = dyn_cast<Instruction>(currPointsTo->propagatingInst->inst);
+                }
+                matchPtoTy(srcPointer,currPointsTo,propInst);
+#ifdef DEBUG_UPDATE_POINTSTO
+                dbgs() << "++ PTO: ";
+                currPointsTo->print(dbgs());
+#endif
+                existingPointsTo->insert(existingPointsTo->end(), currPointsTo);
+            } else {
+                //delete the points to object, as we already have a similar pointsTo object.
+                delete(currPointsTo);
+            }
+        }
+        //Free the memory if required.
+        if (free) {
             delete(newPointsToInfo);
-
-        } else {
-#ifdef DEBUG_UPDATE_POINTSTO
-            errs() << "Impossible to reach here...\n";
-#endif
-            assert(false);
-            /*
-            dbgs() << " existingPointsTo: 0";
-            assert(newPointsToInfo != nullptr);
-            if(newPointsToInfo->size() > 0){
-                (*targetPointsToMap)[srcPointer] = newPointsToInfo;
-            }
-            */
         }
 #ifdef DEBUG_UPDATE_POINTSTO
-        dbgs() << " #After update: " << (*targetPointsToMap)[srcPointer]->size() << "\n";
+        dbgs() << "updatePointsToObjects: #After update: " << existingPointsTo->size() << "\n";
 #endif
     }
 
@@ -1885,10 +1854,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
                 long arg_no = e.second;
                 if (arg_no == -1) {
                     //this means the function return value should point to the newly created file struct.
-                    std::set<PointerPointsTo*> *newPointsToInfo = new std::set<PointerPointsTo*>();
-                    PointerPointsTo *pto = new PointerPointsTo(&I, 0, newObj, 0, propInst, false);
-                    newPointsToInfo->insert(pto);
-                    this->updatePointsToObjects(&I, newPointsToInfo);
+                    this->updatePointsToObjects(&I, newObj, propInst);
                     continue;
                 }
                 if (arg_no < 0 || arg_no >= (long)I.getNumArgOperands()) {
