@@ -117,6 +117,18 @@ int ioctl1(int cmd, void *p) {
             //Exp: g6.p only points to d3 (post-dom and strong update).
             foo2(&g6);
             break;
+        case 1:
+            //This case is to test the pto path-coverage (i.e. whether along every path there exists a pto record, if none, we should create a dummy pto for it).
+            if (ui->a) {
+                g6.p = &d3;
+            }
+            //here g6.p can still potentially point to anything (e.g. a dummy pointee obj should be created), it's still possible that the TF from ioctl0 and ioctl2 can reach here.
+            //Why d0 in ioctl0 or d2 in ioctl2 *can* be this dummy? Imagine that there exists some un-analyzed preliminary code that assigns them as a pointee of g6->p.
+            //NOTE that we can match this dummy w/ d0 in ioctl0 or d2 in ioctl2 because case 0 of ioctl1 assigns both d0,d1,d2,d3 as a pointee of G6->p, so our access path based matching can work,
+            //if there is no such a "case 0", we will have FNs here.
+            //TODO: if we're sure that all preliminary code have been analyzed (so this dummy pto can only come from other parallel code segments), then we need to only match this
+            //dummy pto w/ some "winner" ptos to the real objects (e.g. &d3 in case 0 of ioctl 1). 
+            foo1(&g6);
         default:
             break;
     }

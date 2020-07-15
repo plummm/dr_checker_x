@@ -46,17 +46,27 @@ namespace DRCHECKER {
         if (!newObj) {
             return;
         }
+        /*
+        //TODO: we need to re-consider whether to propagate the host field TF (inherent or not or both?) to the new dummy pointee obj, consider the
+        //case where a "store" assigns the address of a real obj to the host field - in that situation we actually wouldn't propagate the host field TFs.
+        //If we disable the propagation, will we miss any potential bugs (e.g. to modify the host field is to select the pointee, indirectly controlling 
+        //the pointee obj content)? But on the other hand, we can still match this dummy obj w/ other potential real objs that can be selected by changing
+        //the host field..
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
         dbgs() << "AliasObject::taintPointeeObj(): " << (const void*)this << " | " << srcfieldId << " (src) --> " << (const void*)newObj << " (sink)\n";
 #endif
         std::set<TaintFlag*> tfs;
         this->getFieldTaintInfo(srcfieldId,tfs,targetInstr);
         for (TaintFlag *tf : tfs) {
+            //if (tf->is_inherent) {
+            //    continue;
+            //}
             //NOTE: no need to check taint path again here since "getFieldTaintInfo" already ensure its validity.
             TaintFlag *ntf = new TaintFlag(tf,targetInstr);
             //NOTE: "is_weak" is inherited.
             newObj->taintAllFields(ntf);
         }
+        */
         //If the host object is a global taint source, then we also set the newly created field pointee object as so.
         //TODO: justify this decision.
         if (this->is_taint_src) {
@@ -185,11 +195,11 @@ namespace DRCHECKER {
                     continue;
                 }
                 InstLoc *pil = pto->propagatingInst;
-                if (!pil->hasCtx()) {
+                if (!pil->inEntry()) {
                     has_global_pto = true;
                     break;
                 }
-                if (pil->hasCtx() && pil->ctx->size() == 1 && loc->hasCtx() && 
+                if (pil->ctx->size() == 1 && loc->hasCtx() && 
                     (*loc->ctx)[0] == (*pil->ctx)[0] && pil->inst && pil->inst == (*pil->ctx)[0]) {
                     //Has a pto set up at the level 0 function entry.
                     has_global_pto = true;
@@ -652,7 +662,7 @@ namespace DRCHECKER {
             }
             this->activateFieldPto(x,true);
 #ifdef DEBUG_UPDATE_FIELD_POINT
-            dbgs() << "updateFieldPointsTo_do(): add and activate point-to: ";
+            dbgs() << "updateFieldPointsTo_do(): add and activate point-to: host: " << (const void*)this << ", ";
             x->print(dbgs());
 #endif
         }
