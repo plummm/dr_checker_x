@@ -779,6 +779,7 @@ namespace DRCHECKER {
         }
     }
 
+#ifdef CONTROL_TAINT
     //hz: add support for branch and switch instructions into taint analysis. 
     //TODO: In the future if we want to do control taint, we need to extend these below methods.
 
@@ -841,5 +842,6 @@ namespace DRCHECKER {
             }
         }
     }
+#endif
 
 }

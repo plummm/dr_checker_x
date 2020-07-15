@@ -15,6 +15,8 @@ using namespace llvm;
 
 namespace DRCHECKER {
 
+    //#define CONTROL_TAINT
+
     /***
      * The main class that implements the taint propagation for all the relevant
      * instructions.
@@ -91,12 +93,14 @@ namespace DRCHECKER {
 
         virtual void visitICmpInst(ICmpInst &I);
 
+#ifdef CONTROL_TAINT
         //hz: add new instruction support to taint analysis.
         virtual void visitBranchInst(BranchInst &I);
 
         //virtual void visitIndirectBrInst(IndirectBrInst &I);
 
         virtual void visitSwitchInst(SwitchInst &I);
+#endif
 
     private:
         /***

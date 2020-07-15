@@ -44,10 +44,10 @@ namespace DRCHECKER {
 //#define DEBUG_GLOBAL_VARIABLES
 //#define DEBUG_GLOBAL_TAINT
 
-#define NETDEV_IOCTL "NETDEVIOCTL"
-#define READ_HDR "FileRead"
-#define WRITE_HDR "FileWrite"
-#define IOCTL_HDR "IOCTL"
+#define NETDEV_IOCTL "NETDEV_IOCTL"
+#define READ_HDR "READ_HDR"
+#define WRITE_HDR "WRITE_HDR"
+#define IOCTL_HDR "IOCTL_HDR"
 #define DEVATTR_SHOW "DEVSHOW"
 #define DEVATTR_STORE "DEVSTORE"
 #define V4L2_IOCTL_FUNC "V4IOCTL"
@@ -392,15 +392,17 @@ namespace DRCHECKER {
                 delete(vis);
             }
 
+            auto t_now = std::chrono::system_clock::now();
+            std::chrono::duration<double> elapsed_seconds = t_now - t_start;
+            dbgs() << "[TIMING] All main anlysis done in : " << elapsed_seconds.count() << "s\n";
+
             //The main analysis has finished, now dump the results for manual analysis and debugging.
             //Print the main analysis results (e.g. AliasAnalysis and TaintAnalysis) and debug info.
+            /*
             std::string rid = checkFunctionName;
             if (checkFunctionName.size() == 0) {
                 rid = entryConfig.substr(entryConfig.rfind("/") + 1);
             }
-            auto t_now = std::chrono::system_clock::now();
-            std::chrono::duration<double> elapsed_seconds = t_now - t_start;
-            dbgs() << "[TIMING] All anlysis done in : " << elapsed_seconds.count() << "s\n";
 
             dbgs() << "Now start to serialize the taint information...\n";
             currState.serializeTaintInfo("taint_info_" + rid + "_serialize");
@@ -420,6 +422,7 @@ namespace DRCHECKER {
             auto t_end1 = std::chrono::system_clock::now();
             elapsed_seconds = t_end1 - t_end0;
             dbgs() << "[TIMING] Taint info dumped in : " << elapsed_seconds.count() << "s\n";
+            */
 
             //Bug detection phase: traverse all the code (for every entry function) again and detect potential bugs along the way.
             //We need to have a separate traversal because we want to detect high-order taint bugs, so we must wait until all analysis have been done.
@@ -548,6 +551,7 @@ namespace DRCHECKER {
             // next add taint analysis.
             allCallbacks->insert(allCallbacks->end(), currVisCallback);
 
+            /*
             //hz: add the 3rd basic analysis: mod analysis to figure out which instructions can modify the global states.
             currVisCallback = new ModAnalysisVisitor(targetState, toAnalyze, srcCallSites);
 
@@ -559,6 +563,7 @@ namespace DRCHECKER {
 
             // next add mod analysis.
             allCallbacks->insert(allCallbacks->end(), currVisCallback);
+            */
         }
 
         void getAnalysisUsage(AnalysisUsage &AU) const override {
