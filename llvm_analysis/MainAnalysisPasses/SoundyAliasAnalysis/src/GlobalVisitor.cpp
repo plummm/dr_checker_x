@@ -135,7 +135,7 @@ namespace DRCHECKER {
 
         // Create new context.
         //Set up arguments of the called function.
-        std::vector<Instruction *> *newCallContext = new std::vector<Instruction *>();
+        std::vector<Instruction*> *newCallContext = new std::vector<Instruction *>();
         newCallContext->insert(newCallContext->end(), this->currFuncCallSites->begin(), this->currFuncCallSites->end());
         // create context.
         newCallContext->insert(newCallContext->end(), &I);
@@ -154,12 +154,12 @@ namespace DRCHECKER {
         this->currState.getOrCreateContext(newCallContext);
 
         // new callbacks that handles the current function.
-        std::vector<VisitorCallback *> newCallBacks;
+        std::vector<VisitorCallback*> newCallBacks;
 
         // map of the parent visitor to corresponding child visitor.
-        std::map<VisitorCallback *, VisitorCallback *> parentChildCallBacks;
+        std::map<VisitorCallback*, VisitorCallback*> parentChildCallBacks;
 
-        for(VisitorCallback *currCallback:allCallbacks) {
+        for (VisitorCallback *currCallback : allCallbacks) {
             VisitorCallback *newCallBack = currCallback->visitCallInst(I, currFunc, this->currFuncCallSites, newCallContext);
             if(newCallBack != nullptr) {
                 newCallBacks.insert(newCallBacks.end(), newCallBack);
@@ -168,12 +168,14 @@ namespace DRCHECKER {
         }
         // if there are new call backs? then create a GlobalVisitor and run the corresponding  visitor
         if(newCallBacks.size() > 0) {
-
             // Make sure we have the function definition.
             assert(!currFunc->isDeclaration());
 #ifdef DEBUG_CALL_INSTR
             dbgs() << "Analyzing new function: " << currFuncName << " Call depth: " << newCallContext->size() << "\n";
 #endif
+            //log the current calling context.
+            dbgs() << "CTX: ";
+            InstructionUtils::printCallingCtx(dbgs(),newCallContext,true);
 #ifdef TIMING
             dbgs() << "[TIMING] Start func(" << newCallContext->size() << ") " << currFuncName << ": ";
             auto t0 = InstructionUtils::getCurTime(&dbgs());
@@ -200,27 +202,27 @@ namespace DRCHECKER {
             dbgs() << "[TIMING] End func(" << newCallContext->size() << ") " << currFuncName << " in: ";
             InstructionUtils::getTimeDuration(t0,&dbgs());
 #endif
+            //log the current calling context.
+            dbgs() << "CTX: ";
+            InstructionUtils::printCallingCtx(dbgs(),this->currFuncCallSites,true);
         }
     }
 
     // Visit Call Instruction.
     void GlobalVisitor::visitCallInst(CallInst &I) {
-
-        if(this->inside_loop) {
+        if (this->inside_loop) {
 #ifdef DEBUG_CALL_INSTR
             dbgs() << "Function inside loop, will be analyzed at last iteration\n";
 #endif
             return;
         }
-
         Function *currFunc = I.getCalledFunction();
-        if(currFunc == nullptr) {
+        if (currFunc == nullptr) {
             // this is to handle casts.
             currFunc = dyn_cast<Function>(I.getCalledValue()->stripPointerCasts());
         }
-
         // ignore only if the current function is an external function
-        if(currFunc == nullptr || !currFunc->isDeclaration()) {
+        if (currFunc == nullptr || !currFunc->isDeclaration()) {
             // check if the call instruction is already processed?
             if (this->visitedCallSites.find(&I) != this->visitedCallSites.end()) {
 #ifdef DEBUG_CALL_INSTR
@@ -228,19 +230,18 @@ namespace DRCHECKER {
 #endif
                 return;
             }
-
-            //TODO: a special case: the first instruction in current host function is a call inst... in this case, the first inst itself will be used as
-            //a context inst (to identify different callees), so we cannot pass the below check, although we haven't processed this call site.
-            if(std::find(this->currFuncCallSites->begin(), this->currFuncCallSites->end(), &I) != this->currFuncCallSites->end()) {
+            //Only the odd entry in the calling context represents a call site, the even entry is the first inst of a callee.
+            for (int i = 1; i < this->currFuncCallSites->size(); i += 2) {
+                if ((*this->currFuncCallSites)[i] == &I) {
 #ifdef DEBUG_CALL_INSTR
-                dbgs() << "Call-graph cycle found: " << InstructionUtils::getValueStr(&I) << "\n";
+                    dbgs() << "Call-graph cycle found: " << InstructionUtils::getValueStr(&I) << "\n";
 #endif
-                return;
+                    return;
+                }
             }
         }
         // insert into visited call sites.
         this->visitedCallSites.insert(this->visitedCallSites.end(), &I);
-
 
         if(currFunc != nullptr) {
             this->processCalledFunction(I, currFunc);
@@ -260,14 +261,14 @@ namespace DRCHECKER {
             bool hasTargets = PointsToUtils::getTargetFunctions(this->currState, this->currFuncCallSites,
                                                                 calledValue, targetFunctions);
 #ifdef SMART_FUNCTION_PTR_RESOLVING
-            if(!hasTargets) {
+            if (!hasTargets) {
                 hasTargets = PointsToUtils::getPossibleFunctionTargets(I, targetFunctions);
 #ifdef DEBUG_CALL_INSTR
                 if(targetFunctions.size() > 0) {
                     dbgs() << "Function Pointer targets:" << targetFunctions.size() << "\n";
                 }
 #endif
-                std::vector<Function *> filteredFunctions;
+                std::vector<Function*> filteredFunctions;
                 for(unsigned i=0; i<MAX_FUNC_PTR && i<targetFunctions.size(); i++) {
                     filteredFunctions.push_back(targetFunctions[i]);
                 }
@@ -288,7 +289,7 @@ namespace DRCHECKER {
 #ifdef DEBUG_CALL_INSTR
                 dbgs() << "There are:" << targetFunctions.size() << " Target Functions.\n";
 #endif
-                for(Function *currFunction:targetFunctions) {
+                for(Function *currFunction : targetFunctions) {
                     this->processCalledFunction(I, currFunction);
                 }
 
@@ -302,8 +303,6 @@ namespace DRCHECKER {
             }
         }
     }
-
-
 
     void GlobalVisitor::visit(BasicBlock *BB) {
         if(this->currState.numTimeAnalyzed.find(BB) != this->currState.numTimeAnalyzed.end()) {

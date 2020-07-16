@@ -1303,6 +1303,24 @@ namespace DRCHECKER {
         return "";
     }
 
+    void InstructionUtils::printCallingCtx(raw_ostream &O, std::vector<Instruction*> *ctx, bool lbreak) {
+        if (ctx && ctx->size() > 0) {
+            std::string lastFunc;
+            for (Instruction *inst : *ctx) {
+                if (inst && inst->getParent() && inst->getFunction()) {
+                    std::string func = inst->getFunction()->getName().str();
+                    if (func != lastFunc) {
+                        O << func << " -> ";
+                        lastFunc = func;
+                    }
+                }
+            }
+        }
+        if (lbreak) {
+            O << "\n";
+        }
+    }
+
     bool InstructionUtils::isPrimitiveTy(Type *ty) {
         if (ty) {
             return (ty->isVoidTy() || ty->isIntegerTy());

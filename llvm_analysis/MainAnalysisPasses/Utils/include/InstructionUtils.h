@@ -258,6 +258,8 @@ namespace DRCHECKER {
         static std::chrono::duration<double> getTimeDuration(std::chrono::time_point<std::chrono::system_clock> prev, raw_ostream *OS = nullptr);
 
         static int dumpFuncGraph(Function *f);
+
+        static void printCallingCtx(raw_ostream &O, std::vector<Instruction*> *ctx, bool lbreak = false);
     };
 
 }

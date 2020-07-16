@@ -133,6 +133,10 @@ namespace DRCHECKER {
         // a map of basic block to number of times it is analyzed.
         std::map<const BasicBlock*, unsigned long> numTimeAnalyzed;
 
+        //Indicates the analysis phase we're currently in, now:
+        //1 = preliminary phase, 2 = main analysis phase, 3 = bug detection phase.
+        int analysis_phase = 0;
+
 
         GlobalState(RangeAnalysis::RangeAnalysis *ra, DataLayout *currDataLayout) {
             this->range_analysis = ra;
@@ -450,10 +454,67 @@ namespace DRCHECKER {
 
 
         // Get the context for the provided instruction at given call sites.
-        AnalysisContext* getContext(std::vector<Instruction *> *callSites) {
-            for(auto curr_a:availableAnalysisContexts) {
+        AnalysisContext* getContext(std::vector<Instruction*> *callSites) {
+            if (!callSites) {
+                if (this->analysis_phase > 2) {
+                    dbgs() << "!!! getContext(): Null callSites received in the bug detection phase!\n";
+                }
+                return nullptr;
+            }
+            for (auto curr_a : availableAnalysisContexts) {
                 if(*(curr_a->callSites) == *callSites) {
                     return curr_a;
+                }
+            }
+            //////////Below is just for debugging...
+            //In theory all contexts have been analyzed in the main analysis phase, it's impossible that
+            //in bug detection phase we have an unseen context. If this happens, we really need a thorough inspection...
+            if (this->analysis_phase > 2) {
+                dbgs() << "!!!!! getContext(): In bug detection phase we have an unseen calling context:\n";
+                for (Instruction *inst : *callSites) {
+                    InstructionUtils::printInst(inst,dbgs());
+                }
+                dbgs() << "We now have " << this->availableAnalysisContexts.size() << " ctx available, try to find a nearest one...\n";
+                //(1) Longest common prefix, and (2) most matched insts.
+                std::vector<Instruction*> *lcp = nullptr, *mmi = nullptr;
+                int nlcp = 0, nmmi = 0;
+                for (auto curr_a : this->availableAnalysisContexts) {
+                    std::vector<Instruction*> *c = curr_a->callSites;
+                    if (!c) {
+                        continue;
+                    }
+                    bool pr = true;
+                    int nl = 0, nm = 0;
+                    for (int i = 0; i < callSites->size() && i < c->size(); ++i) {
+                        if ((*c)[i] == (*callSites)[i]) {
+                            if (pr) {
+                                ++nl;
+                            }
+                            ++nm;
+                        }else {
+                            pr = false;
+                        }
+                    }
+                    if (nl > nlcp) {
+                        nlcp = nl;
+                        lcp = c;
+                    }
+                    if (nm > nmmi) {
+                        nmmi = nm;
+                        mmi = c;
+                    }
+                }
+                if (lcp) {
+                    dbgs() << "==The candidate w/ longest common prefix:\n";
+                    for (Instruction *inst : *lcp) {
+                        InstructionUtils::printInst(inst,dbgs());
+                    }
+                }
+                if (mmi) {
+                    dbgs() << "==The candidate w/ most matched insts:\n";
+                    for (Instruction *inst : *mmi) {
+                        InstructionUtils::printInst(inst,dbgs());
+                    }
                 }
             }
             return nullptr;

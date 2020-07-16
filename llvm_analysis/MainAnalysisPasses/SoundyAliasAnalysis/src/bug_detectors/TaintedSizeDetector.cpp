@@ -54,10 +54,8 @@ namespace DRCHECKER {
 
         if(!targetFunction->isDeclaration()) {
             // only if the function has source.
-
             TaintedSizeDetector *newVis = new TaintedSizeDetector(this->currState, targetFunction,
                                                                   currFuncCallSites, this->targetChecker);
-
             return newVis;
         }
         return nullptr;

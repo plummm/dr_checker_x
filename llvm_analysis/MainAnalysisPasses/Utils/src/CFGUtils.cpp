@@ -677,18 +677,7 @@ namespace DRCHECKER {
         if (this->inst) {
             O << InstructionUtils::getValueStr(this->inst);
             O << " (";
-            if (this->ctx && this->ctx->size() > 0) {
-                std::string lastFunc;
-                for (Instruction *inst : *this->ctx) {
-                    if (inst && inst->getParent() && inst->getFunction()) {
-                        std::string func = inst->getFunction()->getName().str();
-                        if (func != lastFunc) {
-                            O << func << " -> ";
-                            lastFunc = func;
-                        }
-                    }
-                }
-            }
+            InstructionUtils::printCallingCtx(O,this->ctx,false);
             O << ")";
         }
         if (lbreak) {

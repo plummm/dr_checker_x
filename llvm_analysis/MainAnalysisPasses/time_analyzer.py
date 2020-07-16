@@ -30,7 +30,31 @@ def print_array_info(arr,detail=False):
         print '  Tail: ' + str(tail)
     return [n,s,avg]
 
+#This simulates the bottom-up summary based program analysis and estimates and amount of time we can save, compared to top-down approach.
+#NOTE that the time saving is just a upper bound, as even we use function summary, at each callsite we still need to apply that summary,
+#which also costs some time. (i.e. in this function we assume no extra costs for summary application).
+stk = []
+visited_funcs = {}
+def calc_bottom_up_time(name,lvl,t):
+    global stk,visited_funcs
+    n = {'name':name,'level':lvl,'time':t,'reduction':0.0}
+    i = len(stk) - 1
+    s = 0.0
+    while i >= 0 and stk[i]['level'] > lvl:
+        s += stk[i]['reduction']
+        i -= 1
+    #If we have already visited current func, we have its summary and save the time to analyze it again.
+    if visited_funcs.has_key(name):
+        s = t
+    else:
+        visited_funcs[name] = 1
+    n['reduction'] = s
+    #push to stack and do reduction.
+    stk = stk[:i+1]
+    stk.append(n)
+
 def time_analysis(tl):
+    global stk
     t_inst = {
         'visitLoadInst' : [],
         'visitStoreInst' : [],
@@ -41,6 +65,8 @@ def time_analysis(tl):
         for l in f:
             if not l.startswith('[TIMING]'):
                 continue
+            if l.find('All main anlysis done') >= 0:
+                break
             if l.find('End func') >= 0:
                 #Statistics about the function analysis time.
                 #E.g. 
@@ -56,6 +82,7 @@ def time_analysis(tl):
                 t = ext_time_sec(l)
                 ft.setdefault(level,{}).setdefault(nm,[])
                 ft[level][nm] += [t]
+                calc_bottom_up_time(nm,level,t)
             else:
                 #Statistics about the inst analysis time.
                 for ki in t_inst:
@@ -81,16 +108,20 @@ def time_analysis(tl):
             [on,oavg] = f_cnt.setdefault(nm,[0,0.0]) 
             f_cnt[nm] = [n+on,(float(n)*avg+float(on)*oavg)/float(n+on)]
     print '=============DUPLICATED FUNCS============='
-    total = 0.0
     dcnt = 0
     for nm in sorted(f_cnt.keys(),key = lambda x : f_cnt[x][0]*f_cnt[x][1]):
         [n,avg] = f_cnt[nm]
         if n > 1:
             dcnt += 1
             print '%-*s cnt: %-*d avg: %-*f total: %-*f' % (FUNC_NAME_LEN_MAX,nm,5,n,12,avg,12,n*avg)
-            total += float(n-1)*avg
     print 'Ratio: %d/%d' % (dcnt,len(f_cnt))
-    print 'Total Extra Cost Compared to Bottom-Up: ' + str(total) + 's'
+    print stk
+    orig = 0.0
+    save = 0.0
+    for n in stk:
+        orig += n['time']
+        save += n['reduction']
+    print 'Total: %f, Bottom-Up Saving: %f, After Saving: %f' % (orig,save,orig-save)
 
 if __name__ == '__main__':
     if len(sys.argv) < 2:

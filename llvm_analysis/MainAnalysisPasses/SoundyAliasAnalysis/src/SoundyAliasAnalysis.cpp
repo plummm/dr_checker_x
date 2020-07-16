@@ -290,6 +290,8 @@ namespace DRCHECKER {
             // Call init functions.
             //hz: this is a lightweight (i.e. only includes alias analysis) analysis for the init functions (e.g. .open and .probe), 
             //the goal is to set up some preliminary point-to records used in the real target functions.
+            dbgs() << "=========================Preliminary Analysis Phase=========================\n";
+            currState.analysis_phase = 1;
             if (!skipInit) {
                 std::set<Function*> toAnalyzeInitFunctions;
                 for (FuncInf *fi : targetFuncs) {
@@ -297,7 +299,7 @@ namespace DRCHECKER {
                 }
                 dbgs() << "Analyzing: " << toAnalyzeInitFunctions.size() << " init functions\n";
                 for(auto currInitFunc : toAnalyzeInitFunctions) {
-                    dbgs() << "Analyzing init function: " << currInitFunc->getName() << "\n";
+                    dbgs() << "CTX: " << currInitFunc->getName() << " ->\n";
 #ifdef TIMING
                     dbgs() << "[TIMING] Start func(1) " << currInitFunc->getName() << ": ";
                     auto t0 = InstructionUtils::getCurTime(&dbgs());
@@ -330,6 +332,8 @@ namespace DRCHECKER {
 
             auto t_prev = std::chrono::system_clock::now();
             auto t_next = t_prev;
+            dbgs() << "=========================Main Analysis Phase=========================\n";
+            currState.analysis_phase = 2;
             for (FuncInf *fi : targetFuncs) {
                 if (!fi || !fi->func || fi->func->isDeclaration()) {
                     dbgs() << "!!! runOnModule(): (!fi || !fi->func || fi->func->isDeclaration())\n";
@@ -368,7 +372,7 @@ namespace DRCHECKER {
                 GlobalVisitor *vis = new GlobalVisitor(currState, &currFunction, pcallSites, traversalOrder, allCallBacks);
 
                 //SAAVisitor *vis = new SAAVisitor(currState, &currFunction, pcallSites, traversalOrder);
-                dbgs() << "Analyzing new function: " << fi->name << " Call depth: 1\n";
+                dbgs() << "CTX: " << fi->name << " ->\n";
 #ifdef TIMING
                 dbgs() << "[TIMING] Start func(1) " << fi->name << ": ";
                 auto t0 = InstructionUtils::getCurTime(&dbgs());
@@ -426,6 +430,8 @@ namespace DRCHECKER {
 
             //Bug detection phase: traverse all the code (for every entry function) again and detect potential bugs along the way.
             //We need to have a separate traversal because we want to detect high-order taint bugs, so we must wait until all analysis have been done.
+            dbgs() << "=========================Bug Detection Phase=========================\n";
+            currState.analysis_phase = 3;
             for (FuncInf *fi : targetFuncs) {
                 if (!fi || !fi->func || fi->func->isDeclaration()) {
                     dbgs() << "!!! runOnModule(): (!fi || !fi->func || fi->func->isDeclaration())\n";
@@ -441,7 +447,7 @@ namespace DRCHECKER {
 
                 // Since we have already finished the main alias and taint analysis, here we only need to have a pure traversal of the code and invoke the bug detectors.
                 // All pto and taint information have been already saved in the global state (i.e. "currState").
-                std::vector<VisitorCallback *> allCallBacks;
+                std::vector<VisitorCallback*> allCallBacks;
                 // add pre analysis bug detectors/
                 // these are the detectors, that need to be run before all the analysis passes.
                 BugDetectorDriver::addPreAnalysisBugDetectors(currState, &currFunction, pcallSites,
@@ -454,16 +460,16 @@ namespace DRCHECKER {
                 // create global visitor and run it.
                 GlobalVisitor *vis = new GlobalVisitor(currState, &currFunction, pcallSites, traversalOrder, allCallBacks);
 
-                dbgs() << "[Bug-Detection] Analyzing new function: " << fi->name << " Call depth: 1\n";
+                dbgs() << "CTX: " << fi->name << " ->\n";
 #ifdef TIMING
-                dbgs() << "[TIMING][Bug-Detection] Start func(1) " << fi->name << ": ";
+                dbgs() << "[TIMING] Start func(1) " << fi->name << ": ";
                 auto t0 = InstructionUtils::getCurTime(&dbgs());
 #endif
                 DRCHECKER::currEntryFunc = &currFunction;
                 vis->analyze();
 
 #ifdef TIMING
-                dbgs() << "[TIMING][Bug-Detection] End func(1) " << fi->name << " in: ";
+                dbgs() << "[TIMING] End func(1) " << fi->name << " in: ";
                 InstructionUtils::getTimeDuration(t0,&dbgs());
 #endif
                 //Record the timestamp.
@@ -655,7 +661,7 @@ namespace DRCHECKER {
 
         }
 
-        void setupFunctionArgs(FuncInf *fi, GlobalState &targetState, std::vector<Instruction *> *callSites) {
+        void setupFunctionArgs(FuncInf *fi, GlobalState &targetState, std::vector<Instruction*> *callSites) {
             if (!fi || !fi->func) {
                 dbgs() << "!!! setupFunctionArgs(): (!fi || !fi->func)\n";
                 return;
