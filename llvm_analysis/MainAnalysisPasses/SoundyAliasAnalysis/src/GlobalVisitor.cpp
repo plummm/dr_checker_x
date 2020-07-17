@@ -143,12 +143,17 @@ namespace DRCHECKER {
         //if we only insert the call inst itself into the "call context", we will not be able to differentiate
         //these target callees... So now for each call inst, we insert both the call inst and the entry inst of the
         //target function into the "call context".
-        dbgs() << "GlobalVisitor::processCalledFunction: insert entry inst of: " << currFuncName << "\n";
         if (!currFunc->isDeclaration()) {
+#ifdef DEBUG_CALL_INSTR
+            dbgs() << "GlobalVisitor::processCalledFunction: prepare context for: " << currFuncName << " (w/ definition)\n";
+#endif
             BasicBlock &bb = currFunc->getEntryBlock();
             newCallContext->insert(newCallContext->end(), bb.getFirstNonPHI());
         }else{
             //Insert the call inst again in order to match the 2*MAX-1...
+#ifdef DEBUG_CALL_INSTR
+            dbgs() << "GlobalVisitor::processCalledFunction: prepare context for: " << currFuncName << " (w/o definition)\n";
+#endif
             newCallContext->insert(newCallContext->end(), &I);
         }
         this->currState.getOrCreateContext(newCallContext);
@@ -167,7 +172,7 @@ namespace DRCHECKER {
             }
         }
         // if there are new call backs? then create a GlobalVisitor and run the corresponding  visitor
-        if(newCallBacks.size() > 0) {
+        if (newCallBacks.size() > 0) {
             // Make sure we have the function definition.
             assert(!currFunc->isDeclaration());
 #ifdef DEBUG_CALL_INSTR
@@ -180,8 +185,7 @@ namespace DRCHECKER {
             dbgs() << "[TIMING] Start func(" << newCallContext->size() << ") " << currFuncName << ": ";
             auto t0 = InstructionUtils::getCurTime(&dbgs());
 #endif
-            std::vector<std::vector<BasicBlock *> *> *traversalOrder = BBTraversalHelper::getSCCTraversalOrder(
-                    *currFunc);
+            std::vector<std::vector<BasicBlock *> *> *traversalOrder = BBTraversalHelper::getSCCTraversalOrder(*currFunc);
             // Create a GlobalVisitor
             GlobalVisitor *vis = new GlobalVisitor(currState, currFunc, newCallContext, traversalOrder, newCallBacks);
             // Start analyzing the function.

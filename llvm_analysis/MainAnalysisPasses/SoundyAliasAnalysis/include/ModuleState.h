@@ -455,7 +455,7 @@ namespace DRCHECKER {
 
         // Get the context for the provided instruction at given call sites.
         AnalysisContext* getContext(std::vector<Instruction*> *callSites) {
-            if (!callSites) {
+            if (!callSites || callSites->empty()) {
                 if (this->analysis_phase > 2) {
                     dbgs() << "!!! getContext(): Null callSites received in the bug detection phase!\n";
                 }
