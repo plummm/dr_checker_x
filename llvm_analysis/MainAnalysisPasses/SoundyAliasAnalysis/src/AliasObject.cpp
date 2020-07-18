@@ -282,7 +282,7 @@ namespace DRCHECKER {
 #endif
             srcfieldId = 0;
         }
-        AliasObject *host = this->getNestedObj(srcfieldId,currInst);
+        AliasObject *host = this->getNestedObj(srcfieldId,nullptr,currInst);
         if (!host) {
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
             dbgs() << "AliasObject::fetchPointsToObjects: failed to obtain the innermost nested field!\n";
@@ -377,7 +377,7 @@ namespace DRCHECKER {
         //TODO: deal with other types of insts that can invoke "fetchPointsToObjects" in its handler.
         Type *expObjTy = getLoadedPointeeTy(targetInstr);
         //Get the type of the field for which we want to get the pointee.
-        AliasObject *hostObj = this->getNestedObj(fid,siteInst);
+        AliasObject *hostObj = this->getNestedObj(fid,nullptr,siteInst);
         if (!hostObj) {
             return;
         }
@@ -440,13 +440,14 @@ namespace DRCHECKER {
         }
     }
 
-    //The "fid" may be a composite field, if this is the case, we recursively get the inner most AliasObject whose field 0 is no more composite,
-    //otherwise, just return "this" (i.e. its "fid" field is not composite by itself).
-    AliasObject *AliasObject::getNestedObj(long fid, InstLoc *loc) {
-        //Get the innermost non-somposite field.
+    //The "fid" may be a composite field, if this is the case, we recursively get/create the embedded object at that offset,
+    //until when we get an emb object whose type is "dty", or when there are no more emb objects (i.e. we have reached the innermost).
+    //We will just return "this" if "fid" field is not composite.
+    //NOTE: if "dty" is nullptr, we will just try to return the innermost emb object.
+    AliasObject *AliasObject::getNestedObj(long fid, Type *dty, InstLoc *loc) {
         //There will be several cases here:
         //(1) The dst field is not composite, then we can return directly;
-        //(2) The dst field is an embedded composite, we need to recursively extract the first field of it until we get a non-composite field;
+        //(2) The dst field is an embedded composite, we need to recursively extract the first field of it until we get a non-composite field or match the "dty";
         //(3) No type information for the dst element is available, return directly.
         AliasObject *hostObj = this;
         while (true) {
@@ -468,6 +469,10 @@ namespace DRCHECKER {
                 return nullptr;
             }
             if (!dyn_cast<CompositeType>(ety)) {
+                return hostObj;
+            }
+            //If there is a non-null "dty" specified, we need to honor it as another return criteria.
+            if (dty && InstructionUtils::same_types(dty,ety)) {
                 return hostObj;
             }
             //NOTE: this is actually getOrCreateEmbObj()
@@ -509,7 +514,7 @@ namespace DRCHECKER {
                 srcfieldId = 0;
             }
             //If the "srcfieldId" is an embedded struct/array, we need to recursively update the fieldPointsTo in the embedded object instead of current host object.
-            host = host->getNestedObj(srcfieldId,propagatingInstr);
+            host = host->getNestedObj(srcfieldId,nullptr,propagatingInstr);
             if (!host) {
                 //TODO: return or go ahead w/ "this"?
 #ifdef DEBUG_UPDATE_FIELD_POINT

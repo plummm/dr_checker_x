@@ -1595,6 +1595,13 @@ namespace DRCHECKER {
                 allVulnWarnings[currContext] = new std::set<VulnerabilityWarning*>();
             }
             allVulnWarnings[currContext]->insert(currWarning);
+            
+            //For debug use.
+            ////////////////
+            dbgs() << "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n";
+            currWarning->printWarning(dbgs());
+            dbgs() << "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n";
+            ////////////////
 
             this->addVulnerabilityWarningByInstr(currWarning);
 

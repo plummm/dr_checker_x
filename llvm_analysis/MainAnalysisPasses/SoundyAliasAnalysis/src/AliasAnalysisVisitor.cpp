@@ -157,8 +157,9 @@ namespace DRCHECKER {
     //Basically we try to see whether the pointee object type matches that of srcPointer, if not, we try adjust the PointerPointsTo, e.g.,
     //by walking through the embed/parent hierarchy of the pointee object.
     //"loc" is the instruction site where we need to match the pto.
+    //"create_host" indicates whether to automatically create a host object if that's necessary for a match (i.e. current pto points to a struct that can be embedded in a host object).
     //Return: whether the type is matched in the end.
-    bool AliasAnalysisVisitor::matchPtoTy(Value *srcPointer, PointerPointsTo *pto, Instruction *I) {
+    bool AliasAnalysisVisitor::matchPtoTy(Value *srcPointer, PointerPointsTo *pto, Instruction *I, bool create_host) {
         if (!srcPointer || !pto || !pto->targetObject) {
             return false;
         }
@@ -167,61 +168,96 @@ namespace DRCHECKER {
             return false;
         }
         srcTy = srcTy->getPointerElementType();
-        return this->matchPtoTy(srcTy,pto,I);
+        return this->matchPtoTy(srcTy,pto,I,create_host);
     }
 
     //srcTy is the type we should point to.
-    bool AliasAnalysisVisitor::matchPtoTy(Type *srcTy, PointerPointsTo *pto, Instruction *I) {
+    bool AliasAnalysisVisitor::matchPtoTy(Type *srcTy, PointerPointsTo *pto, Instruction *I, bool create_host) {
         if (!pto || !pto->targetObject) {
             return false;
         }
-        Type *pTy = pto->targetObject->targetType;
+        AliasObject *obj = pto->targetObject;
+        Type *pTy = obj->targetType;
+        if (!srcTy || !pTy) {
+            return false;
+        }
         long dstfieldId = pto->dstfieldId;
+        if (InstructionUtils::same_types(obj->getFieldTy(dstfieldId),srcTy)) {
+            //Quick path.
+            return true;
+        }
         if (dstfieldId == 0 && InstructionUtils::same_types(srcTy,pTy)) {
             //Quick path.
             return true;
         }
-        if (!srcTy || !pTy) {
-            return false;
-        }
         //DataLayout *dl = this->currState.targetDataLayout;
         //Ok, first let's see whether srcTy can match the type of any embedded fields in the pto.
-        if (dyn_cast<CompositeType>(pTy) && !InstructionUtils::isOpaqueSt(pTy) && InstructionUtils::isIndexValid(pTy,dstfieldId)) {
-            Type *eTy = dyn_cast<CompositeType>(pTy)->getTypeAtIndex(dstfieldId);
-            //Quick path
-            if (InstructionUtils::same_types(eTy,srcTy)) {
-                return true;
-            }
-            FieldDesc *hd = InstructionUtils::getHeadFieldDesc(eTy);
-            if (hd && hd->findTy(srcTy) >= 0) {
-                //Got a match in the embedded field, try to create the required embedded objects.
+        std::set<Type*> etys;
+        obj->getNestedFieldTy(dstfieldId, etys);
+        for (Type *ety : etys) {
+            if (InstructionUtils::same_types(ety,srcTy)) {
+                //Ok, we just need to get/create the proper embedded object and return its pto.
 #ifdef DEBUG_UPDATE_POINTSTO
                 dbgs() << "AliasAnalysisVisitor::matchPtoTy(): We need to adjust the current pto to an embedded field to match the srcPointer!\n";
 #endif
-                //TODO: +1 or not? +1, we point to target object's parent w/ a specified field, otherwise, we point to the object itself w/ field set to 0.
-                int limit = hd->findHostTy(srcTy) + 1;
-                //A small hack in order to use "createEmbObjChain".
-                hd->host_tys.push_back(pTy);
-                hd->fid.push_back(dstfieldId);
                 InstLoc *loc = (I ? new InstLoc(I,this->currFuncCallSites) : nullptr);
-                return DRCHECKER::createEmbObjChain(hd,pto,limit,loc) == limit;
-            }
-        }
-        //Then let's see whether the pto has any parent object (e.g. it's embedded in another object) that can match srcTy.
-        //NOTE: different than embedded fields, here we are not obligated to create new container object - we only look up the existing ones.
-        if (dstfieldId == 0 && dyn_cast<CompositeType>(srcTy) && !InstructionUtils::same_types(srcTy,pTy)) {
-            AliasObject *obj = pto->targetObject;
-            while (obj && obj->parent && obj->parent_field == 0) {
-                obj = obj->parent;
-                if (InstructionUtils::same_types(srcTy,obj->targetType)) {
-                    //Got the match!
-#ifdef DEBUG_UPDATE_POINTSTO
-                    dbgs() << "AliasAnalysisVisitor::matchPtoTy(): We need to adjust the current pto to a parent object to match the srcPointer!\n";
-#endif
-                    pto->targetObject = obj;
+                AliasObject *eobj = obj->getNestedObj(dstfieldId,ety,loc);
+                if (eobj && eobj != obj && InstructionUtils::same_types(eobj->getFieldTy(0),srcTy)) {
+                    pto->targetObject = eobj;
                     pto->dstfieldId = 0;
                     return true;
                 }
+                //Here, (1) "srcTy" cannot directly match the given field type in "pto", (2) we're sure that it can match one emb obj of the given field,
+                //but the thing is we failed to get/create that specific emb obj at the given field w/ "getNestedObj", though strange, we can do nothing now..
+                dbgs() << "!!! AliasAnalysisVisitor::matchPtoTy(): Failed to get/create the emb obj that should be there!\n";
+                return false;
+            }
+        }
+        //Ok, we cannot match the "srcTy" in any layer of embedded objects at the given field, now consider whether
+        //we can match any parent object of current "obj".
+        if (dstfieldId || !dyn_cast<CompositeType>(srcTy)) {
+            return false;
+        }
+        //First, is there existing parent object on record that can match "srcTy"?
+        while (obj && obj->parent && obj->parent_field == 0) {
+            obj = obj->parent;
+            pto->targetObject = obj;
+            pto->dstfieldId = 0;
+            if (InstructionUtils::same_types(srcTy,obj->targetType)) {
+                //Got the match!
+#ifdef DEBUG_UPDATE_POINTSTO
+                dbgs() << "AliasAnalysisVisitor::matchPtoTy(): We need to adjust the current pto to an existing parent object to match the srcPointer!\n";
+#endif
+                return true;
+            }
+        }
+        //No matching parent objects on file, now consider whether we can create one, according to the given "srcTy".
+        if (!create_host) {
+            return false;
+        }
+#ifdef DEBUG_UPDATE_POINTSTO
+        dbgs() << "AliasAnalysisVisitor::matchPtoTy(): try to create a host object to match the srcTy!\n";
+#endif
+        FieldDesc *fd = InstructionUtils::getHeadFieldDesc(srcTy);
+        if (!fd) {
+#ifdef DEBUG_UPDATE_POINTSTO
+            dbgs() << "!!! AliasAnalysisVisitor::matchPtoTy(): failed to get the header FieldDesc of srcTy!\n";
+#endif
+            return false;
+        }
+        if (fd->findTy(obj->targetType) >= 0) {
+            //Ok, the "srcTy" can be a parent type for the "obj", create it! 
+#ifdef DEBUG_UPDATE_POINTSTO
+            dbgs() << "AliasAnalysisVisitor::matchPtoTy(): srcTy is a valid host type if current pointee object, creating the host obj...\n";
+#endif
+            InstLoc *loc = (I ? new InstLoc(I,this->currFuncCallSites) : nullptr);
+            DRCHECKER::createHostObjChain(fd,pto,fd->fid.size(),loc);
+            //Sanity check.
+            if (pto->targetObject && pto->dstfieldId == 0 && InstructionUtils::same_types(srcTy,pto->targetObject->targetType)) {
+#ifdef DEBUG_UPDATE_POINTSTO
+                dbgs() << "AliasAnalysisVisitor::matchPtoTy(): successfully created the required host obj!\n";
+#endif
+                return true;
             }
         }
         return false;

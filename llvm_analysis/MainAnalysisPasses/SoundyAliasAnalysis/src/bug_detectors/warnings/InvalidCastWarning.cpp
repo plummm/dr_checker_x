@@ -67,7 +67,7 @@ namespace DRCHECKER {
         InstructionUtils::printInstJson(this->target_instr,O);
         //
         int i = 0;
-        for (auto &trace : this->traces) {
+        for (std::vector<InstLoc*> *trace : this->traces) {
             if (trace == nullptr) {
                 continue;
             }

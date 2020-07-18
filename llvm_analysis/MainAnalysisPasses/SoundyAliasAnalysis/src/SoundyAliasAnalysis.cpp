@@ -431,6 +431,10 @@ namespace DRCHECKER {
             //Bug detection phase: traverse all the code (for every entry function) again and detect potential bugs along the way.
             //We need to have a separate traversal because we want to detect high-order taint bugs, so we must wait until all analysis have been done.
             dbgs() << "=========================Bug Detection Phase=========================\n";
+#ifdef TIMING
+            dbgs() << "[TIMING] Bug Detection Phase Starts : ";
+            auto tb = InstructionUtils::getCurTime(&dbgs());
+#endif
             currState.analysis_phase = 3;
             for (FuncInf *fi : targetFuncs) {
                 if (!fi || !fi->func || fi->func->isDeclaration()) {
@@ -483,6 +487,10 @@ namespace DRCHECKER {
                 this->printCurTime();
                 delete(vis);
             }
+#ifdef TIMING
+            dbgs() << "[TIMING] Bug Detection Phase finished in : ";
+            InstructionUtils::getTimeDuration(tb,&dbgs());
+#endif
 
             //Output all potential bugs.
             if(outputFile == "") {

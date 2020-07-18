@@ -427,6 +427,11 @@ namespace DRCHECKER {
             }
             Type *ety = this->targetType;
             if (dyn_cast<CompositeType>(this->targetType)) {
+                //If this object has an opaque type, we cannot get the field type info..
+                if (InstructionUtils::isOpaqueSt(this->targetType)) {
+                    *err = 4;
+                    return nullptr;
+                }
                 //Boundary check
                 if (!InstructionUtils::isIndexValid(this->targetType,fid)) {
                     *err = 2;
@@ -769,7 +774,7 @@ namespace DRCHECKER {
         //"loc" is the creation site.
         AliasObject *createHostObj(Type *hostTy, long field, InstLoc *loc = nullptr);
 
-        AliasObject *getNestedObj(long fid, InstLoc *loc = nullptr);
+        AliasObject *getNestedObj(long fid, Type *dty = nullptr, InstLoc *loc = nullptr);
 
         //Get the living field ptos at a certain InstLoc.
         virtual void getLivePtos(long fid, InstLoc *loc, std::set<ObjectPointsTo*> *retPto);

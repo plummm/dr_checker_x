@@ -123,8 +123,8 @@ namespace DRCHECKER {
          */
         std::set<PointerPointsTo*>* getPointsToObjects(Value *srcPointer);
         bool isPtoDuplicated(const PointerPointsTo *p0, const PointerPointsTo *p1, bool dbg);
-        bool matchPtoTy(Value *srcPointer, PointerPointsTo *pto, Instruction *I = nullptr);
-        bool matchPtoTy(Type *srcTy, PointerPointsTo *pto, Instruction *I = nullptr);
+        bool matchPtoTy(Value *srcPointer, PointerPointsTo *pto, Instruction *I = nullptr, bool create_host = true);
+        bool matchPtoTy(Type *srcTy, PointerPointsTo *pto, Instruction *I = nullptr, bool create_host = true);
         /***
          * Update points to information for the provided pointer.
          * @param srcPointer pointer whose points to information need to be updated.

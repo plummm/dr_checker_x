@@ -30,7 +30,7 @@ namespace DRCHECKER {
         O << InstructionUtils::escapeJsonString(this->warning_string);
         O << "\",";
         int i = 0;
-        for (auto &trace : this->traces) {
+        for (std::vector<InstLoc*> *trace : this->traces) {
             if (trace == nullptr) {
                 continue;
             }
