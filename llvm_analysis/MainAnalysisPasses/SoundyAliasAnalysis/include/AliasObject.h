@@ -37,6 +37,7 @@ using namespace llvm;
 #define DEBUG_INFER_CONTAINER
 #define DEBUG_SPECIAL_FIELD_POINTTO
 #define DEBUG_SHARED_OBJ_CACHE
+#define DEBUG_OBJ_RESET
 
 namespace DRCHECKER {
 //#define DEBUG_FUNCTION_ARG_OBJ_CREATION
@@ -836,8 +837,11 @@ namespace DRCHECKER {
         }
 
         //In some situations we need to reset this AliasObject, e.g. the obj is originally allocated by kmalloc() w/ a type i8*, and then converted to a composite type.
-        //NOTE: after invoking this we usually need to re-taint the changed object.
         void reset(Value *v, Type *ty, InstLoc *loc = nullptr) {
+#ifdef DEBUG_OBJ_RESET
+            dbgs() << "AliasObject::reset(): reset obj " << (const void*)this << " to type: " << InstructionUtils::getTypeStr(ty) << ", v: " << InstructionUtils::getValueStr(v) << "\n";
+#endif
+            std::set<long> oldFields = this->getAllAvailableFields();
             this->setValue(v);
             if (v && v->getType() && !ty) {
                 ty = v->getType();
@@ -846,8 +850,20 @@ namespace DRCHECKER {
                 }
             }
             this->targetType = ty;
+            std::set<long> curFields = this->getAllAvailableFields();
+            std::set<long> addFields, delFields;
+            for (auto id : curFields) {
+                if (oldFields.find(id) == oldFields.end()) {
+                    addFields.insert(id);
+                }
+            }
+            for (auto id : oldFields) {
+                if (curFields.find(id) == curFields.end()) {
+                    delFields.insert(id);
+                }
+            }
             //Sync the "all_contents_taint_flags" w/ the newly available individual fields.
-            if (!this->all_contents_taint_flags.empty()) {
+            if (addFields.size() && !this->all_contents_taint_flags.empty()) {
                 std::set<TaintFlag*> all_tfs;
                 this->all_contents_taint_flags.getTf(loc,all_tfs);
                 if (all_tfs.empty()) {
@@ -856,9 +872,7 @@ namespace DRCHECKER {
 #ifdef DEBUG_UPDATE_FIELD_TAINT
                 dbgs() << "AliasObject::reset(): re-sync the all_contents_taint_flags to each field in reset obj: " << (const void*)this << "\n";
 #endif
-                //NOTE that we cannot directly use "taintAllFields" here since it requires that the TF is not previously in "all_contents_taint_flags".
-                std::set<long> allAvailableFields = this->getAllAvailableFields();
-                for (auto fieldId : allAvailableFields) {
+                for (auto fieldId : addFields) {
                     for (TaintFlag *tf : all_tfs) {
 #ifdef DEBUG_UPDATE_FIELD_TAINT
                         dbgs() << "AliasObject::reset(): Adding taint to: " << (const void*)this << " | " << fieldId << "\n";
@@ -869,6 +883,12 @@ namespace DRCHECKER {
                         this->addFieldTaintFlag(fieldId, ntf);
                     }
                 }
+            }
+            if (delFields.size()) {
+                //TODO: In theory we need to delete the field pto and TFs of these missing fields.
+#ifdef DEBUG_UPDATE_FIELD_TAINT
+                dbgs() << "!!! AliasObject::reset(): there are some deleted fields after reset!\n";
+#endif
             }
         }
 

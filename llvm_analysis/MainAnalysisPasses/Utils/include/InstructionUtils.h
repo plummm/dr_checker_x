@@ -182,7 +182,7 @@ namespace DRCHECKER {
         static std::string& getInstStrID_No(Instruction*);
 
         //Set up a cache for the expensive "print" operation for llvm::Value.
-        static std::string& getValueStr(const Value *v);
+        static std::string& getValueStr(Value *v);
 
         //Set up a cache for the expensive "print" operation for llvm::Type.
         static std::string& getTypeStr(Type*);

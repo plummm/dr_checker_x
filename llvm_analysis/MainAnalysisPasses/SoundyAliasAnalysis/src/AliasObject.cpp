@@ -377,7 +377,7 @@ namespace DRCHECKER {
         //TODO: deal with other types of insts that can invoke "fetchPointsToObjects" in its handler.
         Type *expObjTy = getLoadedPointeeTy(targetInstr);
         //Get the type of the field for which we want to get the pointee.
-        AliasObject *hostObj = this->getNestedObj(fid,nullptr,siteInst);
+        AliasObject *hostObj = this->getNestedObj(fid,nullptr,currInst);
         if (!hostObj) {
             return;
         }
@@ -399,6 +399,9 @@ namespace DRCHECKER {
             //NOTE: we handle a special case here, sometimes the field type in the struct can be "void*" or "char*" ("i8*"), but it can be converted to "struct*" in the load,
             //if this is the case, we will create the dummy object based on the real converted type and still make this "void*/char*" field point to the new obj. 
             real_ty = expObjTy;
+            //If the field type cannot match the expected pointee type (e.g. i8* can potentially point to anything), we will still use the "currInst",
+            //as in this case, the field may point to different things in different code paths...
+            siteInst = currInst;
         }
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
         dbgs() << "AliasObject::createFieldPointee(): about to create dummy obj of type: " << InstructionUtils::getTypeStr(real_ty) << "\n"; 
@@ -807,10 +810,10 @@ namespace DRCHECKER {
             }else {
                 newObj = DRCHECKER::createOutsideObj(ety);
             }
-#ifdef DEBUG_CREATE_EMB_OBJ
-            dbgs() << "AliasObject::createEmbObj(): the embedded obj created: "  << (const void*)this << " | " << fid << " --> " << (const void*)newObj << "\n"; 
-#endif
             if (newObj) {
+#ifdef DEBUG_CREATE_EMB_OBJ
+                dbgs() << "AliasObject::createEmbObj(): the embedded obj created: "  << (const void*)this << " | " << fid << " --> " << (const void*)newObj << "\n"; 
+#endif
                 //Properly taint it.
                 //First if the host object is a taint source, then the emb obj is so too, we also need to set up the inherent taint flags for it,
                 //however, for the taint instruction trace in the flag we will just inherite from the host object instead of using the current one,

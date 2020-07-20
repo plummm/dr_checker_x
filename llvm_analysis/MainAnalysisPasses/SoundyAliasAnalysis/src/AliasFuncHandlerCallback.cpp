@@ -35,8 +35,11 @@ namespace DRCHECKER {
         if(this->targetChecker->is_kmalloc_function(targetFunction)) {
             targetSize = callInst.getArgOperand(0);
         }
-        AliasObject *targetObj = new HeapLocation(callInst, targetFunction->getReturnType(),
-                                                  callSitesContext, targetSize,
+        Type *objTy = targetFunction->getReturnType();
+        if (objTy && objTy->isPointerTy()) {
+            objTy = objTy->getPointerElementType();
+        }
+        AliasObject *targetObj = new HeapLocation(callInst, objTy, callSitesContext, targetSize,
                                                   this->targetChecker->is_kmalloc_function(targetFunction));
         // OK, this is kmalloc function, now check if this is kzmalloc?
         if(this->targetChecker->is_kmalloc_function(targetFunction)) {

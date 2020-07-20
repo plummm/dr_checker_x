@@ -62,40 +62,37 @@ namespace DRCHECKER {
     std::string InstructionUtils::escapeJsonString(const std::string& input) {
         std::ostringstream ss;
         for (auto iter = input.cbegin(); iter != input.cend(); iter++) {
-            //C++98/03:
-            for (std::string::const_iterator iter = input.begin(); iter != input.end(); iter++) {
-                switch (*iter) {
-                    case '\\':
-                        ss << "\\\\";
-                        break;
-                    case '"':
-                        ss << "\\\"";
-                        break;
-                    case '/':
-                        ss << "\\/";
-                        break;
-                    case '\b':
-                        ss << "\\b";
-                        break;
-                    case '\f':
-                        ss << "\\f";
-                        break;
-                    case '\n':
-                        ss << "\\n";
-                        break;
-                    case '\r':
-                        ss << "\\r";
-                        break;
-                    case '\t':
-                        ss << "\\t";
-                        break;
-                    default:
-                        ss << *iter;
-                        break;
-                }
+            switch (*iter) {
+                case '\\':
+                    ss << "\\\\";
+                    break;
+                case '"':
+                    ss << "\\\"";
+                    break;
+                case '/':
+                    ss << "\\/";
+                    break;
+                case '\b':
+                    ss << "\\b";
+                    break;
+                case '\f':
+                    ss << "\\f";
+                    break;
+                case '\n':
+                    ss << "\\n";
+                    break;
+                case '\r':
+                    ss << "\\r";
+                    break;
+                case '\t':
+                    ss << "\\t";
+                    break;
+                default:
+                    ss << *iter;
+                    break;
             }
-            return ss.str();
         }
+        return ss.str();
     }
 
     std::string InstructionUtils::escapeValueString(Value *currInstr) {
@@ -381,8 +378,8 @@ namespace DRCHECKER {
     }
 
     //Set up a cache for the expensive "print" operation.
-    std::string& InstructionUtils::getValueStr(const Value *v) {
-        static std::map<const Value*,std::string> ValueNameMap;
+    std::string& InstructionUtils::getValueStr(Value *v) {
+        static std::map<Value*,std::string> ValueNameMap;
         if (ValueNameMap.find(v) == ValueNameMap.end()) {
             if(v){
                 std::string str;
