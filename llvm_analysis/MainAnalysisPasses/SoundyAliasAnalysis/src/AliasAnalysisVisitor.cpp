@@ -1479,7 +1479,6 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
 
 #ifdef CREATE_DUMMY_OBJ_IF_NULL
         //hz: try to create dummy objects if there is no point-to information about the pointer variable,
-        //since it can be an outside global variable. (e.g. platform_device).
         if(!InstructionUtils::isAsanInst(&I) && !hasPointsToObjects(srcPointer)) {
             this->createOutsideObj(srcPointer,&I,true);
         }

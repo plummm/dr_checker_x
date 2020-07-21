@@ -14,7 +14,7 @@ namespace DRCHECKER {
 
 #define DEBUG_IS_ASAN_INST
 //#define DEBUG_GET_TY_DESC
-#define DEBUG_GET_FIELD_NAME
+#define DEBUG_RELATE_TYPE_NAME
 
     bool InstructionUtils::isPointerInstruction(Instruction *I) {
         bool retVal = false;
@@ -546,6 +546,17 @@ namespace DRCHECKER {
             }
         }
         return;
+    }
+
+    std::string InstructionUtils::trim_struct_name(std::string &s) {
+        std::string r;
+        //Strip the name prefix
+        if (s.find("struct.") == 0) {
+            r = s.substr(7);
+        }
+        //Strip the numeric suffix.
+        InstructionUtils::trim_num_suffix(&r);
+        return r;
     }
 
     //In theory, we can simply compare two Type* by "==" in llvm,
@@ -1204,94 +1215,113 @@ namespace DRCHECKER {
     		createMetadataSlot(MD.second,mdnMap);
 	}
 
-    int InstructionUtils::getAllMDNodes(Module *mod, DenseMap<MDNode*, unsigned> *mdnMap) {
-        if (!mod || !mdnMap) {
+    int InstructionUtils::getAllMDNodes(Module *mod) {
+        if (!InstructionUtils::mdnCache.empty()) {
+            //Already inited
+            return 0;
+        }
+        if (!mod) {
             return 1;
         }
         //Get all metadata nodes for global variables.
         for (const GlobalVariable &Var : mod->globals()) {
-            processGlobalObjectMetadata(Var,mdnMap);
+            processGlobalObjectMetadata(Var,&InstructionUtils::mdnCache);
         }
         //Add metadata used by named metadata.
   		for (const NamedMDNode &NMD : mod->named_metadata()) {
     		for (unsigned i = 0, e = NMD.getNumOperands(); i != e; ++i)
-      			createMetadataSlot(NMD.getOperand(i),mdnMap);
+      			createMetadataSlot(NMD.getOperand(i),&InstructionUtils::mdnCache);
   		}
         //Add metadata used by all functions and instructions.
 		for (const Function &F : *mod) {
-            processGlobalObjectMetadata(F,mdnMap);
+            processGlobalObjectMetadata(F,&InstructionUtils::mdnCache);
             for (auto &BB : F) {
                 for (auto &I : BB)
-                    processInstructionMetadata(I,mdnMap);
+                    processInstructionMetadata(I,&InstructionUtils::mdnCache);
             }
         }
         return 0;
+    }
+
+    int InstructionUtils::setupDicMap(Module *mod) {
+        if (!InstructionUtils::dicMap.empty()) {
+            //Already inited.
+            return 0;
+        }
+        if (InstructionUtils::mdnCache.empty()) {
+            if (!mod) {
+                return 1;
+            }
+            InstructionUtils::getAllMDNodes(mod);
+        }
+        //Convert mdnCache to dicMap.
+        for (auto& e : InstructionUtils::mdnCache) {
+            DICompositeType *nd = dyn_cast<DICompositeType>(e.first);
+            if (nd && !nd->getName().empty()) {
+                InstructionUtils::dicMap[nd->getName().str()] = nd;
+            }
+        }
+        return 1;
     }
 
     //////////////////////////////////////////////////////////////////////////////////////////////////////////
  
     //Get the name of a specified field within a struct type, w/ the debug info.
     std::string InstructionUtils::getStFieldName(Module *mod, StructType *ty, unsigned fid) {
-        static DenseMap<MDNode*, unsigned> mdncache;
-        static std::map<std::string,DICompositeType*> dicmap;
-        static std::map<Type*,std::map<unsigned,std::string>> ncache;
-#ifdef DEBUG_GET_FIELD_NAME
+        //struct type --> field id --> field name
+        static std::map<std::string,std::map<unsigned,std::string>> ncache;
+#ifdef DEBUG_RELATE_TYPE_NAME
         dbgs() << "InstructionUtils::getStFieldName(): for ty: " << InstructionUtils::getTypeStr(ty) << " | " << fid << "\n";
 #endif
         if (!mod || !ty || !ty->hasName()) {
             return "";
         }
-        if (mdncache.empty()) {
-            InstructionUtils::getAllMDNodes(mod,&mdncache);
-            //Convert mdncache to dicmap.
-            for (auto& e : mdncache) {
-                DICompositeType *nd = dyn_cast<DICompositeType>(e.first);
-                if (nd && !nd->getName().empty()) {
-                    dicmap[nd->getName().str()] = nd;
-                }
-            }
-        }
-        if (ncache.find(ty) == ncache.end()) {
-            std::string stn = ty->getName().str();
-            //Strip the name prefix
-            if (stn.find("struct.") == 0) {
-                stn = stn.substr(7);
-            }
-#ifdef DEBUG_GET_FIELD_NAME
-            dbgs() << "InstructionUtils::getStFieldName(): type name: " << stn << "\n";
+        //Get the struct name.
+        std::string stn = ty->getName().str();
+        stn = InstructionUtils::trim_struct_name(stn);
+#ifdef DEBUG_RELATE_TYPE_NAME
+        dbgs() << "InstructionUtils::getStFieldName(): type name: " << stn << "\n";
 #endif
-            if (dicmap.find(stn) == dicmap.end()) {
-#ifdef DEBUG_GET_FIELD_NAME
+        if (stn == "anon") {
+            //We have no field names for anonymized struct. 
+            return "";
+        }
+        if (ncache.find(stn) == ncache.end()) {
+            if (InstructionUtils::dicMap.empty()) {
+                InstructionUtils::setupDicMap(mod);
+            }
+            if (InstructionUtils::dicMap.find(stn) == InstructionUtils::dicMap.end()) {
+#ifdef DEBUG_RELATE_TYPE_NAME
                 dbgs() << "InstructionUtils::getStFieldName(): cannot get the DICompositeType MDNode!\n";
 #endif
                 return "";
             }
-            DICompositeType *nmd = dicmap[stn];
+            DICompositeType *nmd = InstructionUtils::dicMap[stn];
             //Ok, got it.
-#ifdef DEBUG_GET_FIELD_NAME
+#ifdef DEBUG_RELATE_TYPE_NAME
             dbgs() << "InstructionUtils::getStFieldName(): Got the DICompositeType MDNode!\n";
 #endif
             DINodeArray dia=nmd->getElements(); 
             for (unsigned j = 0; j < dia.size(); ++j) {
                 DIType *field=dyn_cast<DIType>(dia[j]);
                 if (!field) {
-#ifdef DEBUG_GET_FIELD_NAME
+#ifdef DEBUG_RELATE_TYPE_NAME
                     dbgs() << "InstructionUtils::getStFieldName(): cannot get the DIType for field: " << j << "\n";
 #endif
                     continue;
                 }
-                ncache[ty][j] = field->getName().str();
+                ncache[stn][j] = field->getName().str();
             }
         }//if not in cache.
         //Note that as long as we processed one request for a single field in a certain StructType, we will cache all fields in the same type.
-        if (ncache.find(ty) != ncache.end()) {
-            if (ncache[ty].find(fid) != ncache[ty].end()) {
-#ifdef DEBUG_GET_FIELD_NAME
-                dbgs() << "InstructionUtils::getStFieldName(): Got the result from the cache: " << ncache[ty][fid] << "\n";
+        if (ncache.find(stn) != ncache.end()) {
+            if (ncache[stn].find(fid) != ncache[stn].end()) {
+#ifdef DEBUG_RELATE_TYPE_NAME
+                dbgs() << "InstructionUtils::getStFieldName(): Got the result from the cache: " << ncache[stn][fid] << "\n";
 #endif
-                return ncache[ty][fid];
+                return ncache[stn][fid];
             }else {
-#ifdef DEBUG_GET_FIELD_NAME
+#ifdef DEBUG_RELATE_TYPE_NAME
                 dbgs() << "InstructionUtils::getStFieldName(): Got the type from the cache but not the field!\n";
 #endif
                 return "";
@@ -1346,16 +1376,67 @@ namespace DRCHECKER {
         return InstructionUtils::isPrimitiveTy(ty->getPointerElementType());
     }
 
-    //Note: the struct name is like "struct.file"
+    //Note: the struct name is like "file"
     Type *InstructionUtils::getStTypeByName(Module *mod, std::string &n) {
-        if (!mod) {
-            return nullptr;
-        }
-        std::vector<StructType*> tys = mod->getIdentifiedStructTypes();
-        for (StructType *ty : tys) {
-            if (ty && ty->hasName() && ty->getName().str() == n) {
-                return ty;
+        static std::map<std::string,StructType*> tyMap;
+        static std::map<std::string,std::set<StructType*>> tysMap;
+#ifdef DEBUG_RELATE_TYPE_NAME
+        dbgs() << "InstructionUtils::getStTypeByName(): name: " << n << "\n";
+#endif
+        if (tyMap.empty()) {
+#ifdef DEBUG_RELATE_TYPE_NAME
+            dbgs() << "InstructionUtils::getStTypeByName(): set up the tyMap...\n";
+#endif
+            //Setup the cache for all available struct types.
+            if (!mod) {
+                return nullptr;
             }
+            std::vector<StructType*> tys = mod->getIdentifiedStructTypes();
+            for (StructType *ty : tys) {
+                if (ty && ty->hasName()) {
+                    std::string s = ty->getName().str();
+                    //Strip the name prefix
+                    if (s.find("struct.") == 0) {
+                        s = s.substr(7);
+                    }
+                    if (s.find("anon") == 0) {
+                        //If it's an anonymized struct, different numeric suffixes mean different structures, so we need to preserve the suffix.
+                        tysMap[s].insert(ty);
+                        continue;
+                    }
+                    //Strip the numeric suffix.
+                    InstructionUtils::trim_num_suffix(&s);
+                    tysMap[s].insert(ty);
+                }
+            }
+            //Now try to consolidate the tysMap to tyMap.
+            for (auto &e : tysMap) {
+                std::set<StructType*> &ts = e.second;
+                if (ts.size() == 0) {
+                    continue;
+                }
+                if (ts.size() == 1) {
+                    tyMap[e.first] = *(ts.begin());
+                    continue;
+                }
+                //Pick the type w/ the shortest name (likely that's the one w/o the numeric suffix).
+                StructType *pt = *(ts.begin());
+                for (StructType *t : ts) {
+                    if (t->getName().str().size() < pt->getName().str().size()) {
+                        pt = t;
+                    }
+                }
+                tyMap[e.first] = pt;
+            }
+#ifdef DEBUG_RELATE_TYPE_NAME
+            dbgs() << "InstructionUtils::getStTypeByName(): done. #tyMap: " << tyMap.size() << "\n";
+#endif
+        }
+        if (tyMap.find(n) != tyMap.end()) {
+#ifdef DEBUG_RELATE_TYPE_NAME
+            dbgs() << "InstructionUtils::getStTypeByName(): Got the type: " << InstructionUtils::getTypeStr(tyMap[n]) << "\n";
+#endif
+            return tyMap[n];
         }
         return nullptr;
     }

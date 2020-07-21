@@ -233,7 +233,15 @@ namespace DRCHECKER {
 
         static std::string getStFieldName(Module *mod, StructType *ty, unsigned fid);
 
-        static int getAllMDNodes(Module *mod, DenseMap<MDNode*, unsigned> *mdnMap);
+        //This holds all metadata nodes in the module.
+        static DenseMap<MDNode*, unsigned> mdnCache;
+
+        //This holds the name->DIC mapping, the name is the struct name like "file" (no struct. prefix and no numeric suffix).
+        static std::map<std::string,DICompositeType*> dicMap;
+
+        static int getAllMDNodes(Module *mod);
+
+        static int setupDicMap(Module *mod);
 
         static bool isPrimitivePtr(Type *ty);
 
@@ -252,6 +260,8 @@ namespace DRCHECKER {
         static std::string& getTypeName(Type *ty);
 
         static void trim_num_suffix(std::string *s);
+
+        static std::string trim_struct_name(std::string &s);
 
         static std::chrono::time_point<std::chrono::system_clock> getCurTime(raw_ostream *OS = nullptr);
 
