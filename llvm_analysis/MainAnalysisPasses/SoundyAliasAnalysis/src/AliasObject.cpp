@@ -78,7 +78,15 @@ namespace DRCHECKER {
         if (targetInstr && dyn_cast<LoadInst>(targetInstr)) {
             Type *ptrTy = targetInstr->getType();
             if (ptrTy->isPointerTy()) {
-                return ptrTy->getPointerElementType();
+                Type *ty = ptrTy->getPointerElementType();
+                if (InstructionUtils::isPrimitiveTy(ty) || !dyn_cast<CompositeType>(ty)) {
+                    //If the pointee type is primitive (e.g. i8*) or not composite, we may be able to infer the real pointee struct type from the context.
+                    Type *ity = InstructionUtils::inferPointeeTy(targetInstr);
+                    if (ity) {
+                        return ity;
+                    }
+                }
+                return ty;
             }
         }
         return nullptr;
@@ -1161,7 +1169,7 @@ namespace DRCHECKER {
     //figure out the true pointer type from the subsequent cast IRs).
     //ARG: "v" points to the location w/ bit offset "bitoff" in the host type "ty".
     //NOTE: this function is time-consuming!
-    CandStructInf *inferContainerTy(Module *m,Value *v,Type *ty,long bitoff) {
+    CandStructInf *inferContainerTy(Module *m, Value *v, Type *ty, long bitoff) {
 #ifdef DEBUG_INFER_CONTAINER
         dbgs() << "inferContainerTy(): v: " << InstructionUtils::getValueStr(v) << " ty: " << InstructionUtils::getTypeStr(ty) << " bitoff: " << bitoff << "\n";
 #endif
@@ -1191,10 +1199,10 @@ namespace DRCHECKER {
         std::set<Instruction*> insts;
         for (User *u : v->users()) {
             if (dyn_cast<Instruction>(u)) {
-                //In case this is an instruction artificially created by us.
                 if (dyn_cast<Instruction>(u)->getParent()) {
                     insts.insert(dyn_cast<Instruction>(u));
                 }else {
+                    //In case this is an instruction artificially created by us.
                     continue;
                 }
             }
@@ -1408,7 +1416,7 @@ namespace DRCHECKER {
         }
         Type *pointeeTy = vt->getPointerElementType();
         //i8* or void* can in theory point to anything.
-        if (pointeeTy && (pointeeTy->isIntegerTy() || pointeeTy->isVoidTy())) {
+        if (InstructionUtils::isPrimitiveTy(pointeeTy)) {
             return 0;
         }
         //TODO: For the composite type in theory we need to inspect its type desc, but for now we assume that "p" can point to any composite type,

@@ -1579,4 +1579,206 @@ namespace DRCHECKER {
         return 0;
     }
 
+    DIType *getTyFromDbgInfo(Function *f, Value *v) {
+        if (!f || !v) {
+            return nullptr;
+        }
+        DILocalVariable *div = nullptr;
+        for (BasicBlock &bb : *f) {
+            for (Instruction &inst : bb) {
+                if (dyn_cast<DbgDeclareInst>(&inst)) {
+                    DbgDeclareInst *dinst = dyn_cast<DbgDeclareInst>(&inst);
+                    if (dinst->getAddress() == v) {
+                        div = dinst->getVariable();
+                        goto out;
+                    }
+                }else if (dyn_cast<DbgValueInst>(&inst)) {
+                    DbgValueInst *dinst = dyn_cast<DbgValueInst>(&inst);
+                    if (dinst->getValue() == v) {
+                        div = dinst->getVariable();
+                        goto out;
+                    }
+                }
+            }
+        }
+out:
+        if (!div) {
+            return nullptr;
+        }
+        return div->getType();
+    }
+
+    Type *getPointeeTyFromDITy(Module *mod, DIType *div) {
+        if (!div) {
+            return nullptr;
+        }
+        //Record the pointer indirection layer.
+        int layer = 0;
+        Type *ty = nullptr;
+        while (div) {
+            DIDerivedType *dity = dyn_cast<DIDerivedType>(div);
+            if (dity) {
+                //One more layer of type indirection, see whether it's a pointer..
+                if (dity->getTag() == llvm::dwarf::DW_TAG_pointer_type || 
+                    dity->getTag() == llvm::dwarf::DW_TAG_ptr_to_member_type) {
+                    ++layer;
+                }
+                div = dity->getBaseType();
+            }else {
+                //We have reached the non-pointer base type, record it.
+                //TODO: get the Type of non-composite types as well (see the static methods in the Type class).
+                if (dyn_cast<DICompositeType>(div)) {
+                    std::string stn = div->getName().str();
+                    ty = InstructionUtils::getStTypeByName(mod, stn);
+                }
+                break;
+            }
+        }
+        //Construct the pointee type according to the pointer indirection layer.
+        if (!ty) {
+            return nullptr;
+        }
+        for (int i = 1; i < layer; ++i) {
+            ty = ty->getPointerTo();
+        }
+        return ty;
+    }
+
+    //Return 1 if ty0 contain ty1 (as its heading part), -1 if the opposite, 0 if they are equal, -2 if they are not compatiable.
+    int testTyCompat(Type *ty0, Type *ty1) {
+        if (!ty0 != !ty1) {
+            return (ty0 ? 1 : -1);
+        }
+        if (!ty0) {
+            return 0;
+        }
+        if (InstructionUtils::same_types(ty0,ty1)) {
+            return 0;
+        }
+        if (!dyn_cast<CompositeType>(ty0) && !dyn_cast<CompositeType>(ty1)) {
+            //TODO: consider more special cases, like i8* can be potentially converted to other pointer types.
+            if (!ty0->isVoidTy() != !ty1->isVoidTy()) {
+                return (ty0->isVoidTy() ? -1 : 1);
+            }
+            if (ty0->isIntegerTy() && ty1->isIntegerTy()) {
+                int r = ty0->getIntegerBitWidth() - ty1->getIntegerBitWidth();
+                return (r > 0 ? 1 : (r < 0 ? -1 : 0));
+            }
+            return -2;
+        }
+        //From now on at least one of the two types is composite.
+        FieldDesc *fd0 = InstructionUtils::getHeadFieldDesc(ty0);
+        FieldDesc *fd1 = InstructionUtils::getHeadFieldDesc(ty1);
+        if (!fd0 || !fd1) {
+            return -2;
+        }
+        if (fd0->tys.size() == fd1->tys.size()) {
+            //Both types should be composite, and one cannot contain the other, and they are not the same types.
+            return -2;
+        }
+        if (fd0->tys.size() > fd1->tys.size()) {
+            return (fd0->findTy(ty1) ? 1 : -2);
+        }
+        return (fd1->findTy(ty0) ? -1 : -2);
+    }
+
+    //Infer the pointee type of the pointer "v" from the context (e.g. cast inst involving "v") and src debug info (i.e. metadata node).
+    //Note that we always try to return the largest pointee type that is compatiable w/ all other identified types. 
+    Type *InstructionUtils::inferPointeeTy(Value *v) {
+#ifdef DEBUG_RELATE_TYPE_NAME
+        dbgs() << "InstructionUtils::inferPointeeTy() for: " << InstructionUtils::getValueStr(v) << "\n";
+#endif
+        static std::map<Value*,Type*> vtMap;
+        if (!v) {
+            return nullptr;
+        }
+        if (vtMap.find(v) != vtMap.end()) {
+#ifdef DEBUG_RELATE_TYPE_NAME
+            dbgs() << "InstructionUtils::inferPointeeTy(): res type: " << InstructionUtils::getTypeStr(vtMap[v]) << "\n";
+#endif
+            return vtMap[v];
+        }
+        //Set a default value, anyway we will not execute the below code again for the same Value.
+        vtMap[v] = nullptr;
+        std::set<Type*> tys;
+        //First extract the type associated w/ the value itself.
+        if (v->getType() && v->getType()->isPointerTy()) {
+            tys.insert(v->getType()->getPointerElementType());
+        }
+        //Now let's inspect the cast/load/gep insts involving the "v" in the context.
+        std::set<Function*> funcs;
+        for (User *u : v->users()) {
+            //Collect the enclosing functions of this value.
+            if (dyn_cast<Instruction>(u) && dyn_cast<Instruction>(u)->getParent()) {
+                funcs.insert(dyn_cast<Instruction>(u)->getFunction());
+            }
+            if (dyn_cast<GEPOperator>(u)) {
+                GEPOperator *gep = dyn_cast<GEPOperator>(u);
+                //Make sure it's a GEP w/ "v" as the base pointer.
+                if (gep->getPointerOperand() != v) {
+                    continue;
+                }
+                //Get the GEP base pointer type.
+                Type *ty = gep->getPointerOperandType();
+                if (ty && ty->isPointerTy()) {
+                    tys.insert(ty->getPointerElementType());
+                }
+            }else if (dyn_cast<Instruction>(u)) {
+                Type *ty = nullptr;
+                if (dyn_cast<CastInst>(u)) {
+                    ty = dyn_cast<CastInst>(u)->getDestTy();
+                }else if (dyn_cast<LoadInst>(u)) {
+                    ty = dyn_cast<LoadInst>(u)->getPointerOperandType();
+                }
+                if (ty && ty->isPointerTy()) {
+                    tys.insert(ty->getPointerElementType());
+                }
+            }
+        }
+        //Now try to get type info from the src level dbg info (i.e. metadata node).
+        for (Function *f : funcs) {
+            if (f) {
+                //Get the src level type descriptor of "v", if any.
+                DIType *dty = getTyFromDbgInfo(f,v);
+                //Extract the pointee type, if it's indeed a pointer.
+                Type *ty = getPointeeTyFromDITy(f->getParent(),dty);
+                if (ty) {
+                    tys.insert(ty);
+                }
+            }
+        }
+        if (tys.empty()) {
+            return nullptr;
+        }
+        if (tys.size() == 1) {
+            return *(tys.begin());
+        }
+        //Ok, now we have a set of the potential pointee types in "tys", we then need a compatiability test of these types
+        //and return the largest one.
+        Type *hostTy = nullptr;
+        for (Type *ty : tys) {
+            if (!ty) {
+                continue;
+            }
+            if (!hostTy) {
+                hostTy = ty;
+                continue;
+            }
+            //See whether current hostTy can contain this "ty", if so, continue, otherwise, if it's conatined by "ty", update
+            //current hostTy to "ty". If they are not compatiable, that means we cannot decide the correct pointee type...
+            int r = testTyCompat(hostTy,ty);
+            if (r == -2) {
+                //TODO: maybe we can record all potential pointee types though they are not compatiable.
+                return nullptr;
+            }
+            if (r == -1) {
+                hostTy = ty;
+            }
+        }
+#ifdef DEBUG_RELATE_TYPE_NAME
+        dbgs() << "InstructionUtils::inferPointeeTy(): res type: " << InstructionUtils::getTypeStr(hostTy) << "\n";
+#endif
+        vtMap[v] = hostTy;
+        return hostTy;
+    }
 }

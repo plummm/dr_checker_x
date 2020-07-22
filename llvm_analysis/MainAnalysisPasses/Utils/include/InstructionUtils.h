@@ -16,6 +16,7 @@
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/IR/Operator.h"
 #include "llvm/Analysis/CFGPrinter.h"
+#include "llvm/IR/IntrinsicInst.h"
 #include <string>
 #include <sstream>
 #include <chrono>
@@ -270,6 +271,8 @@ namespace DRCHECKER {
         static int dumpFuncGraph(Function *f);
 
         static void printCallingCtx(raw_ostream &O, std::vector<Instruction*> *ctx, bool lbreak = false);
+        
+        static Type *inferPointeeTy(Value *v);
     };
 
 }

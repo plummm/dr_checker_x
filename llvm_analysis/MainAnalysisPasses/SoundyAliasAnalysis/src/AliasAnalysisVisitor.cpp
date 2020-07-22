@@ -1808,7 +1808,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
             return;
         }
         //We need to create a new struct.file object and set its field point-to according to the field-to-arg map.
-        std::string fn("struct.file");
+        std::string fn("file");
         Type *file_ty = InstructionUtils::getStTypeByName(I.getModule(), fn);
         if (!file_ty) {
 #ifdef DEBUG_CALL_INSTR
