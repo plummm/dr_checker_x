@@ -559,21 +559,35 @@ namespace DRCHECKER {
         return r;
     }
 
-    //In theory, we can simply compare two Type* by "==" in llvm,
-    //but sometimes we want to handle cases like "%struct.A" and "%struct.A.123", 
-    //they are basically the same but llvm does assign different Type* for them.
-    bool InstructionUtils::same_types(Type* ty0, Type* ty1, bool wild_intp) {
-#ifdef DEBUG_TYPE_CMP
-        if (ty0->isFunctionTy()) {
-            dbgs() << "InstructionUtils::same_types() FUNC: " << InstructionUtils::getTypeStr(ty0) << " | " << InstructionUtils::getTypeStr(ty1) << "\n";
+    //E.g. i8** -> 2, i8* -> 1, i8 -> 0
+    //The base type will be returned to "bty" if provided.
+    int InstructionUtils::getPtrLayer(Type *ty, Type **bty = nullptr) {
+        int r = 0;
+        while (ty) {
+            if (ty->isPointerTy()) {
+                ++r;
+                ty = ty->getPointerElementType();
+            }else {
+                break;
+            }
         }
-#endif
+        if (bty) {
+            *bty = ty;
+        }
+        return r;
+    }
+
+    //In theory, we can simply compare two Type by "==" in llvm,
+    //but sometimes we want to handle cases like "%struct.A" and "%struct.A.123", 
+    //they are basically the same but llvm does assign different Type for them.
+    bool InstructionUtils::same_types(Type* ty0, Type* ty1, bool wild_intp) {
         if (ty0 == ty1) {
             return true;
         }
-        if (!ty0 || !ty1) {
+        if (!ty0 != !ty1) {
             return false;
         }
+        //From now on neither can be null.
         if (ty0->getTypeID() != ty1->getTypeID()) {
             //This means their basic types are different, e.g. a pointer vs an integer.
             return false;
@@ -582,33 +596,37 @@ namespace DRCHECKER {
         if (n != ty1->getNumContainedTypes()) {
             return false;
         }
+        Type *bty0 = nullptr, *bty1 = nullptr;
+        int l0 = InstructionUtils::getPtrLayer(ty0,&bty0);
+        int l1 = InstructionUtils::getPtrLayer(ty1,&bty1);
+        if (l0 != l1) {
+            return false;
+        }
+        if (l0 > 0) {
+            //Both are pointers w/ the same layers, we compare their base types.
+            return InstructionUtils::same_types(bty0,bty1,wild_intp);
+        }
+        //From now on both types are not pointers, and they have the same type ID:
+        //https://llvm.org/doxygen/classllvm_1_1Type.html#a5e9e1c0dd93557be1b4ad72860f3cbda
         if (wild_intp) {
-            if (ty0->isPointerTy() && ty0->getPointerElementType()->isIntegerTy(8)) {
-                return ty1->isPointerTy();
-            }
-            if (ty1->isPointerTy() && ty1->getPointerElementType()->isIntegerTy(8)) {
-                return ty0->isPointerTy();
+            //i8/void can match anything.
+            if (InstructionUtils::isPrimitiveTy(ty0,8) || InstructionUtils::isPrimitiveTy(ty1,8)) {
+                return true;
             }
         }
-#ifdef DEBUG_TYPE_CMP
-        dbgs() << "InstructionUtils::same_types(): " << "#SUB:" << n << " " << InstructionUtils::getTypeStr(ty0) << " | " << InstructionUtils::getTypeStr(ty1) << "\n";
-        /*
-        if (ty0->isFunctionTy()) {
-            dbgs() << "InstructionUtils::same_types(): function type, #subtypes: " << n << "\n";
+        if (!dyn_cast<CompositeType>(ty0)) {
+            return (ty0 == ty1);
         }else if (ty0->isStructTy()) {
-            dbgs() << "InstructionUtils::same_types(): struct type, #subtypes: " << n << "\n";
-        }else if (ty0->isPointerTy()) {
-            dbgs() << "InstructionUtils::same_types(): pointer type, #subtypes: " << n << "\n";
-        }
-        */
-#endif
-        //Special handling for "struct"s.
-        if (ty0->isStructTy()) {
+            //Compare two struct types by their names (w/ numeric suffix trimmed).
             StructType *st0 = dyn_cast<StructType>(ty0);
             StructType *st1 = dyn_cast<StructType>(ty1);
             if (st0 && st1 && st0->hasName() && st1->hasName()) {
                 std::string n0 = st0->getName().str();
                 std::string n1 = st1->getName().str();
+                //For anonymized structs, we still need to count the numeric suffix.
+                if (n0.find(".anon.") != std::string::npos && n1.find(".anon.") != std::string::npos) {
+                    return (n0 == n1);
+                }
                 //trim the numeric suffix if any.
                 InstructionUtils::trim_num_suffix(&n0);
                 InstructionUtils::trim_num_suffix(&n1);
@@ -622,10 +640,17 @@ namespace DRCHECKER {
 #endif
                 return false;
             }
+        }else if (dyn_cast<SequentialType>(ty0) && dyn_cast<SequentialType>(ty1)) {
+            //Ensure that their #elem are same.
+            if (dyn_cast<SequentialType>(ty0)->getNumElements() != dyn_cast<SequentialType>(ty1)->getNumElements()) {
+                return false;
+            }
         }
-        for (unsigned i=0; i<n; ++i) {
+        //In the end compare the contained sub types one by one.
+        for (unsigned i = 0; i < n; ++i) {
 #ifdef DEBUG_TYPE_CMP
-            dbgs() << i << ": " << InstructionUtils::getTypeStr(ty0->getContainedType(i)) << " | " << InstructionUtils::getTypeStr(ty1->getContainedType(i)) << "\n";
+            dbgs() << i << ": " << InstructionUtils::getTypeStr(ty0->getContainedType(i)) << " | " 
+            << InstructionUtils::getTypeStr(ty1->getContainedType(i)) << "\n";
 #endif
             if (!InstructionUtils::same_types(ty0->getContainedType(i),ty1->getContainedType(i))) {
                 return false;
@@ -1120,10 +1145,10 @@ namespace DRCHECKER {
         OS << "\n";
     }
 
-    int FieldDesc::findTy(Type *ty) {
+    int FieldDesc::findTy(Type *ty, bool wildp) {
         if (ty) {
             for (int i = 0; i < this->tys.size(); ++i) {
-                if (InstructionUtils::same_types(this->tys[i],ty)) {
+                if (InstructionUtils::same_types(this->tys[i],ty,wildp)) {
                     return i;
                 }
             }
@@ -1169,6 +1194,13 @@ namespace DRCHECKER {
     //Most of below metadata related code is copied from the llvm 7.0's internal implementation on ".ll" generation.
     //https://github.com/llvm/llvm-project/blob/release/7.x/llvm/lib/IR/AsmWriter.cpp
     //I do think they should make a convenient API to enumerate all metadata nodes...
+    
+    //This holds all metadata nodes in the module.
+    DenseMap<MDNode*, unsigned> InstructionUtils::mdnCache;
+
+    //This holds the name->DIC mapping, the name is the struct name like "file" (no struct. prefix and no numeric suffix).
+    std::map<std::string,DICompositeType*> InstructionUtils::dicMap;
+
     void createMetadataSlot(MDNode *N, DenseMap<MDNode*, unsigned> *mdnMap) {
         static int mdnNext = 0;
         static std::set<MDNode*> visited;
@@ -1348,9 +1380,10 @@ namespace DRCHECKER {
         }
     }
 
-    bool InstructionUtils::isPrimitiveTy(Type *ty) {
+    //If "bit" is zero, integer w/ any width will do.
+    bool InstructionUtils::isPrimitiveTy(Type *ty, int bit) {
         if (ty) {
-            return (ty->isVoidTy() || ty->isIntegerTy());
+            return (ty->isVoidTy() || (bit > 0 ? ty->isIntegerTy(bit) : ty->isIntegerTy()));
         }
         return true;
     }
@@ -1369,11 +1402,11 @@ namespace DRCHECKER {
         return InstructionUtils::isNullCompTy(ty->getPointerElementType());
     }
 
-    bool InstructionUtils::isPrimitivePtr(Type *ty) {
+    bool InstructionUtils::isPrimitivePtr(Type *ty, int bit) {
         if (!ty || !ty->isPointerTy()) {
             return false;
         }
-        return InstructionUtils::isPrimitiveTy(ty->getPointerElementType());
+        return InstructionUtils::isPrimitiveTy(ty->getPointerElementType(),bit);
     }
 
     //Note: the struct name is like "file"
@@ -1650,8 +1683,10 @@ out:
             return (ty0 ? 1 : -1);
         }
         if (!ty0) {
+            //Both are nullptr.
             return 0;
         }
+        //From now on both types cannot be null.
         if (InstructionUtils::same_types(ty0,ty1)) {
             return 0;
         }
@@ -1660,9 +1695,15 @@ out:
             if (!ty0->isVoidTy() != !ty1->isVoidTy()) {
                 return (ty0->isVoidTy() ? -1 : 1);
             }
+            //E.g. i32 should contain i8, etc.
             if (ty0->isIntegerTy() && ty1->isIntegerTy()) {
-                int r = ty0->getIntegerBitWidth() - ty1->getIntegerBitWidth();
+                int r = (int)ty0->getIntegerBitWidth() - (int)ty1->getIntegerBitWidth();
                 return (r > 0 ? 1 : (r < 0 ? -1 : 0));
+            }
+            //i8 can match anything
+            if (InstructionUtils::isPrimitiveTy(ty0,8) || InstructionUtils::isPrimitiveTy(ty1,8)) {
+                //Only one of them is i8.
+                return (InstructionUtils::isPrimitiveTy(ty0,8) ? -1 : 1);
             }
             return -2;
         }
@@ -1677,9 +1718,36 @@ out:
             return -2;
         }
         if (fd0->tys.size() > fd1->tys.size()) {
-            return (fd0->findTy(ty1) ? 1 : -2);
+            return (fd0->findTy(ty1,true) >= 0 ? 1 : -2);
         }
-        return (fd1->findTy(ty0) ? -1 : -2);
+        return (fd1->findTy(ty0,true) >= 0 ? -1 : -2);
+    }
+
+    //If there are two potential types for a same value but they are not compatiable, we try to select one
+    //or none of them, according to some domain knowledges.
+    //Currently we deal w/ one situation here, e.g.
+    //-------------------------------------------------------------------
+    //  struct snd_timer_instance *ts;
+    //  list_for_each_entry(ts, &ti->slave_active_head, active_list)
+    //-------------------------------------------------------------------
+    //In theory each iteration of the macro needs to construct a snd_timer_instance* (w/ container_of) and assign it to "ts",
+    //but clang optimization usually directly uses the list_head* (i.e. pointer to the "active_list" field in snd_timer_instance)
+    //to access other fields in the host struct w/ the relative offset. So in many cases, "ts" is a list_head* (according to cast instr),
+    //but snd_timer_instance* according to the src dbg info. In this case we will choose list_head* as is, and infer the container later.
+    Type *solveConflictTys(Value *v, Type *ty0, Type *ty1) {
+        StructType *sty0 = dyn_cast<StructType>(ty0);
+        StructType *sty1 = dyn_cast<StructType>(ty1);
+        if (sty0 && sty1) {
+            std::string n0 = sty0->hasName() ? sty0->getName().str() : "";
+            std::string n1 = sty1->hasName() ? sty1->getName().str() : "";
+            std::string nv = (v && v->hasName()) ? v->getName().str() : "";
+            if (n0.find("struct.list_head") != std::string::npos || n1.find("struct.list_head") != std::string::npos) {
+                if (nv.find("pn") != std::string::npos) {
+                    return ((n0.find("struct.list_head") != std::string::npos) ? ty0 : ty1);
+                }
+            }
+        }
+        return nullptr;
     }
 
     //Infer the pointee type of the pointer "v" from the context (e.g. cast inst involving "v") and src debug info (i.e. metadata node).
@@ -1747,12 +1815,13 @@ out:
                 }
             }
         }
-        if (tys.empty()) {
-            return nullptr;
+#ifdef DEBUG_RELATE_TYPE_NAME
+        dbgs() << "InstructionUtils::inferPointeeTy(): candidate types: ";
+        for (Type *ty : tys) {
+            dbgs() << InstructionUtils::getTypeStr(ty) << " | ";
         }
-        if (tys.size() == 1) {
-            return *(tys.begin());
-        }
+        dbgs() << "\n";
+#endif
         //Ok, now we have a set of the potential pointee types in "tys", we then need a compatiability test of these types
         //and return the largest one.
         Type *hostTy = nullptr;
@@ -1767,9 +1836,17 @@ out:
             //See whether current hostTy can contain this "ty", if so, continue, otherwise, if it's conatined by "ty", update
             //current hostTy to "ty". If they are not compatiable, that means we cannot decide the correct pointee type...
             int r = testTyCompat(hostTy,ty);
+#ifdef DEBUG_RELATE_TYPE_NAME
+            dbgs() << "InstructionUtils::inferPointeeTy(): type compat: " << InstructionUtils::getTypeStr(hostTy) << 
+            " | " << InstructionUtils::getTypeStr(ty) << " -> " << r << "\n";
+#endif
             if (r == -2) {
                 //TODO: maybe we can record all potential pointee types though they are not compatiable.
-                return nullptr;
+                hostTy = solveConflictTys(v,hostTy,ty);
+                if (!hostTy) {
+                    //Cannot resolve the conflicts.
+                    return nullptr;
+                }
             }
             if (r == -1) {
                 hostTy = ty;
