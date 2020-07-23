@@ -60,6 +60,7 @@ def get_ctx_strs(ctx):
             chain_comp.append(s)
         is_entry = (not is_entry)
     chain_comp.append(' -> '.join(chain))
+    return chain_comp
 
 def pprint_trace(tr):
     cur_ctx = None
@@ -67,9 +68,9 @@ def pprint_trace(tr):
         #First we need to output the context of this inst - if we haven't done so already.
         ctx = get_ctx_strs(ins.get('ctx',[]))
         if (not cur_ctx) or cur_ctx <> ctx:
-            print '#####CTX#####'
-            for s in ctx:
-                print s
+            print '#####CTX##### ' + ctx[-1]
+            for i in range(len(ctx)-1):
+                print ctx[i]
             print '#####INSTS#####'
             cur_ctx = ctx
         #Now print current inst.
