@@ -1769,9 +1769,11 @@ out:
         //Set a default value, anyway we will not execute the below code again for the same Value.
         vtMap[v] = nullptr;
         std::set<Type*> tys;
+        std::set<Type*> ctx_tys;
         //First extract the type associated w/ the value itself.
         if (v->getType() && v->getType()->isPointerTy()) {
             tys.insert(v->getType()->getPointerElementType());
+            ctx_tys.insert(v->getType()->getPointerElementType());
         }
         //Now let's inspect the cast/load/gep insts involving the "v" in the context.
         std::set<Function*> funcs;
@@ -1790,6 +1792,7 @@ out:
                 Type *ty = gep->getPointerOperandType();
                 if (ty && ty->isPointerTy()) {
                     tys.insert(ty->getPointerElementType());
+                    ctx_tys.insert(ty->getPointerElementType());
                 }
             }else if (dyn_cast<Instruction>(u)) {
                 Type *ty = nullptr;
@@ -1800,6 +1803,7 @@ out:
                 }
                 if (ty && ty->isPointerTy()) {
                     tys.insert(ty->getPointerElementType());
+                    ctx_tys.insert(ty->getPointerElementType());
                 }
             }
         }
@@ -1841,12 +1845,18 @@ out:
             " | " << InstructionUtils::getTypeStr(ty) << " -> " << r << "\n";
 #endif
             if (r == -2) {
-                //TODO: maybe we can record all potential pointee types though they are not compatiable.
-                hostTy = solveConflictTys(v,hostTy,ty);
-                if (!hostTy) {
-                    //Cannot resolve the conflicts.
-                    return nullptr;
+                //The two types are not incompatiable, try to resolve the conflicts.
+                Type *sty = solveConflictTys(v,hostTy,ty);
+                if (!sty) {
+                    //Cannot resolve the conflicts, we will just pick the type inferred from the context IR since that's how it's used.
+                    if ((ctx_tys.find(hostTy) == ctx_tys.end()) != (ctx_tys.find(ty) == ctx_tys.end())) {
+                        sty = (ctx_tys.find(ty) != ctx_tys.end()) ? ty : hostTy;
+                    }else {
+                        //Conflict types from the same source...
+                        return nullptr;
+                    }
                 }
+                hostTy = sty;
             }
             if (r == -1) {
                 hostTy = ty;
