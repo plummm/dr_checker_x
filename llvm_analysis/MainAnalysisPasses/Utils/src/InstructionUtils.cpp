@@ -587,6 +587,12 @@ namespace DRCHECKER {
         if (!ty0 != !ty1) {
             return false;
         }
+        if (wild_intp) {
+            //i8/void can match any non-composite types, but if the other is composite, we return false.
+            if (InstructionUtils::isPrimitiveTy(ty0,8) || InstructionUtils::isPrimitiveTy(ty1,8)) {
+                return (!dyn_cast<CompositeType>(ty0) && !dyn_cast<CompositeType>(ty1));
+            }
+        }
         //From now on neither can be null.
         if (ty0->getTypeID() != ty1->getTypeID()) {
             //This means their basic types are different, e.g. a pointer vs an integer.
@@ -608,12 +614,6 @@ namespace DRCHECKER {
         }
         //From now on both types are not pointers, and they have the same type ID:
         //https://llvm.org/doxygen/classllvm_1_1Type.html#a5e9e1c0dd93557be1b4ad72860f3cbda
-        if (wild_intp) {
-            //i8/void can match anything.
-            if (InstructionUtils::isPrimitiveTy(ty0,8) || InstructionUtils::isPrimitiveTy(ty1,8)) {
-                return true;
-            }
-        }
         if (!dyn_cast<CompositeType>(ty0)) {
             return (ty0 == ty1);
         }else if (ty0->isStructTy()) {
