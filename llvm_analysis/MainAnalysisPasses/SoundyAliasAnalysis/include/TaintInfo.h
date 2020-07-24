@@ -638,7 +638,8 @@ namespace DRCHECKER {
         //The logic is similar to "fetchFieldPointsTo" in the Alias Analysis.
         bool getTf(InstLoc *loc, std::set<TaintFlag*> &r) {
 #ifdef DEBUG_UPDATE_FIELD_TAINT
-            dbgs() << "FieldTaint::getTf(): fetch taint for field: " << this->fieldId << ", FieldTaint: " << (const void*)this << ", Host: " << this->priv << "\n";
+            dbgs() << "FieldTaint::getTf(): fetch taint for field: " << this->fieldId << ", FieldTaint: " 
+            << (const void*)this << ", Host: " << this->priv << "\n";
 #endif
             //Reactivation phase: if the entry function has changed, we need to deactivate the TFs propagated in the previous entry,
             //and then re-activate the inherent TF if present.
@@ -740,7 +741,8 @@ namespace DRCHECKER {
                 r.insert(actTf.begin(),actTf.end());
             }
 #ifdef DEBUG_UPDATE_FIELD_TAINT
-            dbgs() << "FieldTaint::getTf(): final stats: total/act_tan/ret: " << this->targetTaint.size() << "/" << actTf.size() << "/" << r.size() << "\n";
+            dbgs() << "FieldTaint::getTf(): final stats: total/act_tan/ret: " << this->targetTaint.size() << "/" 
+            << actTf.size() << "/" << r.size() << "\n";
 #endif
             return true;
         }

@@ -56,7 +56,7 @@ def get_ctx_strs(ctx):
         else:
             #Record the callsite info.
             ins = inst.get('instr','UNK_INST')
-            s = '-> (' + furl + ' : ' + ins + ')'
+            s = '----> (' + furl + ' : ' + ins + ')'
             chain_comp.append(s)
         is_entry = (not is_entry)
     chain_comp.append(' -> '.join(chain))
@@ -90,9 +90,10 @@ def pprint(j):
     trsk = [s for s in j if s.startswith('inst_trace')]
     cnt = 0
     for tr in trsk:
-        print '<<-----Trace(%d)----->>' % cnt
+        print '********Trace(%d)********' % cnt
         pprint_trace(j.get(tr,[]))
         cnt += 1
+        print ''
 
 def dump_warns_pretty(ty):
     global jwarns
@@ -100,7 +101,7 @@ def dump_warns_pretty(ty):
     for j in jwarns:
         if j.get('by','').find(ty) < 0:
             continue
-        print '============WARN %d============' % cnt
+        print '=================WARN %d=================' % cnt
         pprint(j)
         cnt += 1
 

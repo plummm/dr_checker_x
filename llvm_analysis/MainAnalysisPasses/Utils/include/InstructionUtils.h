@@ -112,13 +112,6 @@ namespace DRCHECKER {
         static bool isPointerInstruction(Instruction *I);
 
         /***
-         *  Get the line number of the instruction.
-         * @param I instruction whose line number need to be fetched.
-         * @return unsigned int representing line number.
-         */
-        static unsigned getLineNumber(Instruction &I);
-
-        /***
          *  Get the name of the provided instruction.
          * @param I instruction whose name needs to be fetched.
          * @return string representing the instruction name.

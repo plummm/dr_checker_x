@@ -33,16 +33,6 @@ namespace DRCHECKER {
         return retVal;
     }
 
-    unsigned InstructionUtils::getLineNumber(Instruction &I)
-    {
-
-        const DebugLoc &currDC = I.getDebugLoc();
-        if(currDC) {
-            return currDC.getLine();
-        }
-        return -1;
-    }
-
     std::string InstructionUtils::getInstructionName(Instruction *I) {
         if(I->hasName()) {
             return I->getName().str();
@@ -177,12 +167,30 @@ namespace DRCHECKER {
         return instrLoc;
     }
 
+    int getCorrectLineNumber(DILocation *d) {
+        if (!d) {
+            return -1;
+        }
+        int l = d->getLine();
+        if (l == 0) {
+            //It's very unlikely that the instr is at line 0...
+            //Let's try to find the real line number from the "scope".
+            MDNode *n = d->getScope();
+            if (n) {
+                if (dyn_cast<DILexicalBlock>(n)) {
+                    return dyn_cast<DILexicalBlock>(n)->getLine();
+                }
+                if (dyn_cast<DISubprogram>(n)) {
+                    return dyn_cast<DISubprogram>(n)->getLine();
+                }
+            }
+        }
+        return l;
+    }
+
     int InstructionUtils::getInstrLineNumber(Instruction *I) {
         DILocation *targetLoc = InstructionUtils::getCorrectInstrLocation(I);
-        if(targetLoc != nullptr) {
-            return targetLoc->getLine();
-        }
-        return -1;
+        return getCorrectLineNumber(targetLoc);
     }
 
     void InstructionUtils::printInst(Instruction *I, raw_ostream &ROS) {
@@ -210,7 +218,7 @@ namespace DRCHECKER {
         DILocation *instrLoc = InstructionUtils::getCorrectInstrLocation(I);
         if (instrLoc != nullptr) {
             OS << InstructionUtils::escapeJsonString(instrLoc->getFilename());
-            OS << " @ " << instrLoc->getLine();
+            OS << " @ " << getCorrectLineNumber(instrLoc);
         } else {
             OS << "N/A";
         }
@@ -236,7 +244,7 @@ namespace DRCHECKER {
         O << "\"at_line\":";
         DILocation *instrLoc = InstructionUtils::getCorrectInstrLocation(I);
         if(instrLoc != nullptr) {
-            O << instrLoc->getLine() << ",\"at_file\":\"" << InstructionUtils::escapeJsonString(instrLoc->getFilename()) << "\",";
+            O << getCorrectLineNumber(instrLoc) << ",\"at_file\":\"" << InstructionUtils::escapeJsonString(instrLoc->getFilename()) << "\",";
         } else {
             O << "-1,";
         }
