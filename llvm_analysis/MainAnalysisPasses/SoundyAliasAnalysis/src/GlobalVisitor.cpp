@@ -132,7 +132,6 @@ namespace DRCHECKER {
             }
         }
 #endif
-
         // Create new context.
         //Set up arguments of the called function.
         std::vector<Instruction*> *newCallContext = new std::vector<Instruction *>();
@@ -148,7 +147,7 @@ namespace DRCHECKER {
             dbgs() << "GlobalVisitor::processCalledFunction: prepare context for: " << currFuncName << " (w/ definition)\n";
 #endif
             BasicBlock &bb = currFunc->getEntryBlock();
-            newCallContext->insert(newCallContext->end(), bb.getFirstNonPHI());
+            newCallContext->insert(newCallContext->end(), bb.getFirstNonPHIOrDbg());
         }else{
             //Insert the call inst again in order to match the 2*MAX-1...
 #ifdef DEBUG_CALL_INSTR

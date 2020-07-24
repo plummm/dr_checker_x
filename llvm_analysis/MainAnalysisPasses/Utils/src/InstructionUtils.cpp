@@ -174,6 +174,22 @@ namespace DRCHECKER {
             return nullptr;
         }
         DILocation *dloc = I->getDebugLoc().get();
+        //Deal w/ a special case here: sometimes the first instruction in a function is an "alloc", which usually doesn't
+        //have a DILocation associated, but on the other hand, we only want to use it to locate the function start (e.g.
+        //in the calling context), so in this situation we can use the first instruction in the same entry BB who has the DILocation instead.
+        if (!dloc) {
+            if (I->getParent() && I->getFunction()) {
+                BasicBlock &firstBB = I->getFunction()->getEntryBlock();
+                if (firstBB.getFirstNonPHIOrDbg() == I) {
+                    for (Instruction &inst : firstBB) {
+                        dloc = inst.getDebugLoc().get();
+                        if (dloc) {
+                            break; 
+                        }
+                    }
+                }
+            }
+        }
         while (dloc) {
             MDNode *md = dloc->getInlinedAt();
             if (!md) {
