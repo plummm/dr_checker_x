@@ -155,6 +155,9 @@ namespace DRCHECKER {
          * @return DILocation correct debug location corresponding to the provided instruction.
          */
         static DILocation* getCorrectInstrLocation(Instruction *I);
+        
+        //hz: my experimental replacement of the above.
+        static DILocation* getCorrectInstLoc(Instruction *I);
 
         //Print the instruction with detailed src level debug info (e.g. file, line number).
         static void printInst(Instruction *I, raw_ostream &OS);

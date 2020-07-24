@@ -167,6 +167,31 @@ namespace DRCHECKER {
         return instrLoc;
     }
 
+    //hz: my feeling is that above "getCorrectInstrLocation" is unnecessarily complex and there should be better solution
+    //to get the correct DILocation just for the real inline site (instead of inside the original callee definition).
+    DILocation* InstructionUtils::getCorrectInstLoc(Instruction *I) {
+        if (!I) {
+            return nullptr;
+        }
+        DILocation *dloc = I->getDebugLoc().get();
+        while (dloc) {
+            MDNode *md = dloc->getInlinedAt();
+            if (!md) {
+                //This means we have reached the bottom.
+                break;
+            }
+            if (dyn_cast<DILocation>(md)) {
+                dloc = dyn_cast<DILocation>(md);
+            }else {
+                //Not sure whether this is possible...
+                dbgs() << "!!! InstructionUtils::getCorrectInstLoc(): The inlinedAt metadata is not a DILocation! inst: "
+                << InstructionUtils::getValueStr(I) << "\n";
+                break;
+            }
+        }
+        return dloc;
+    }
+
     int getCorrectLineNumber(DILocation *d) {
         if (!d) {
             return -1;
@@ -189,7 +214,7 @@ namespace DRCHECKER {
     }
 
     int InstructionUtils::getInstrLineNumber(Instruction *I) {
-        DILocation *targetLoc = InstructionUtils::getCorrectInstrLocation(I);
+        DILocation *targetLoc = InstructionUtils::getCorrectInstLoc(I);
         return getCorrectLineNumber(targetLoc);
     }
 
@@ -215,7 +240,7 @@ namespace DRCHECKER {
             OS << I->getFunction()->getName().str();
         }
         OS << " ,SRC: ";
-        DILocation *instrLoc = InstructionUtils::getCorrectInstrLocation(I);
+        DILocation *instrLoc = InstructionUtils::getCorrectInstLoc(I);
         if (instrLoc != nullptr) {
             OS << InstructionUtils::escapeJsonString(instrLoc->getFilename());
             OS << " @ " << getCorrectLineNumber(instrLoc);
@@ -242,7 +267,7 @@ namespace DRCHECKER {
         O << "\"instr\":\"";
         O << InstructionUtils::escapeValueString(I) << "\",";
         O << "\"at_line\":";
-        DILocation *instrLoc = InstructionUtils::getCorrectInstrLocation(I);
+        DILocation *instrLoc = InstructionUtils::getCorrectInstLoc(I);
         if(instrLoc != nullptr) {
             O << getCorrectLineNumber(instrLoc) << ",\"at_file\":\"" << InstructionUtils::escapeJsonString(instrLoc->getFilename()) << "\",";
         } else {
@@ -275,7 +300,7 @@ namespace DRCHECKER {
             return nullptr;
         }
         std::string inst,bb,func,mod;
-        DILocation *instrLoc = InstructionUtils::getCorrectInstrLocation(I);
+        DILocation *instrLoc = InstructionUtils::getCorrectInstLoc(I);
         inst = InstructionUtils::getInstStrID_No(I);
         if(I->getParent()){
 			bb = InstructionUtils::getBBStrID_No(I->getParent());
