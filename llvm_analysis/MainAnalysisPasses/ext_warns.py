@@ -95,15 +95,66 @@ def pprint(j):
         cnt += 1
         print ''
 
-def dump_warns_pretty(ty):
+#Our criteria here is: if the warned instr of 'a' is the same as that of 'b', or it appears in the trace of 'b',
+#we say 'b' contains 'a'. Return True iff 'b' contains 'a'.
+def warn_compat(a,b):
+    if (not a) <> (not b):
+        return (not a)
+    if not a:
+        #Both are null.
+        return True
+    fpa = a.get('at_file','file_a')
+    lna = a.get('at_line',-2)
+    if fpa == b.get('at_file','file_b') and lna == b.get('at_line',-3):
+        return True
+    #Inspect b's trace.
+    trb = [s for s in b if s.startswith('inst_trace')]
+    for tr in trb:
+        for ins in b.get(tr,[]):
+            if fpa == ins.get('at_file','file_b') and lna == ins.get('at_line',-3):
+                return True
+    return False
+
+#Try to group the warnings of a specific type (e.g. put all the warns associated w/ a same instruction together)
+def group_warns(ty):
     global jwarns
-    cnt = 0
+    cands = []
+    #First get all warnings of a specific type.
     for j in jwarns:
         if j.get('by','').find(ty) < 0:
             continue
-        print '=================WARN %d=================' % cnt
-        pprint(j)
-        cnt += 1
+        cands.append(j)
+    #Do the grouping.
+    res = []
+    for j in cands:
+        #Test its compatioability w/ each group, if compatiable, add it to that group.
+        #Otherwise, make a new group for it.
+        compat = False
+        for grp in res:
+            for e in grp:
+                #Note that the test should be bi-directional.
+                if warn_compat(j,e) or warn_compat(e,j):
+                    compat = True
+                    break
+            if compat:
+                grp.append(j)
+                break
+        if not compat:
+            res.append([j])
+    return res
+
+def dump_warns_pretty(ty):
+    warn_grps = group_warns(ty)
+    gcnt = 0
+    for grp in warn_grps:
+        print '=========================GROUP %d=========================' % gcnt
+        print ''
+        wcnt = 0
+        for j in grp:
+            print '++++++++++++++++WARN %d++++++++++++++++' % wcnt
+            pprint(j)
+            wcnt += 1
+        gcnt += 1
 
 if __name__ == '__main__':
     if len(sys.argv) < 2:

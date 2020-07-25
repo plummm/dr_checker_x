@@ -174,19 +174,30 @@ namespace DRCHECKER {
             return nullptr;
         }
         DILocation *dloc = I->getDebugLoc().get();
-        //Deal w/ a special case here: sometimes the first instruction in a function is an "alloc", which usually doesn't
-        //have a DILocation associated, but on the other hand, we only want to use it to locate the function start (e.g.
-        //in the calling context), so in this situation we can use the first instruction in the same entry BB who has the DILocation instead.
+        //Deal w/ a special case here: instructions like "alloca" and "phi" usually don't have the DILocation, since our goal
+        //is only to locate them in the source code for the debugging purpose, in this situation we can use the DILocation of the
+        //first instruction after the original one within the same BB.
         if (!dloc) {
-            if (I->getParent() && I->getFunction()) {
-                BasicBlock &firstBB = I->getFunction()->getEntryBlock();
-                if (firstBB.getFirstNonPHIOrDbg() == I) {
-                    for (Instruction &inst : firstBB) {
-                        dloc = inst.getDebugLoc().get();
-                        if (dloc) {
-                            break; 
+            if (I->getParent()) {
+                BasicBlock *bb = I->getParent();
+                DILocation *prev = nullptr;
+                bool reached = false;
+                for (Instruction &inst : *bb) {
+                    if (&inst == I) {
+                        reached = true;
+                        continue;
+                    }
+                    if (inst.getDebugLoc().get()) {
+                        if (reached) {
+                            dloc = inst.getDebugLoc().get();
+                            break;
+                        }else {
+                            prev = inst.getDebugLoc().get();
                         }
                     }
+                }
+                if (!dloc) {
+                    dloc = prev;
                 }
             }
         }
