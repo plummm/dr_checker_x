@@ -422,8 +422,8 @@ namespace DRCHECKER {
             //This is a function pointer w/o point-to function, which can cause trobule later in resolving indirect function call.
             //We can try to do some smart resolving here by looking at the same-typed global constant objects.
 #ifdef SMART_FUNC_PTR_RESOLVE
-            std::vector<Function*> candidateFuncs;
-            hostObj->getPossibleMemberFunctions(targetInstr, dyn_cast<FunctionType>(real_ty), hostObj->targetType, fid, candidateFuncs);
+            std::set<Function*> candidateFuncs;
+            hostObj->getPossibleMemberFunctions(fid, dyn_cast<FunctionType>(real_ty), targetInstr, candidateFuncs);
             for (Function *func : candidateFuncs) {
                 GlobalObject *newObj = new GlobalObject(func);
                 //Update points-to
@@ -1588,18 +1588,14 @@ namespace DRCHECKER {
     void PointerPointsTo::print(llvm::raw_ostream& OS) {
         if (this->targetObject) {
             Value *tv = this->targetObject->getValue();
-            OS << InstructionUtils::getTypeStr(this->targetObject->targetType) << " | " << this->dstfieldId << " ,is_taint_src: " << this->targetObject->is_taint_src;
-            OS << ", Obj ID: " << (const void*)(this->targetObject) << ", Inst/Val: " << InstructionUtils::getValueStr(tv) << "\n";
-            /*
-            if (tv){
-                dbgs() << "Inst/Val: " << InstructionUtils::getValueStr(tv) << "\n";
-                if (dyn_cast<Instruction>(tv)){
-                    InstructionUtils::printInst(dyn_cast<Instruction>(tv),dbgs());
-                }else{
-                    dbgs() << InstructionUtils::getValueStr(tv) << "\n";
-                }
+            OS << InstructionUtils::getTypeStr(this->targetObject->targetType) << " | " << this->dstfieldId 
+            << " ,is_taint_src: " << this->targetObject->is_taint_src << ", Obj ID: " << (const void*)(this->targetObject) << ", Inst/Val: ";
+            if (dyn_cast<Function>(tv)) {
+                OS << "FUNC " << dyn_cast<Function>(tv)->getName().str();
+            }else {
+                OS << InstructionUtils::getValueStr(tv);
             }
-            */
+            OS << "\n";
         }else {
             OS << "Null targetObject!\n";
         }

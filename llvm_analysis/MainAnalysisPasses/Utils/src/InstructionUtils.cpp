@@ -15,6 +15,7 @@ namespace DRCHECKER {
 #define DEBUG_IS_ASAN_INST
 //#define DEBUG_GET_TY_DESC
 #define DEBUG_RELATE_TYPE_NAME
+#define DEBUG_FUNCTION_PTR_RESOLVE
 
     bool InstructionUtils::isPointerInstruction(Instruction *I) {
         bool retVal = false;
@@ -127,7 +128,7 @@ namespace DRCHECKER {
     }
 
     std::string getFunctionFileName(Function *F) {
-        SmallVector<std::pair<unsigned, MDNode *>, 4> MDs;
+        SmallVector<std::pair<unsigned, MDNode*>,4> MDs;
         F->getAllMetadata(MDs);
         for (auto &MD : MDs) {
             if (MDNode *N = MD.second) {
@@ -138,7 +139,6 @@ namespace DRCHECKER {
         }
         return "";
     }
-
 
     DILocation* InstructionUtils::getCorrectInstrLocation(Instruction *I) {
         DILocation *instrLoc = I->getDebugLoc().get();
@@ -674,9 +674,7 @@ namespace DRCHECKER {
         }
         //From now on both types are not pointers, and they have the same type ID:
         //https://llvm.org/doxygen/classllvm_1_1Type.html#a5e9e1c0dd93557be1b4ad72860f3cbda
-        if (!dyn_cast<CompositeType>(ty0)) {
-            return (ty0 == ty1);
-        }else if (ty0->isStructTy()) {
+        if (ty0->isStructTy()) {
             //Compare two struct types by their names (w/ numeric suffix trimmed).
             StructType *st0 = dyn_cast<StructType>(ty0);
             StructType *st1 = dyn_cast<StructType>(ty1);
@@ -700,13 +698,20 @@ namespace DRCHECKER {
 #endif
                 return false;
             }
-        }else if (dyn_cast<SequentialType>(ty0) && dyn_cast<SequentialType>(ty1)) {
+        }else if (dyn_cast<SequentialType>(ty0)) {
             //Ensure that their #elem are same.
             if (dyn_cast<SequentialType>(ty0)->getNumElements() != dyn_cast<SequentialType>(ty1)->getNumElements()) {
                 return false;
             }
+            return InstructionUtils::same_types(dyn_cast<SequentialType>(ty0)->getElementType(), 
+                                                dyn_cast<SequentialType>(ty1)->getElementType());
         }
-        //In the end compare the contained sub types one by one.
+        if (n <= 1) {
+            //They are not composite types, nor pointers, and only one sub-type is involved, so they must be basic types, e.g. i32.
+            //Since they cannot be the same since we have an earlier check (ty0 == ty1), so return false directly.
+            return false;
+        }
+        //In the end compare the contained sub types one by one (e.g. they may be the function types).
         for (unsigned i = 0; i < n; ++i) {
 #ifdef DEBUG_TYPE_CMP
             dbgs() << i << ": " << InstructionUtils::getTypeStr(ty0->getContainedType(i)) << " | " 
@@ -1928,4 +1933,100 @@ out:
         vtMap[v] = hostTy;
         return hostTy;
     }
+
+    //Decide whether a function is a potential target of an indirect call site.
+    bool InstructionUtils::isPotentialIndirectCallee(Function *func) {
+        if (!func) {
+            return false;
+        }
+        //We have below heuristics to decide whether a function is a potential indirect callee.
+        //(1) the func appears in a non-call instruction, indicating a function pointer assignment
+        //(2) the func appears in a constant structure, possibly as a function pointer field.
+        for (Value::user_iterator i = func->user_begin(), e = func->user_end(); i != e; ++i) {
+            Instruction *currI = dyn_cast<Instruction>(*i);
+            CallInst *currC = dyn_cast<CallInst>(*i);
+            ConstantAggregate *currConstA = dyn_cast<ConstantAggregate>(*i);
+            GlobalValue *currGV = dyn_cast<GlobalValue>(*i);
+            if(currI && !currC) {
+                //Heuristic (1)
+                return true;
+            }
+            if (currConstA) {
+                //Heuristic (2)
+                return true;
+            }
+        }
+        return false;
+    }
+
+    void InstructionUtils::filterPossibleFunctionsByLoc(Instruction *inst, std::set<Function*> &targetFunctions) {
+        if (!inst) {
+            return;
+        }
+        // Find only those functions which are part of the driver.
+        DILocation *instrLoc = InstructionUtils::getCorrectInstLoc(inst);
+        if (instrLoc) {
+            std::string currFileName = instrLoc->getFilename();
+            size_t found = currFileName.find_last_of("/");
+            std::string parFol = currFileName.substr(0, found);
+            std::set<Function*> newList;
+            for (Function *cf : targetFunctions) {
+                if (!cf) {
+                    continue;
+                }
+                instrLoc = InstructionUtils::getCorrectInstLoc(cf->getEntryBlock().getFirstNonPHIOrDbg());
+                if(instrLoc != nullptr) {
+                    currFileName = instrLoc->getFilename();
+                    if(currFileName.find(parFol) != std::string::npos) {
+                        newList.insert(cf);
+                    }
+                }
+            }
+            targetFunctions.clear();
+            targetFunctions.insert(newList.begin(), newList.end());
+        }
+    }
+
+    bool InstructionUtils::getPossibleFunctionTargets(CallInst &callInst, std::set<Function*> &targetFunctions) {
+        //Set up a cache to accelerate the lookup.
+        static std::map<Module*,std::map<FunctionType*,std::set<Function*>>> target_cache;
+        FunctionType *targetFunctionType = callInst.getFunctionType();
+#ifdef DEBUG_FUNCTION_PTR_RESOLVE
+        dbgs() << "InstructionUtils::getPossibleFunctionTargets: try to resolve a indirect function call w/ type-based method: ";
+        dbgs() << InstructionUtils::getValueStr(&callInst) << "\n";
+        dbgs() << "InstructionUtils::getPossibleFunctionTargets: Callee type: " << InstructionUtils::getTypeStr(targetFunctionType) << "\n";
+#endif
+        Module *currModule = callInst.getParent()->getParent()->getParent();
+        if (target_cache.find(currModule) != target_cache.end() && 
+            target_cache[currModule].find(targetFunctionType) != target_cache[currModule].end()) {
+            //targetFunctions.insert(target_cache[currModule][targetFunctionType].begin(),target_cache[currModule][targetFunctionType].end());
+            targetFunctions = target_cache[currModule][targetFunctionType];
+            return true;
+        }
+        for(auto a = currModule->begin(), b = currModule->end(); a != b; a++) {
+            Function *currFunction = &(*a);
+            // does the current function has same type of the call instruction?
+            if (currFunction->isDeclaration() || !InstructionUtils::same_types(currFunction->getFunctionType(), targetFunctionType)) {
+                continue;
+            }
+#ifdef DEBUG_FUNCTION_PTR_RESOLVE
+            dbgs() << "InstructionUtils::getPossibleFunctionTargets: Got a same-typed candidate callee: ";
+            dbgs() << currFunction->getName().str() << "\n";
+#endif
+            if (InstructionUtils::isPotentialIndirectCallee(currFunction)) {
+#ifdef DEBUG_FUNCTION_PTR_RESOLVE
+                dbgs() << "InstructionUtils::getPossibleFunctionTargets: add to final list since the candidate is a potential indirect callee.\n";
+#endif
+                targetFunctions.insert(currFunction);
+            }
+        }
+        InstructionUtils::filterPossibleFunctionsByLoc(&callInst, targetFunctions);
+        if (targetFunctions.size() > 0) {
+            //target_cache[currModule][targetFunctionType].insert(targetFunctions.begin(),targetFunctions.end());
+            target_cache[currModule][targetFunctionType] = targetFunctions;
+            return true;
+        }
+        return false;
+    }
+
 }

@@ -272,6 +272,18 @@ namespace DRCHECKER {
         static void printCallingCtx(raw_ostream &O, std::vector<Instruction*> *ctx, bool lbreak = false);
         
         static Type *inferPointeeTy(Value *v);
+
+        static bool isPotentialIndirectCallee(Function *func);
+
+        static void filterPossibleFunctionsByLoc(Instruction *inst, std::set<Function*> &targetFunctions);
+
+        /***
+         * Get potential targets of a call instruction from its type information.
+         * @param callInst Call instruction whose targets need to be fetched.
+         * @param targetFunctions Set to which possible targets should be added.
+         * @return true/false depending on targets is non-empty or empty.
+         */
+        static bool getPossibleFunctionTargets(CallInst &callInst, std::set<Function*> &targetFunctions);
     };
 
 }

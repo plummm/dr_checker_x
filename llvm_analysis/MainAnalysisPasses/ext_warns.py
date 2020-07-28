@@ -96,24 +96,48 @@ def pprint(j):
         print ''
 
 #Our criteria here is: if the warned instr of 'a' is the same as that of 'b', or it appears in the trace of 'b',
-#we say 'b' contains 'a'. Return True iff 'b' contains 'a'.
+#we say 'b' contains 'a'. Return 1 iff 'b' strictly contains 'a' in its trace, 0 iff they have the same warned inst.
 def warn_compat(a,b):
     if (not a) <> (not b):
-        return (not a)
+        return 1 if not a else -1
     if not a:
         #Both are null.
-        return True
+        return 0
     fpa = a.get('at_file','file_a')
     lna = a.get('at_line',-2)
     if fpa == b.get('at_file','file_b') and lna == b.get('at_line',-3):
-        return True
+        return 0
     #Inspect b's trace.
     trb = [s for s in b if s.startswith('inst_trace')]
     for tr in trb:
         for ins in b.get(tr,[]):
             if fpa == ins.get('at_file','file_b') and lna == ins.get('at_line',-3):
-                return True
-    return False
+                return 1
+    return -1
+
+def same_warn(a,b):
+    if (not a) <> (not b):
+        return False
+    if not a:
+        #Both are null.
+        return True
+    fpa = a.get('at_file','file_a')
+    lna = a.get('at_line',-2)
+    return (fpa == b.get('at_file','file_b') and lna == b.get('at_line',-3))
+
+def get_avg_trace_len(j):
+    if not j:
+        return 0
+    lens = [len(j.get(s,[])) for s in j if s.startswith('inst_trace')]
+    return sum(lens)/len(lens)
+
+def grp_cmp(a,b):
+    r = warn_compat(a,b)
+    if r > 1:
+        return 1
+    if r == 0:
+        return get_avg_trace_len(b) - get_avg_trace_len(a)
+    return -1
 
 #Try to group the warnings of a specific type (e.g. put all the warns associated w/ a same instruction together)
 def group_warns(ty):
@@ -133,7 +157,8 @@ def group_warns(ty):
         for grp in res:
             for e in grp:
                 #Note that the test should be bi-directional.
-                if warn_compat(j,e) or warn_compat(e,j):
+                #if warn_compat(j,e) >= 0 or warn_compat(e,j) >= 0:
+                if same_warn(j,e):
                     compat = True
                     break
             if compat:
@@ -142,6 +167,11 @@ def group_warns(ty):
         if not compat:
             res.append([j])
     return res
+    #Sort each group, put the most inclusive warning first.
+    #ret = []
+    #for g in res:
+    #    ret.append(sorted(g,cmp = grp_cmp))
+    #return ret
 
 def dump_warns_pretty(ty):
     warn_grps = group_warns(ty)

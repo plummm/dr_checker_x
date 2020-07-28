@@ -249,48 +249,49 @@ namespace DRCHECKER {
         if(currFunc != nullptr) {
             this->processCalledFunction(I, currFunc);
         } else {
+#ifdef DEBUG_CALL_INSTR
+            dbgs() << "Visiting Indirect call instruction: " << InstructionUtils::getValueStr(&I) << "\n";
+#endif
             // if this is inline assembly, ignore the call instruction.
             if(I.isInlineAsm()) {
                 return;
             }
-#ifdef DEBUG_CALL_INSTR
-            dbgs() << "Visiting Indirect call instruction.\n";
-#endif
             Value *calledValue = I.getCalledValue();
-
             // get points to information of calledValue and look for only functions.
-            std::vector<Function*> targetFunctions;
+            std::set<Function*> targetFunctions;
             targetFunctions.clear();
             bool hasTargets = PointsToUtils::getTargetFunctions(this->currState, this->currFuncCallSites,
                                                                 calledValue, targetFunctions);
 #ifdef SMART_FUNCTION_PTR_RESOLVING
             if (!hasTargets) {
-                hasTargets = PointsToUtils::getPossibleFunctionTargets(I, targetFunctions);
+                hasTargets = InstructionUtils::getPossibleFunctionTargets(I, targetFunctions);
 #ifdef DEBUG_CALL_INSTR
-                if(targetFunctions.size() > 0) {
-                    dbgs() << "Function Pointer targets:" << targetFunctions.size() << "\n";
-                }
+                dbgs() << "Function Pointer targets:" << targetFunctions.size() << "\n";
 #endif
-                std::vector<Function*> filteredFunctions;
-                for(unsigned i=0; i<MAX_FUNC_PTR && i<targetFunctions.size(); i++) {
-                    filteredFunctions.push_back(targetFunctions[i]);
-                }
+                if (targetFunctions.size() > MAX_FUNC_PTR) {
 #ifdef DEBUG_CALL_INSTR
-                if(filteredFunctions.size() != targetFunctions.size()) {
-                    dbgs() << "Too many Target Functions, give up some, Doing:"
-                           << filteredFunctions.size()
-                           << ", Got:" << targetFunctions.size() << "\n";
-                }
+                    dbgs() << "Too many Target Functions, give up some, our limit is: " << MAX_FUNC_PTR << "\n";
 #endif
-                targetFunctions.clear();
-                targetFunctions.insert(targetFunctions.end(), filteredFunctions.begin(), filteredFunctions.end());
+                    std::set<Function*> tset = targetFunctions;
+                    targetFunctions.clear();
+                    int cnt = 0;
+                    for (Function *f : tset) {
+                        if (cnt >= MAX_FUNC_PTR) {
+                            break;
+                        }
+                        if (f) {
+                            targetFunctions.insert(f);
+                            ++cnt;
+                        }
+                    }
+                }
             }
 #endif
             // get potential target function from a given pointer.
             if(hasTargets) {
                 assert(targetFunctions.size() > 0);
 #ifdef DEBUG_CALL_INSTR
-                dbgs() << "There are:" << targetFunctions.size() << " Target Functions.\n";
+                dbgs() << "There are: " << targetFunctions.size() << " Target Functions.\n";
 #endif
                 for(Function *currFunction : targetFunctions) {
                     this->processCalledFunction(I, currFunction);

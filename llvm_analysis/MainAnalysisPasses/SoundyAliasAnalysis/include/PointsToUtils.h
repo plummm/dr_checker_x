@@ -48,8 +48,8 @@ namespace DRCHECKER {
          * @param dstFunctions list of functions which are possible targets of srcPointer.
          * @return true if there is atleast one function else false.
          */
-        static bool getTargetFunctions(GlobalState &currState, std::vector<Instruction *> *currFuncCallSites,
-                                       Value *srcPointer, std::vector<Function *> &dstFunctions);
+        static bool getTargetFunctions(GlobalState &currState, std::vector<Instruction*> *currFuncCallSites,
+                                       Value *srcPointer, std::set<Function*> &dstFunctions);
 
         /***
          * Gets all objects that could be pointed by the provided pointer.
@@ -65,19 +65,7 @@ namespace DRCHECKER {
                                        Value *srcPointer,
                                        std::set<AliasObject*> &dstObjects);
 
-        /***
-         * Get potential targets of a call instruction from its type information.
-         * @param callInst Call instruction whose targets need to be fetched.
-         * @param targetFunctions Set to which possible targets should be added.
-         * @return true/false depending on targets is non-empty or empty.
-         */
-        static bool getPossibleFunctionTargets(CallInst &callInst, std::vector<Function*> &targetFunctions);
-
-        static void filterPossibleFunctionsByLoc(Instruction *inst, std::vector<Function *> &targetFunctions);
-
         static bool getTargetObjects(std::set<PointerPointsTo*> *dstPointsTo, std::set<std::pair<long, AliasObject*>> &targetObjects);
-
-        //static std::set<std::string> *getHierarchyStr(AliasObject *obj, long field);
 
     };
 
