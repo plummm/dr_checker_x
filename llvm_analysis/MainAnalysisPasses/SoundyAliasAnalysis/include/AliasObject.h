@@ -643,6 +643,9 @@ namespace DRCHECKER {
                 bool match_1 = false, match_2 = false;
                 for (auto& x : *res) {
                     CompositeType *curHostTy = x.first;
+                    if (!curHostTy) {
+                        continue;
+                    }
 #ifdef DEBUG_SMART_FUNCTION_PTR_RESOLVE
                     dbgs() << "USE: STRUCT: " << InstructionUtils::getTypeStr(curHostTy) << " #";
                     for (auto& y : x.second) {

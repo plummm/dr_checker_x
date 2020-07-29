@@ -1590,7 +1590,7 @@ namespace DRCHECKER {
             Value *tv = this->targetObject->getValue();
             OS << InstructionUtils::getTypeStr(this->targetObject->targetType) << " | " << this->dstfieldId 
             << " ,is_taint_src: " << this->targetObject->is_taint_src << ", Obj ID: " << (const void*)(this->targetObject) << ", Inst/Val: ";
-            if (dyn_cast<Function>(tv)) {
+            if (tv && dyn_cast<Function>(tv)) {
                 OS << "FUNC " << dyn_cast<Function>(tv)->getName().str();
             }else {
                 OS << InstructionUtils::getValueStr(tv);
@@ -1622,7 +1622,8 @@ namespace DRCHECKER {
             }else {
                 ety = dyn_cast<CompositeType>(curHostTy)->getTypeAtIndex((unsigned)0);
                 if (InstructionUtils::same_types(ty,curHostTy)) {
-                    return (this->targetObject->parent && this->targetObject->parent->targetType && this->targetObject->parent->targetType->isArrayTy());
+                    return (this->targetObject->parent && this->targetObject->parent->targetType 
+                    && this->targetObject->parent->targetType->isArrayTy());
                 }else if (InstructionUtils::same_types(ty,ety)) {
                     return curHostTy->isArrayTy();
                 }else {
@@ -1631,7 +1632,8 @@ namespace DRCHECKER {
             }
         }else {
             if (InstructionUtils::same_types(ty,curHostTy)) {
-                return (fid == 0 && this->targetObject->parent && this->targetObject->parent->targetType && this->targetObject->parent->targetType->isArrayTy());
+                return (fid == 0 && this->targetObject->parent && this->targetObject->parent->targetType 
+                && this->targetObject->parent->targetType->isArrayTy());
             }else {
                 return false;
             }
