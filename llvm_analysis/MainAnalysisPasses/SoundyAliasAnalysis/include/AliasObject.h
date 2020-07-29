@@ -528,12 +528,12 @@ namespace DRCHECKER {
                         continue;
                     }
                     dbgs() << "Find vt_ioctl()\n";
-                    std::map<ConstantAggregate*,std::set<long>> *res = InstructionUtils::getUsesInStruct(currFunction);
+                    std::map<CompositeType*,std::set<long>> *res = InstructionUtils::getUsesInStruct(currFunction);
                     if (res) {
                         dbgs() << "getUsesInStruct succeed!\n";
                         for (auto& x : *res) {
                             dbgs() << "-------------------\n";
-                            dbgs() << InstructionUtils::getValueStr(x.first) << "\n";
+                            dbgs() << InstructionUtils::getTypeStr(x.first) << "\n";
                             for (auto &y : x.second) {
                                 dbgs() << y << ", ";
                             }
@@ -605,6 +605,15 @@ namespace DRCHECKER {
                 return false;
             }
             Module *currModule = inst->getFunction()->getParent();
+            std::string fname = "";
+            if (dyn_cast<StructType>(host_ty)) {
+                fname = InstructionUtils::getStFieldName(currModule,dyn_cast<StructType>(host_ty),field);
+            }
+            //Put the potential callees into three categories (from mostly likely to unlikely):
+            //(1) Both host struct type and pointer field ID match;
+            //(2) The field names match (e.g. both are .put field, but maybe in different host struct types);
+            //(3) Other potential callees besides (1) and (2).
+            std::set<Function*> grp[3];
             for(auto a = currModule->begin(), b = currModule->end(); a != b; a++) {
                 Function *currFunction = &(*a);
                 // does the current function has same type of the call instruction?
@@ -619,52 +628,87 @@ namespace DRCHECKER {
 #ifdef DEBUG_SMART_FUNCTION_PTR_RESOLVE
                     dbgs() << "getPossibleMemberFunctions: not a potential indirect callee!\n";
 #endif
-                    return false;
+                    continue;
                 }
                 //In theory, at this point the "currFunction" can already be a possible callee, we may have FP, but not FN.
                 //The below filtering logic (based on the host struct type and field id/name of the function pointer) is to
                 //reduce the FP, but in the meanwhile it may introduce FN...
-                //TODO
-                //Our filter logic is that the candidate function should appear in a constant (global) struct as a field,
-                //with the struct type "host_ty" and fieldID "field".
-                std::map<ConstantAggregate*,std::set<long>> *res = InstructionUtils::getUsesInStruct(currFunction);
+                //TODO: for grp (1) and (2), currently we can only recognize the statically assigned function pointer field
+                //(e.g. at the definition site), the dynamically assigned ones will be put into grp (3) now.
+                std::map<CompositeType*,std::set<long>> *res = InstructionUtils::getUsesInStruct(currFunction);
                 if (!res || res->empty()) {
+                    grp[2].insert(currFunction);
                     continue;
                 }
+                bool match_1 = false, match_2 = false;
                 for (auto& x : *res) {
+                    CompositeType *curHostTy = x.first;
 #ifdef DEBUG_SMART_FUNCTION_PTR_RESOLVE
-                    dbgs() << "USE: STRUCT: " << InstructionUtils::getTypeStr((x.first)->getType()) << " #";
+                    dbgs() << "USE: STRUCT: " << InstructionUtils::getTypeStr(curHostTy) << " #";
                     for (auto& y : x.second) {
                         dbgs() << y << ", ";
                     }
                     dbgs() << "\n";
 #endif
-                    if (InstructionUtils::same_types((x.first)->getType(), host_ty)) {
+                    if (InstructionUtils::same_types(curHostTy, host_ty)) {
                         if (dyn_cast<StructType>(host_ty)) {
                             //field-sensitive for the struct.
                             if (x.second.find(field) != x.second.end()) {
 #ifdef DEBUG_SMART_FUNCTION_PTR_RESOLVE
-                                dbgs() << "getPossibleMemberFunctions: add to final list (struct).\n";
+                                dbgs() << "getPossibleMemberFunctions: matched! (struct | field).\n";
 #endif
-                                targetFunctions.insert(currFunction);
+                                match_1 = true;
                                 break;
                             }
                         }else if (dyn_cast<SequentialType>(host_ty)) {
                             //Since we now collapse an array to one element, we need to return func pointers for all fields..
 #ifdef DEBUG_SMART_FUNCTION_PTR_RESOLVE
-                            dbgs() << "getPossibleMemberFunctions: add to final list (sequential).\n";
+                            dbgs() << "getPossibleMemberFunctions: matched! (sequential).\n";
 #endif
-                            targetFunctions.insert(currFunction);
+                            match_1 = true;
                             break;
                         }else {
                             //Impossible.
                             assert("Unrecognized CompositeType" && false);
                         }
                     }
+                    if (dyn_cast<StructType>(curHostTy) && fname != "" && !match_2) {
+                        for (auto& y : x.second) {
+                            std::string curFname = InstructionUtils::getStFieldName(currModule,dyn_cast<StructType>(curHostTy),y);
+                            if (curFname == fname) {
+#ifdef DEBUG_SMART_FUNCTION_PTR_RESOLVE
+                                dbgs() << "getPossibleMemberFunctions: matched! (field name).\n";
+#endif
+                                match_2 = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+                if (match_1) {
+                    grp[0].insert(currFunction);
+                }else if (match_2) {
+                    grp[1].insert(currFunction);
+                }else {
+                    grp[2].insert(currFunction);
                 }
             }
-            // Find only those functions which are part of the driver.
-            InstructionUtils::filterPossibleFunctionsByLoc(inst,targetFunctions);
+#ifdef DEBUG_SMART_FUNCTION_PTR_RESOLVE
+            dbgs() << "getPossibleMemberFunctions: #grp0: " << grp[0].size() << " #grp1: " << grp[1].size()
+            << " #grp2: " << grp[2].size() << "\n";
+#endif
+            if (grp[0].size() > 0) {
+                targetFunctions.insert(grp[0].begin(),grp[0].end());
+            }else if (grp[1].size() > 0) {
+                targetFunctions.insert(grp[1].begin(),grp[1].end());
+            }else {
+                targetFunctions.insert(grp[2].begin(),grp[2].end());
+                //Reserve only those functions which are part of the driver.
+                InstructionUtils::filterPossibleFunctionsByLoc(inst,targetFunctions);
+            }
+#ifdef DEBUG_SMART_FUNCTION_PTR_RESOLVE
+            dbgs() << "getPossibleMemberFunctions: #ret: " << targetFunctions.size() << "\n";
+#endif
             return targetFunctions.size() > 0;
         }
 

@@ -528,7 +528,7 @@ namespace DRCHECKER {
             }
             if (dyn_cast<llvm::PtrToIntOperator>(v)) {
                 if (for_scalar) {
-                    //This means it's not a real scalar, but just converted from a pointer, we may ignore this case.
+                    //This means it's not a real scalar, but just converted from a pointer, we may ignore this case if specified.
                     return nullptr;
                 }else {
                     v = (dyn_cast<llvm::PtrToIntOperator>(v))->getOperand(0);
@@ -560,7 +560,8 @@ namespace DRCHECKER {
         return "";
     }
 
-    std::set<uint64_t> *InstructionUtils::getCmdValues(std::vector<Instruction*> *ctx, Instruction* inst, std::map<BasicBlock*,std::set<uint64_t>> *switchMap) {
+    std::set<uint64_t> *InstructionUtils::getCmdValues(std::vector<Instruction*> *ctx, Instruction* inst, 
+                                                       std::map<BasicBlock*,std::set<uint64_t>> *switchMap) {
         if ((!switchMap) || switchMap->empty()) {
             return nullptr;
         }
@@ -724,7 +725,7 @@ namespace DRCHECKER {
         return true;
     }
 
-    std::map<ConstantAggregate*,std::set<long>> *InstructionUtils::getUsesInStruct(Value *v) {
+    std::map<ConstantAggregate*,std::set<long>> *InstructionUtils::getUsesInGlobalConstStruct(Value *v) {
         static std::map<Value*,std::map<ConstantAggregate*,std::set<long>>> use_cache;
         if (!v) {
             return nullptr;
@@ -750,7 +751,7 @@ namespace DRCHECKER {
                 }
                 res = &buf;
             }else {
-                res = InstructionUtils::getUsesInStruct(*i);
+                res = InstructionUtils::getUsesInGlobalConstStruct(*i);
             }
             if (!res || res->empty()) {
                 continue;
@@ -770,6 +771,145 @@ namespace DRCHECKER {
         return nullptr;
     }
 
+    //Perform a lightweight analysis to see which store insts will store "v" 
+    //or its simple transformations (e.g. v+1, cond ? v1:v2) into a mem location.
+    void getSinkInsts(Value *v, std::set<StoreInst*> &res) {
+        static std::map<Value*,std::set<StoreInst*>> sink_cache;
+        if (!v) {
+            return;
+        }
+        if (sink_cache.find(v) != sink_cache.end()) {
+            res.insert(sink_cache[v].begin(),sink_cache[v].end());
+            return;
+        }
+        std::set<StoreInst*> curRes;
+        for (Value::user_iterator i = v->user_begin(), e = v->user_end(); i != e; ++i) {
+            //If this is already a store inst, just add it to the result if the "v" is used as the source..
+            if (dyn_cast<StoreInst>(*i)) {
+                StoreInst *si = dyn_cast<StoreInst>(*i);
+                if (si->getValueOperand() == v) {
+                    curRes.insert(si);
+                    continue;
+                }
+            }
+            //If current user is one of the below instructions, recursively get its sink insts...
+            //NOTE: currently there is only one type of "UnaryOperator" -- FNeg, which we don't care.
+            if (dyn_cast<BinaryOperator>(*i) || dyn_cast<PHINode>(*i) || dyn_cast<SelectInst>(*i) ||
+                dyn_cast<CastInst>(*i)) {
+                getSinkInsts(*i,curRes);
+                continue;
+            }
+            //If it's not an instruction but a specific type of Operator, do the recursion...
+            if (dyn_cast<BitCastOperator>(*i) || dyn_cast<PtrToIntOperator>(*i) || dyn_cast<ZExtOperator>(*i) ||
+                dyn_cast<OverflowingBinaryOperator>(*i) || dyn_cast<PossiblyExactOperator>(*i)) {
+                getSinkInsts(*i,curRes);
+                continue;
+            }
+        }
+        //Update the cache.
+        sink_cache[v] = curRes;
+        res.insert(curRes.begin(),curRes.end());
+        return;
+    }
+
+    //Try to figure out the result pointer of this GEP points to which filed in which host type.
+    //We now have some limitations for this function:
+    //(1) We assume the base pointer points to a composite type (e.g. cannot be i8*).
+    //(2) If the first index is non-zero, we assume there is an array of the base composite (i.e. ignore the first index).
+    void getGEPDstTypeField(GEPOperator *gep, TypeField &res) {
+        if (!gep) {
+            return;
+        }
+        Value *orgPointer = gep->getPointerOperand();
+        if (!orgPointer || !orgPointer->getType() || !orgPointer->getType()->isPointerTy()) {
+            return;
+        }
+        Type *baseTy = orgPointer->getType()->getPointerElementType();
+        if (!dyn_cast<CompositeType>(baseTy)) {
+            return;
+        }
+        Type *curTy = baseTy;
+        res.ty = curTy;
+        res.fid = 0;
+        //Skip the first index.
+        int i = 1;
+        while (++i < gep->getNumOperands() && curTy) {
+            ConstantInt *CI = dyn_cast<ConstantInt>(gep->getOperand(i));
+            long fid = 0;
+            if (!CI) {
+                //If the index is a variable, we assume that current host type must be sequential, so that
+                //we can continue w/ its element type, otherwise we don't know what's the next type...
+                if (!dyn_cast<SequentialType>(curTy)) {
+                    break;
+                }
+            }else {
+                fid = CI->getZExtValue();
+            }
+            res.ty = curTy;
+            res.fid = fid;
+            if (dyn_cast<CompositeType>(curTy) && InstructionUtils::isIndexValid(curTy,fid)) {
+                //Get the subsequent field type.
+                curTy = dyn_cast<CompositeType>(curTy)->getTypeAtIndex((unsigned)fid);
+            } else {
+                break;
+            }
+        }
+        if (i < gep->getNumOperands()) {
+            //Something goes wrong.
+            res.ty = nullptr;
+        }
+    }
+
+    //In this function we try to get the value assignment to a certain struct field both statically 
+    //(e.g. when defining a global constant struct) and dynamically (e.g. via a "store" inst)
+    std::map<CompositeType*,std::set<long>> *InstructionUtils::getUsesInStruct(Value *v) {
+        static std::map<Value*,std::map<CompositeType*,std::set<long>>> use_cache;
+        if (!v) {
+            return nullptr;
+        }
+        if (use_cache.find(v) != use_cache.end()) {
+            return &use_cache[v];
+        }
+        //First get the info from static assignments.
+        std::map<ConstantAggregate*,std::set<long>> *constU = InstructionUtils::getUsesInGlobalConstStruct(v);
+        std::map<CompositeType*,std::set<long>> dynU;
+        //Then dynamic ones.
+        //Step 1. Get the store inst(s) to store this value to somewhere.
+        std::set<StoreInst*> stInsts;
+        getSinkInsts(v,stInsts);
+        //Step 2. For each store, analyze its destination struct|field.
+        for (StoreInst *si : stInsts) {
+            if (!si) {
+                continue;
+            }
+            Value *dstp = si->getPointerOperand();
+            dstp = InstructionUtils::stripAllCasts(dstp,false);
+            if (!dstp) {
+                continue;
+            }
+            if (dyn_cast<GEPOperator>(dstp)) {
+                TypeField tf;
+                getGEPDstTypeField(dyn_cast<GEPOperator>(dstp),tf);
+                if (tf.ty && dyn_cast<CompositeType>(tf.ty)) {
+                    dynU[dyn_cast<CompositeType>(tf.ty)].insert(tf.fid);
+                }
+            }
+        }
+        //Ok, now combine the static and dynamic type|field info.
+        if (constU) {
+            for (auto &e : *constU) {
+                ConstantAggregate *constA = e.first;
+                if (!constA || !constA->getType() || !dyn_cast<CompositeType>(constA->getType())) {
+                    continue;
+                }
+                dynU[dyn_cast<CompositeType>(constA->getType())].insert(e.second.begin(),e.second.end());
+            }
+        }
+        //Update the cache and return.
+        use_cache[v] = dynU;
+        return &use_cache[v];
+    }
+
     //Create a new GEP with up to ith operand of the original GEP.
     GetElementPtrInst *InstructionUtils::createSubGEP(GEPOperator* gep,unsigned i) {
         if (!gep || i < 1) {
@@ -783,7 +923,8 @@ namespace DRCHECKER {
             indices.push_back(gep->getOperand(t));
         }
         ArrayRef<Value*> IdxList(indices);
-        return GetElementPtrInst::Create(nullptr/*PointeeType*/, gep->getPointerOperand()/*Value *Ptr*/, IdxList/*ArrayRef<Value*> IdxList*//*const Twine &NameStr="", Instruction *InsertBefore=nullptr*/);
+        return GetElementPtrInst::Create(nullptr/*PointeeType*/, gep->getPointerOperand()/*Value *Ptr*/, 
+        IdxList/*ArrayRef<Value*> IdxList*//*const Twine &NameStr="", Instruction *InsertBefore=nullptr*/);
     }
 
     //To decide whether a Instruction is generated and inserted by ASAN.
@@ -1583,7 +1724,8 @@ namespace DRCHECKER {
             if (i > 1) {
                 if (fid < 0) {
                     //TODO: Is it possible that the non-1st index is negative? Seems impossible...
-                    dbgs() << "!!! InstructionUtils::calcGEPTotalOffsetInBits(): negative non-1st index: " << InstructionUtils::getValueStr(gep) << "\n";
+                    dbgs() << "!!! InstructionUtils::calcGEPTotalOffsetInBits(): negative non-1st index: " 
+                    << InstructionUtils::getValueStr(gep) << "\n";
                     break;
                 }
                 if (dyn_cast<CompositeType>(curTy) && InstructionUtils::isIndexValid(curTy,fid)) {

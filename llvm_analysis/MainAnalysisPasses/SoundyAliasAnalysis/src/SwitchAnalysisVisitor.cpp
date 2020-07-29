@@ -223,7 +223,7 @@ namespace DRCHECKER {
         //Second, our heuristic is that the indirect target callee (currFunc) should reside in a const aggregate, which then reside
         //in a const array/vector, e.g.
         //[ {0, handler0}, {1, handler1}, ... ]
-        std::map<ConstantAggregate*,std::set<long>> *func_uses = InstructionUtils::getUsesInStruct(currFunc);
+        std::map<ConstantAggregate*,std::set<long>> *func_uses = InstructionUtils::getUsesInGlobalConstStruct(currFunc);
         if (!func_uses) {
             return;
         }
