@@ -589,11 +589,46 @@ namespace DRCHECKER {
 
     private:
 
+        void printGVInfo(GlobalVariable &gv) {
+            gv.print(dbgs());
+            dbgs() << " NUM USES:" << gv.getNumUses() << ", TYPE:";
+            gv.getType()->print(dbgs());
+            //op1->print(dbgs());
+            dbgs() << "\n";
+
+            dbgs() << "For:";
+            dbgs() << gv.getName() << ":";
+            dbgs() << " of type (" << gv.getType()->getContainedType(0)->isStructTy() << ","
+                   << gv.getType()->isPointerTy() << "," << gv.getType()->isArrayTy() << "):";
+            gv.getType()->print(dbgs());
+            dbgs() << ":";
+            if(gv.hasInitializer()) {
+                Constant *initializationConst = gv.getInitializer();
+                initializationConst->getType()->print(dbgs());
+                dbgs() << ", Struct Type:" << initializationConst->getType()->isStructTy();
+                if(initializationConst->getType()->isStructTy() &&
+                        !initializationConst->isZeroValue()) {
+                    ConstantStruct *constantSt = dyn_cast<ConstantStruct>(initializationConst);
+                    dbgs() << " Num fields:" << constantSt->getNumOperands() << "\n";
+                    for (int i = 0; i < constantSt->getNumOperands(); i++) {
+                        dbgs() << "Operand (" << i + 1 << ") :";
+                        Function *couldBeFunc = dyn_cast<Function>(constantSt->getOperand(i));
+                        dbgs() << "Is Function:" << (couldBeFunc != nullptr) << "\n";
+                        if(!couldBeFunc)
+                            constantSt->getOperand(i)->print(dbgs());
+                        dbgs() << "\n";
+                    }
+                }
+                dbgs() << "\n";
+            } else {
+                dbgs() << "No initializer\n";
+            }
+        }
+
         void setupGlobals(Module &m) {
             /***
              * Set up global variables.
              */
-
             // map that contains global variables to AliasObjects.
             std::map<Value*, AliasObject*> globalObjectCache;
             std::vector<llvm::GlobalVariable*> visitorCache;
@@ -602,54 +637,31 @@ namespace DRCHECKER {
             for(Module::iterator mi = m.begin(), ei = m.end(); mi != ei; mi++) {
                 GlobalState::addGlobalFunction(&(*mi), globalObjectCache);
             }
-
             Module::GlobalListType &currGlobalList = m.getGlobalList();
             for(Module::global_iterator gstart = currGlobalList.begin(), gend = currGlobalList.end(); gstart != gend; gstart++) {
+                //We cannot simply ignore the constant global structs (e.g. some "ops" structs are constant, but we still need
+                //to know their field function pointers to resolve the indirect call sites involving them).
+                /*
                 // ignore constant immutable global pointers
                 if((*gstart).isConstant()) {
                     continue;
                 }
-                GlobalState::addGlobalVariable(visitorCache, &(*gstart), globalObjectCache);
-#ifdef DEBUG_GLOBAL_VARIABLES
-                (*gstart).print(dbgs());
-                    dbgs() << " NUM USES:" << (*gstart).getNumUses() << ", TYPE:";
-                    (*gstart).getType()->print(dbgs());
-                    //op1->print(dbgs());
-                    dbgs() << "\n";
-
-                dbgs() << "For:";
-                dbgs() << (*gstart).getName() << ":";
-                dbgs() << " of type (" << (*gstart).getType()->getContainedType(0)->isStructTy() << ","
-                       << (*gstart).getType()->isPointerTy() << "," << (*gstart).getType()->isArrayTy() << "):";
-                (*gstart).getType()->print(dbgs());
-                dbgs() << ":";
-                if((*gstart).hasInitializer()) {
-                    Constant *initializationConst = (*gstart).getInitializer();
-                    initializationConst->getType()->print(dbgs());
-                    dbgs() << ", Struct Type:" << initializationConst->getType()->isStructTy();
-                    if(initializationConst->getType()->isStructTy() &&
-                            !initializationConst->isZeroValue()) {
-                        ConstantStruct *constantSt = dyn_cast<ConstantStruct>(initializationConst);
-                        dbgs() << " Num fields:" << constantSt->getNumOperands() << "\n";
-                        for (int i = 0; i < constantSt->getNumOperands(); i++) {
-                            dbgs() << "Operand (" << i + 1 << ") :";
-                            Function *couldBeFunc = dyn_cast<Function>(constantSt->getOperand(i));
-                            dbgs() << "Is Function:" << (couldBeFunc != nullptr) << "\n";
-                            if(!couldBeFunc)
-                                constantSt->getOperand(i)->print(dbgs());
-                            dbgs() << "\n";
-                        }
-                    }
-                    dbgs() << "\n";
-                } else {
-                    dbgs() << "No initializer\n";
+                */
+                if (!GlobalState::toCreateObjForGV(&(*gstart))) {
+                    continue;
                 }
+                AliasObject *obj = GlobalState::addGlobalVariable(visitorCache, &(*gstart), globalObjectCache);
+                if (obj) {
+                    //TODO: confirm that the global variable is const equals to the pointee object is also const.
+                    obj->is_const = (*gstart).isConstant();
+                }
+#ifdef DEBUG_GLOBAL_VARIABLES
+                printGVInfo(*gstart);
 #endif
                 // sanity
                 assert(visitorCache.empty());
             }
             globalObjectCache.clear();
-
             // OK get loop info of all the functions and store them for future use.
             // get all loop exit basic blocks.
             for(Module::iterator mi = m.begin(), ei = m.end(); mi != ei; mi++) {
@@ -666,7 +678,6 @@ namespace DRCHECKER {
                     }
                 }
             }
-
         }
 
         void setupFunctionArgs(FuncInf *fi, GlobalState &targetState, std::vector<Instruction*> *callSites) {

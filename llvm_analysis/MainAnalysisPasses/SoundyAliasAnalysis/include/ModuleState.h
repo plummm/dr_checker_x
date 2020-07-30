@@ -216,49 +216,48 @@ namespace DRCHECKER {
          */
         static AliasObject* getReferencedGlobal(std::vector<llvm::GlobalVariable *> &visitedCache, Value *currVal,
                                                 std::map<Value*, AliasObject*> &globalObjectCache) {
-
             llvm::GlobalVariable *actualGlobal = dyn_cast<llvm::GlobalVariable>(currVal);
             if (actualGlobal == nullptr) {
                 // OK, check with stripped.
                 Value *strippedVal = currVal->stripPointerCasts();
                 actualGlobal = dyn_cast<llvm::GlobalVariable>(strippedVal);
             }
-
-            if (actualGlobal == nullptr) {
+            // Even stripping din't help. Check if this is an instruction and get the first
+            // global variable in operand list
+            // TODO: a better handling of the ConstantExpr. 
+            if (actualGlobal == nullptr && dyn_cast<ConstantExpr>(currVal)) {
                 ConstantExpr *targetExpr = dyn_cast<ConstantExpr>(currVal);
-                if (targetExpr != nullptr) {
-                    AliasObject *refObj = nullptr;
-                    // Even stripping din't help. Check if this is an instruction and get the first
-                    // global variable in operand list
-                    for (unsigned int i = 0; i < targetExpr->getNumOperands(); i++) {
-                        Value *currOperand = targetExpr->getOperand(i);
-                        llvm::GlobalVariable *globalCheck = dyn_cast<llvm::GlobalVariable>(currOperand);
-                        if (globalCheck == nullptr) {
-                            // check with strip
-                            globalCheck = dyn_cast<llvm::GlobalVariable>(currOperand->stripPointerCasts());
-                        }
-                        if (globalCheck != nullptr) {
-                            actualGlobal = globalCheck;
-                            break;
-                        }
-                        refObj = getReferencedGlobal(visitedCache, currOperand, globalObjectCache);
-                        if(refObj != nullptr) {
-                            return refObj;
-                        }
+                for (unsigned int i = 0; i < targetExpr->getNumOperands(); i++) {
+                    Value *currOperand = targetExpr->getOperand(i);
+                    llvm::GlobalVariable *globalCheck = dyn_cast<llvm::GlobalVariable>(currOperand);
+                    if (globalCheck == nullptr) {
+                        // check with strip
+                        globalCheck = dyn_cast<llvm::GlobalVariable>(currOperand->stripPointerCasts());
                     }
-
+                    if (globalCheck != nullptr) {
+                        actualGlobal = globalCheck;
+                        break;
+                    }
+                    AliasObject *refObj = getReferencedGlobal(visitedCache, currOperand, globalObjectCache);
+                    if(refObj != nullptr) {
+                        return refObj;
+                    }
                 }
             }
-
-            if (actualGlobal == nullptr) {
+            //Is it a function?
+            if (actualGlobal == nullptr && dyn_cast<Function>(currVal)) {
                 Function *targetFunction = dyn_cast<Function>(currVal);
-                if(targetFunction != nullptr) {
-                    if (globalObjectCache.find((Value *) targetFunction) != globalObjectCache.end()) {
-                        return globalObjectCache[(Value *) targetFunction];
-                    }
+                //NOTE: we assume that all functions that have definitions in the module have already 
+                //been added to globalObjectCache (i.e. in "setupGlobals").
+                if (globalObjectCache.find((Value*)targetFunction) != globalObjectCache.end()) {
+                    return globalObjectCache[(Value*)targetFunction];
+                }else {
+                    dbgs() << "!!! getReferencedGlobal(): Cannot find the targetFunction in the cache: "
+                    << targetFunction->getName().str() << "\n";
                 }
             }
             if(actualGlobal != nullptr) {
+                //Not a function, neither expr, it's a normal global object pointer.
                 return addGlobalVariable(visitedCache, actualGlobal, globalObjectCache);
             }
             return nullptr;
@@ -287,7 +286,6 @@ namespace DRCHECKER {
             return false;
         }
 
-
         /***
          *  Get the global object from variable initializers.
          * @param constantType Type of the constant.
@@ -296,41 +294,74 @@ namespace DRCHECKER {
          * @return Alias Object corresponding to the initializer.
          */
         static AliasObject* getGlobalObjectFromInitializer(std::vector<llvm::GlobalVariable *> &visitedCache,
-                                                           Type* constantType, Constant* targetConstant,
-                                                     std::map<Value*, AliasObject*> &globalObjectCache) {
-            AliasObject *glob = nullptr;
-            if(constantType->isStructTy()) {
-                glob = new GlobalObject(targetConstant, constantType);
-                ConstantStruct *actualStType = dyn_cast<ConstantStruct>(targetConstant);
-                if(actualStType != nullptr) {
-                    for (unsigned int i = 0; i < actualStType->getNumOperands(); i++) {
-                        Value *currFieldVal = actualStType->getOperand(i);
-                        AliasObject *currFieldObj = nullptr;
-                        Constant *constCheck = dyn_cast<Constant>(currFieldVal);
-                        if(isConstantVariable(constCheck)) {
-                            // OK, the field is initialized but it is not a constant?
-                            // check if this is a global variable?
-                            currFieldObj = getReferencedGlobal(visitedCache, currFieldVal, globalObjectCache);
-                        }
-                        else {
-                            // the field is initialized with constant?
-                            currFieldObj = getGlobalObjectFromInitializer(visitedCache,
-                                                                          currFieldVal->getType(), constCheck,
-                                                                          globalObjectCache);
-                        }
-                        if (currFieldObj != nullptr) {
-                            glob->addObjectToFieldPointsTo(i, currFieldObj, nullptr);
-                        }
-                    }
+                                                           Constant *targetConstant,
+                                                           std::map<Value*, AliasObject*> &globalObjectCache) {
+            if (!targetConstant || !targetConstant->getType() || !dyn_cast<ConstantAggregate>(targetConstant)) {
+                return nullptr;
+            }
+            ConstantAggregate *constA = dyn_cast<ConstantAggregate>(targetConstant);
+            Type* constantType = targetConstant->getType();
+            AliasObject *glob = new GlobalObject(targetConstant, constantType);
+            //hz: this can handle both the struct and sequential type.
+            for (unsigned int i = 0; i < constA->getNumOperands(); ++i) {
+                Constant *constCheck = constA->getOperand(i);
+                if (!constCheck) {
+                    continue;
                 }
-
-            } else if(constantType->isAggregateType()) {
-                glob = new GlobalObject(targetConstant, constantType);
+                AliasObject *currFieldObj = nullptr;
+                if (isConstantVariable(constCheck)) {
+                    // OK, the field is initialized w/ a global object pointer, now get that pointee global object.
+                    currFieldObj = getReferencedGlobal(visitedCache, constCheck, globalObjectCache);
+                    //Update the field point-to record.
+                    if (currFieldObj != nullptr) {
+                        //Since this is the global object initialization, the InstLoc is nullptr.
+                        glob->addObjectToFieldPointsTo(i, currFieldObj, nullptr);
+                    }
+                } else if (dyn_cast<ConstantAggregate>(constCheck)) {
+                    // This is an embedded struct...
+                    currFieldObj = getGlobalObjectFromInitializer(visitedCache, constCheck, globalObjectCache);
+                    // Update the embed object record.
+                    if (currFieldObj != nullptr) {
+                        glob->setEmbObj(i, currFieldObj, true);
+                    }
+                } else {
+                    // This is possibly an integer field initialization, we can just skip.
+                    continue; 
+                }
             }
             return glob;
-
         }
 
+        //Decide whether we need to create a GlobalObject for a certain GlobalVariable.
+        static bool toCreateObjForGV(llvm::GlobalVariable *globalVariable) {
+            if (!globalVariable) {
+                return false;
+            }
+            Type *ty = globalVariable->getType();
+            // global variables are always pointers
+            if (!ty || !ty->isPointerTy()) {
+                return false;
+            }
+            ty = ty->getPointerElementType();
+            // Don't create GlobalObject for certain types (e.g. str pointer). 
+            if (dyn_cast<SequentialType>(ty)) {
+                Type *ety = dyn_cast<SequentialType>(ty)->getElementType();
+                if (InstructionUtils::isPrimitiveTy(ety) || InstructionUtils::isPrimitivePtr(ety)) {
+                    return false;
+                }
+            }
+            //Filter by name.
+            std::string bls[] = {".str.",".descriptor"};
+            if (globalVariable->hasName()) {
+                std::string n = globalVariable->getName().str();
+                for (auto &s : bls) {
+                    if (s == n) {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
 
         /***
          * Add global variable into the global state and return corresponding AliasObject.
@@ -343,59 +374,55 @@ namespace DRCHECKER {
          * @param globalObjectCache Cache of Values to corresponding AliasObject.
          * @return AliasObject corresponding to the global variable.
          */
-        static AliasObject* addGlobalVariable(std::vector<llvm::GlobalVariable *> &visitedCache,
+        static AliasObject* addGlobalVariable(std::vector<llvm::GlobalVariable*> &visitedCache,
                                               llvm::GlobalVariable *globalVariable,
                                       std::map<Value*, AliasObject*> &globalObjectCache) {
 
             if(std::find(visitedCache.begin(), visitedCache.end(), globalVariable) != visitedCache.end()) {
 #ifdef DEBUG_GLOBALS
-                dbgs() << "Cycle Detected for:";
-                globalVariable->print(dbgs());
-                dbgs() << "\n";
+                dbgs() << "Cycle Detected for: " << InstructionUtils::getValueStr(globalVariable) << "\n";
 #endif
                 return nullptr;
             }
 
             Value *objectCacheKey = dyn_cast<Value>(globalVariable);
-            AliasObject *toRet = nullptr;
-            assert(objectCacheKey != nullptr);
+            if (!objectCacheKey) {
+                return nullptr;
+            }
+            Type *baseType = globalVariable->getType();
+            // global variables are always pointers
+            if (!baseType || !baseType->isPointerTy()) {
+                return nullptr;
+            }
+            Type *objType = baseType->getPointerElementType();
+            //Don't create the GlobalObject for certain GVs.
+            if (!toCreateObjForGV(globalVariable)) {
+                return nullptr;
+            }
             // if its already processed? Return previously created object.
             if(globalObjectCache.find(objectCacheKey) != globalObjectCache.end()) {
                 return globalObjectCache[objectCacheKey];
-            } else {
-
-                visitedCache.push_back(globalVariable);
-
+            }
+            AliasObject *toRet = nullptr;
+            visitedCache.push_back(globalVariable);
+            // This is new global variable.
+            // next check if it has any initializers.
+            if (globalVariable->hasInitializer()) {
+                Constant *targetConstant = globalVariable->getInitializer();
+                toRet = getGlobalObjectFromInitializer(visitedCache, targetConstant, globalObjectCache);
+            }
+            if(toRet == nullptr) {
                 // OK, the global variable has no initializer.
                 // Just create a default object.
-                std::set<PointerPointsTo *> *newPointsTo = new std::set<PointerPointsTo *>();
-
-
-                // This is new global variable.
-                Type *baseType = globalVariable->getType();
-                // global variables are always pointers
-                assert(baseType->isPointerTy());
-                // next check if it has any initializers.
-                if (globalVariable->hasInitializer()) {
-                    Constant *baseInitializer = globalVariable->getInitializer();
-                    toRet = getGlobalObjectFromInitializer(visitedCache, baseInitializer->getType(),
-                                                           baseInitializer, globalObjectCache);
-
-                }
-
-                if(toRet == nullptr) {
-                    // OK, the global variable has no initializer.
-                    // Just create a default object.
-                    toRet = new GlobalObject(globalVariable, baseType->getContainedType(0));
-                }
-
-                //hz: since this is the pre-set pto for gv, there is no calling context. 
-                PointerPointsTo *pointsToObj = new PointerPointsTo(globalVariable, 0, toRet, 0, new InstLoc(globalVariable,nullptr), false);
-                newPointsTo->insert(newPointsTo->end(), pointsToObj);
-                assert(GlobalState::globalVariables.find(globalVariable) == GlobalState::globalVariables.end());
-                GlobalState::globalVariables[globalVariable] = newPointsTo;
-                //dbgs() << "Adding:" << *globalVariable << " into cache\n";
+                toRet = new GlobalObject(globalVariable, objType);
             }
+            //hz: since this is the pre-set pto for gv, there is no calling context. 
+            std::set<PointerPointsTo*> *newPointsTo = new std::set<PointerPointsTo*>();
+            PointerPointsTo *pointsToObj = new PointerPointsTo(globalVariable, 0, toRet, 0, new InstLoc(globalVariable,nullptr), false);
+            newPointsTo->insert(newPointsTo->end(), pointsToObj);
+            assert(GlobalState::globalVariables.find(globalVariable) == GlobalState::globalVariables.end());
+            GlobalState::globalVariables[globalVariable] = newPointsTo;
+            //dbgs() << "Adding:" << *globalVariable << " into cache\n";
             // make sure that object cache doesn't already contain the object.
             assert(globalObjectCache.find(objectCacheKey) == globalObjectCache.end());
             // insert into object cache.
@@ -405,7 +432,6 @@ namespace DRCHECKER {
             assert(GlobalState::globalVariables[globalVariable] != nullptr);
             visitedCache.pop_back();
             return toRet;
-
         }
 
         /***
@@ -416,7 +442,7 @@ namespace DRCHECKER {
         static void addGlobalFunction(Function *currFunction, std::map<Value*, AliasObject*> &globalObjectCache) {
             // add to the global cache, only if there is a definition.
             if(!currFunction->isDeclaration()) {
-                std::set<PointerPointsTo *> *newPointsTo = new std::set<PointerPointsTo *>();
+                std::set<PointerPointsTo*> *newPointsTo = new std::set<PointerPointsTo*>();
                 GlobalObject *glob = new GlobalObject(currFunction);
                 PointerPointsTo *pointsToObj = new PointerPointsTo(currFunction, 0, glob, 0, new InstLoc(currFunction,nullptr), false);
                 newPointsTo->insert(newPointsTo->end(), pointsToObj);

@@ -243,6 +243,9 @@ namespace DRCHECKER {
         // the set of instructions which initialize this object
         std::set<Instruction*> initializingInstructions;
 
+        // Whether this object is immutable.
+        bool is_const = false;
+
         unsigned long id;
 
         //hz: indicate whether this object is a taint source.
@@ -272,6 +275,7 @@ namespace DRCHECKER {
             this->is_initialized = srcAliasObject->is_initialized;
             this->initializingInstructions.insert(srcAliasObject->initializingInstructions.begin(),
                                                   srcAliasObject->initializingInstructions.end());
+            this->is_const = srcAliasObject->is_const;
             //this->is_taint_src = srcAliasObject->is_taint_src;
             this->embObjs = srcAliasObject->embObjs;
             this->parent = srcAliasObject->parent;
@@ -462,7 +466,8 @@ namespace DRCHECKER {
             return;
         }
 
-        //We want to get all possible pointee types of a certain field, so we need to inspect the detailed type desc (i.e. embed/parent object hierarchy).
+        //We want to get all possible pointee types of a certain field, so we need to 
+        //inspect the detailed type desc (i.e. embed/parent object hierarchy).
         void getFieldPointeeTy(long fid, std::set<Type*> &retSet) {
             if (this->pointsTo.find(fid) == this->pointsTo.end()) {
                 return;
@@ -494,7 +499,8 @@ namespace DRCHECKER {
                     }
                 }
             }
-            O << "Field Pto: " << (const void*)this << " | " << fid << " : " << "#Total: " << total << " #Active: " << act << " #Strong: " << strong << "\n";
+            O << "Field Pto: " << (const void*)this << " | " << fid << " : " << "#Total: " << total 
+            << " #Active: " << act << " #Strong: " << strong << "\n";
         }
 
         //This is a wrapper of "updateFieldPointsTo" for convenience, it assumes that we only have one pto record for the "fieldId" to update,
@@ -513,6 +519,32 @@ namespace DRCHECKER {
                 //We can now delete the allocated objects since "updateFieldPointsTo" has made a copy.
                 delete(newPointsTo);
             }
+        }
+
+        //Set the "dstObject" as embedded in field "fieldId".
+        bool setEmbObj(long fieldId, AliasObject *dstObject, bool check_ty = false) {
+            if (!dstObject) {
+                return false;
+            }
+            if (this->embObjs.find(fieldId) != this->embObjs.end()) {
+                //There is already an existing emb obj.
+                return false;
+            }
+            //First check whether the object type matches that of the field, if required.
+            if (check_ty) {
+                Type *ety = this->getFieldTy(fieldId);
+                if (!ety) {
+                    return false;
+                }
+                if (!InstructionUtils::same_types(dstObject->targetType,ety)) {
+                    return false;
+                }
+            }
+            //Now embed the object.
+            //TODO: what if the "dstObject" already has a host object?
+            this->embObjs[fieldId] = dstObject;
+            dstObject->parent = this;
+            dstObject->parent_field = fieldId;
         }
 
         bool getPossibleMemberFunctions_dbg(Instruction *inst, FunctionType *targetFunctionType, Type *host_ty, 

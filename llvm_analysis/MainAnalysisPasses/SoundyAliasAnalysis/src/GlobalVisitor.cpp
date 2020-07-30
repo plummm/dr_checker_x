@@ -298,11 +298,9 @@ namespace DRCHECKER {
                 }
 
             } else {
-
 #ifdef DEBUG_CALL_INSTR
-                dbgs() << "Function pointer does not point to any functions:";
-                calledValue->print(dbgs());
-                dbgs() << ", So Ignoring\n";
+                dbgs() << "Function pointer does not point to any functions: " << InstructionUtils::getValueStr(calledValue) 
+                << ", So Ignoring\n";
 #endif
             }
         }

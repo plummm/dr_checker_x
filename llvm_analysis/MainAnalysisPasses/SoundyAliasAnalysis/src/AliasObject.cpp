@@ -404,11 +404,13 @@ namespace DRCHECKER {
         if (ety->isPointerTy() && !InstructionUtils::isPrimitivePtr(ety) && !InstructionUtils::isNullCompPtr(ety)) {
             real_ty = ety->getPointerElementType();
         }else if (expObjTy && !InstructionUtils::isPrimitiveTy(expObjTy)) {
-            //NOTE: we handle a special case here, sometimes the field type in the struct can be "void*" or "char*" ("i8*"), but it can be converted to "struct*" in the load,
-            //if this is the case, we will create the dummy object based on the real converted type and still make this "void*/char*" field point to the new obj. 
+            //NOTE: we handle a special case here, sometimes the field type in the struct can 
+            //be "void*" or "char*" ("i8*"), but it can be converted to "struct*" in the load,
+            //if this is the case, we will create the dummy object based on the real converted 
+            //type and still make this "void*/char*" field point to the new obj. 
             real_ty = expObjTy;
-            //If the field type cannot match the expected pointee type (e.g. i8* can potentially point to anything), we will still use the "currInst",
-            //as in this case, the field may point to different things in different code paths...
+            //If the field type cannot match the expected pointee type (e.g. i8* can potentially point to anything), 
+            //we will still use the "currInst", as in this case, the field may point to different things in different code paths...
             siteInst = currInst;
         }
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
@@ -458,14 +460,16 @@ namespace DRCHECKER {
     AliasObject *AliasObject::getNestedObj(long fid, Type *dty, InstLoc *loc) {
         //There will be several cases here:
         //(1) The dst field is not composite, then we can return directly;
-        //(2) The dst field is an embedded composite, we need to recursively extract the first field of it until we get a non-composite field or match the "dty";
+        //(2) The dst field is an embedded composite, we need to recursively extract 
+        //the first field of it until we get a non-composite field or match the "dty";
         //(3) No type information for the dst element is available, return directly.
         AliasObject *hostObj = this;
         while (true) {
             int err = 0;
             Type *ety = hostObj->getFieldTy(fid,&err);
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-            dbgs() << "AliasObject::getNestedObj(): " << (const void*)hostObj << " | " << fid << " : " << InstructionUtils::getTypeStr(ety) << "\n";
+            dbgs() << "AliasObject::getNestedObj(): " << (const void*)hostObj << " | " << fid 
+            << " : " << InstructionUtils::getTypeStr(ety) << "\n";
 #endif
             if (!ety) {
                 if (err == 2) {
@@ -524,7 +528,8 @@ namespace DRCHECKER {
 #endif
                 srcfieldId = 0;
             }
-            //If the "srcfieldId" is an embedded struct/array, we need to recursively update the fieldPointsTo in the embedded object instead of current host object.
+            //If the "srcfieldId" is an embedded struct/array, we need to recursively update 
+            //the fieldPointsTo in the embedded object instead of current host object.
             host = host->getNestedObj(srcfieldId,nullptr,propagatingInstr);
             if (!host) {
                 //TODO: return or go ahead w/ "this"?
@@ -565,7 +570,8 @@ namespace DRCHECKER {
             }
             bool unique = true;
             for (ObjectPointsTo *t : unique_pto) {
-                //NOTE: pto in "dstPointsTo" should all share the same "propagatingInstr", so we only need to care about their dst obj and field here.
+                //NOTE: pto in "dstPointsTo" should all share the same "propagatingInstr", 
+                //so we only need to care about their dst obj and field here.
                 if (!t->pointsToSameObject(pto)) {
                     //Obviously different.
                     continue;
@@ -761,7 +767,8 @@ namespace DRCHECKER {
             return nullptr;
         }
 #ifdef DEBUG_CREATE_EMB_OBJ
-        dbgs() << "AliasObject::createEmbObj(): host type: " << InstructionUtils::getTypeStr(this->targetType) << " | " << fid << " ID: " << (const void*)(this) << "\n";
+        dbgs() << "AliasObject::createEmbObj(): host type: " << InstructionUtils::getTypeStr(this->targetType) 
+        << " | " << fid << " ID: " << (const void*)(this) << "\n";
 #endif
         if (dyn_cast<SequentialType>(this->targetType)) {
             //We collapse the array/vector to a single element.
@@ -776,7 +783,8 @@ namespace DRCHECKER {
             expectedPointeeTy = v->getType()->getPointerElementType();
         }
 #ifdef DEBUG_CREATE_EMB_OBJ
-        dbgs() << "AliasObject::createEmbObj(): ety: " << InstructionUtils::getTypeStr(ety) << " expectedPointeeTy: " << InstructionUtils::getTypeStr(expectedPointeeTy) << "\n";
+        dbgs() << "AliasObject::createEmbObj(): ety: " << InstructionUtils::getTypeStr(ety) 
+        << " expectedPointeeTy: " << InstructionUtils::getTypeStr(expectedPointeeTy) << "\n";
 #endif
         if (v) {
             if (!ety || !InstructionUtils::same_types(ety,expectedPointeeTy)) {
@@ -799,14 +807,16 @@ namespace DRCHECKER {
             if (!newObj) {
                 dbgs() << "there is no emb obj in cache...\n";
             }else{
-                dbgs() << "the emb obj in cache has a different type than expected: " << InstructionUtils::getTypeStr(newObj->targetType) << "\n";
+                dbgs() << "the emb obj in cache has a different type than expected: " 
+                << InstructionUtils::getTypeStr(newObj->targetType) << "\n";
             }
 #endif
             if (newObj) {
                 //Erase the parent record of the existing emb obj.
                 if (newObj->parent == this) {
 #ifdef DEBUG_CREATE_EMB_OBJ
-                    dbgs() << "AliasObject::createEmbObj(): try to erase the existing emb obj's parent record since its parent is also this hostObj.\n";
+                    dbgs() << "AliasObject::createEmbObj(): try to erase the existing emb obj's\
+                    parent record since its parent is also this hostObj.\n";
 #endif
                     newObj->parent = nullptr;
                     newObj->parent_field = 0;
@@ -820,17 +830,22 @@ namespace DRCHECKER {
             }
             if (newObj) {
 #ifdef DEBUG_CREATE_EMB_OBJ
-                dbgs() << "AliasObject::createEmbObj(): the embedded obj created: "  << (const void*)this << " | " << fid << " --> " << (const void*)newObj << "\n"; 
+                dbgs() << "AliasObject::createEmbObj(): the embedded obj created: "  
+                << (const void*)this << " | " << fid << " --> " << (const void*)newObj << "\n"; 
 #endif
                 //Properly taint it.
-                //First if the host object is a taint source, then the emb obj is so too, we also need to set up the inherent taint flags for it,
-                //however, for the taint instruction trace in the flag we will just inherite from the host object instead of using the current one,
+                //First if the host object is a taint source, then the emb obj is so too, 
+                //we also need to set up the inherent taint flags for it,
+                //however, for the taint instruction trace in the flag we will just inherite 
+                //from the host object instead of using the current one,
                 //because in theory, this emb object was immediately avaiable when creating the host object.
                 if (this->is_taint_src) {
 #ifdef DEBUG_CREATE_EMB_OBJ
-                    dbgs() << "AliasObject::createEmbObj(): set the emb obj as a taint source since its host obj is so, is_taint_src: " << this->is_taint_src << "\n"; 
+                    dbgs() << "AliasObject::createEmbObj(): set the emb obj as a taint source since its host obj is so, is_taint_src: " 
+                    << this->is_taint_src << "\n"; 
 #endif
-                    //NOTE: since our goal here is to extract the "loc" of the inherent taint flag for the host obj, not to get the current live taint flags,
+                    //NOTE: since our goal here is to extract the "loc" of the inherent taint 
+                    //flag for the host obj, not to get the current live taint flags,
                     //we do not use the "getTf()" interface.
                     TaintFlag *itf = this->all_contents_taint_flags.getInherentTf();
                     if (itf && itf->targetInstr) {
@@ -842,8 +857,10 @@ namespace DRCHECKER {
                         newObj->setAsTaintSrc(loc,(this->is_taint_src>0));
                     }
                 }
-                //Now propagate non-inherent flags in the host object, no need to propagate inherent ones since emb obj is a part of the host. 
-                //NOTE: these propagated TFs may override the previously set-up inherent TFs ("setAsTaintSrc"), which is just the correct and expected bahavior.
+                //Now propagate non-inherent flags in the host object, no need to 
+                //propagate inherent ones since emb obj is a part of the host. 
+                //NOTE: these propagated TFs may override the previously set-up inherent TFs 
+                //("setAsTaintSrc"), which is just the correct and expected bahavior.
                 std::set<TaintFlag*> tfs;
                 this->getFieldTaintInfo(fid,tfs,loc);
 #ifdef DEBUG_CREATE_EMB_OBJ
@@ -851,16 +868,15 @@ namespace DRCHECKER {
 #endif
                 for (TaintFlag *tf : tfs) {
                     //NOTE: we don't need to add current "loc" into the taint trace since this emb obj was tainted as early as the field.
-                    //And no worry that "newObj" will be tainted by an inherent TF not belonging to itself, since we only propagate non-inherent ones here.
+                    //And no worry that "newObj" will be tainted by an inherent TF not 
+                    //belonging to itself, since we only propagate non-inherent ones here.
                     if (tf && !tf->is_inherent) {
                         //NOTE: "is_weak" is inherited.
                         newObj->taintAllFields(tf);
                     }
                 }
                 //Record it in the "embObjs".
-                this->embObjs[fid] = newObj;
-                newObj->parent = this;
-                newObj->parent_field = fid;
+                this->setEmbObj(fid,newObj);
             }else {
 #ifdef DEBUG_CREATE_EMB_OBJ
                 dbgs() << "AliasObject::createEmbObj(): Failed to create the outside object!\n";
@@ -892,12 +908,15 @@ namespace DRCHECKER {
 #endif
                 return this->parent;
             }else {
-                //NOTE: we should honor the original parent object, since it's static analysis and we can have multiple pointees for a same pointer
-                //and they may have multiple different parent objects, here we're possibly trying yo create a parent object for a wrong pointee, we should
-                //just skip.
+                //NOTE: we should honor the original parent object, since it's static 
+                //analysis and we can have multiple pointees for a same pointer
+                //and they may have multiple different parent objects, here we're 
+                //possibly trying yo create a parent object for a wrong pointee, we should just skip.
 #ifdef DEBUG_CREATE_HOST_OBJ
                 dbgs() << "!!! AliasObject::createHostObj(): found a previously created parent object but w/ different field or type!\n";
-                dbgs() << "!!! AliasObject::createHostObj(): previous parent: " << InstructionUtils::getTypeStr(this->parent->targetType) << " | " << this->parent_field << ", id: " << (const void*)this->parent << "\n";
+                dbgs() << "!!! AliasObject::createHostObj(): previous parent: " 
+                << InstructionUtils::getTypeStr(this->parent->targetType) << " | " << this->parent_field 
+                << ", id: " << (const void*)this->parent << "\n";
 #endif
                 return nullptr;
                 /*
@@ -948,9 +967,7 @@ namespace DRCHECKER {
             return nullptr;
         }
         //Setup embed relationship.
-        hobj->embObjs[field] = this;
-        this->parent = hobj;
-        this->parent_field = field;
+        hobj->setEmbObj(field,this);
         return hobj;
     }
 
