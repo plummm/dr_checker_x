@@ -298,7 +298,8 @@ namespace DRCHECKER {
             return;
         }
         if (host != this) {
-            //This means what we need to fetch is in an embedded field obj at the original "srcfieldId", so the new field should be 0 in the emb obj.
+            //This means what we need to fetch is in an embedded field obj at the original 
+            //"srcfieldId", so the new field should be 0 in the emb obj.
             srcfieldId = 0;
         }
         //Reactivation check: if there has been a level 0 entry function change (e.g. we have finished analyzing ioctl_0 and started
@@ -315,23 +316,27 @@ namespace DRCHECKER {
             for (ObjectPointsTo *obj : livePtos) {
                 if (obj->fieldId == srcfieldId && obj->targetObject) {
                     //We handle a special case here:
-                    //Many malloc'ed HeapLocation object can be of the type i8*, while only in the later code the pointer will be converted to a certain struct*,
+                    //Many malloc'ed HeapLocation object can be of the type i8*, while 
+                    //only in the later code the pointer will be converted to a certain struct*,
                     //we choose to do this conversion here, specifically we need to:
                     //(1) change the object type to the "expObjTy",
                     //(2) setup the taint information properly.
 #ifdef DEBUG_CHANGE_HEAPLOCATIONTYPE
-                    //dbgs() << "AliasObject::fetchPointsToObjects: isHeapLocation: " << (obj->targetObject && obj->targetObject->isHeapLocation()) << " dstField: " << obj->dstfieldId;
+                    //dbgs() << "AliasObject::fetchPointsToObjects: isHeapLocation: " 
+                    //<< (obj->targetObject && obj->targetObject->isHeapLocation()) << " dstField: " << obj->dstfieldId;
                     //dbgs() << " expObjTy: " << InstructionUtils::getTypeStr(expObjTy) << "\n";
 #endif
                     if (obj->dstfieldId == 0 && obj->targetObject->isHeapLocation() && 
                         expObjTy && dyn_cast<CompositeType>(expObjTy) && obj->targetObject->targetType != expObjTy) 
                     {
 #ifdef DEBUG_CHANGE_HEAPLOCATIONTYPE
-                        dbgs() << "AliasObject::fetchPointsToObjects: Change type of the HeapLocation obj to: " << InstructionUtils::getTypeStr(expObjTy) << "\n"; 
+                        dbgs() << "AliasObject::fetchPointsToObjects: Change type of the HeapLocation obj to: " 
+                        << InstructionUtils::getTypeStr(expObjTy) << "\n"; 
 #endif
                         //Change type.
                         obj->targetObject->reset(targetInstr,expObjTy,currInst);
-                        //No need to call the "taintPointeeObj" again since we have already done that when creating the old (before type reset) object, and the TaintFlags
+                        //No need to call the "taintPointeeObj" again since we have already 
+                        //done that when creating the old (before type reset) object, and the TaintFlags
                         //at that time will be propagated to new fields by "reset".
                         //host->taintPointeeObj(obj->targetObject,srcfieldId,currInst);
                     }
@@ -342,28 +347,33 @@ namespace DRCHECKER {
                     auto p = std::make_pair(obj->dstfieldId, obj->targetObject);
                     if (std::find(dstObjects.begin(), dstObjects.end(), p) == dstObjects.end()) {
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-                        dbgs() << "-> " << InstructionUtils::getTypeStr(obj->targetObject->targetType) << " | " << obj->dstfieldId << ", obj: " << (const void*)(obj->targetObject);
-                        dbgs() << ", is_taint_src: " << obj->targetObject->is_taint_src << ", Val: " << InstructionUtils::getValueStr(obj->targetObject->getValue()) << "\n";
+                        dbgs() << "-> " << InstructionUtils::getTypeStr(obj->targetObject->targetType) 
+                        << " | " << obj->dstfieldId << ", obj: " << (const void*)(obj->targetObject);
+                        dbgs() << ", is_taint_src: " << obj->targetObject->is_taint_src << ", Val: " 
+                        << InstructionUtils::getValueStr(obj->targetObject->getValue()) << "\n";
 #endif
                         dstObjects.insert(dstObjects.end(), p);
                     }
                 }
             }
         }
-        if (hasObjects || InstructionUtils::isAsanInst(targetInstr)) {
+        //If this is a const object, then no new field pto records are possible besides those set up at
+        //the definition site, so just leave it as is.
+        if (hasObjects || this->is_const || InstructionUtils::isAsanInst(targetInstr)) {
             return;
         }
         //Try to create a dummy object.
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
         dbgs() << "AliasObject::fetchPointsToObjects: No existing pto records for the field, try to create a dummy obj.\n";
 #endif
-        //since we cannot find any existing pto records, we need to create a "default" pto for current field who should exist at current level 0 function entry,
+        //since we cannot find any existing pto records, we need to create a "default" 
+        //pto for current field who should exist at current level 0 function entry,
         //thus, we need to set the "siteInst" to the entry, instead of the "currInst".
         if (currInst && currInst->hasCtx() && (*currInst->ctx)[0]) {
             std::vector<Instruction*> *newCtx = new std::vector<Instruction*>(currInst->ctx->begin(),currInst->ctx->begin()+1);
             InstLoc *il = new InstLoc((*currInst->ctx)[0],newCtx);
             host->createFieldPointee(srcfieldId, dstObjects, currInst, il);
-        }else {
+        } else {
             dbgs() << "!!! AliasObject::fetchPointsToObjects: currInst does not have a valid level 0 entry function!\n";
             host->createFieldPointee(srcfieldId, dstObjects, currInst);
         }

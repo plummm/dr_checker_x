@@ -530,7 +530,7 @@ namespace DRCHECKER {
                 if (for_scalar) {
                     //This means it's not a real scalar, but just converted from a pointer, we may ignore this case if specified.
                     return nullptr;
-                }else {
+                } else {
                     v = (dyn_cast<llvm::PtrToIntOperator>(v))->getOperand(0);
                     continue;
                 }
@@ -2171,4 +2171,27 @@ out:
         return false;
     }
 
+    bool isAnonStName(const std::string &s) {
+        if (s == "anon" || s.find(".anon") == s.size() - 5 || s.find(".anon.") != std::string::npos
+            || s.find("anon.") == 0) {
+            return true;
+        }
+        return false;
+    }
+
+    //We may consider some similarity algorithms like edit distance based ones, but now we simply look at
+    //whether one string is the prefix of the other.
+    bool InstructionUtils::similarStName(const std::string &s0, const std::string &s1) {
+        if (s0 == "" || s1 == "") {
+            return false;
+        }
+        //Cannot rely on the name similarity for anonymized structs.
+        if (isAnonStName(s0) || isAnonStName(s1)) {
+            return false;
+        }
+        if (s0.find(s1) == 0 || s1.find(s0) == 0) {
+            return true;
+        }
+        return false;
+    }
 }

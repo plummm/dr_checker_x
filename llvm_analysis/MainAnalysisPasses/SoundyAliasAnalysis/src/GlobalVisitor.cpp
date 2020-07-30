@@ -264,9 +264,18 @@ namespace DRCHECKER {
                                                                 calledValue, targetFunctions);
 #ifdef SMART_FUNCTION_PTR_RESOLVING
             if (!hasTargets) {
+                //NOTE: the below inference is actually a backup method to the "getPossibleMemeberFunction" when
+                //we fetch the field pto from an object, so if we are sure that the aforementioned inference
+                //has already been performed (and we still get nothing), then no need to do the inference again here.
+                Value *v = InstructionUtils::stripAllCasts(calledValue,false);
+                if (v && dyn_cast<LoadInst>(v)) {
+                    //We must have already tried the inference when processing the "load", so give up now.
+                    dbgs() << "We have done the inference previously when processing the load, but still no results...\n";
+                    goto out;
+                }
                 hasTargets = InstructionUtils::getPossibleFunctionTargets(I, targetFunctions);
 #ifdef DEBUG_CALL_INSTR
-                dbgs() << "Function Pointer targets:" << targetFunctions.size() << "\n";
+                dbgs() << "Function Pointer targets: " << targetFunctions.size() << "\n";
 #endif
                 if (targetFunctions.size() > MAX_FUNC_PTR) {
 #ifdef DEBUG_CALL_INSTR
@@ -287,6 +296,7 @@ namespace DRCHECKER {
                 }
             }
 #endif
+out:
             // get potential target function from a given pointer.
             if(hasTargets) {
                 assert(targetFunctions.size() > 0);

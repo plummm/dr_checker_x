@@ -286,6 +286,8 @@ namespace DRCHECKER {
          * @return true/false depending on targets is non-empty or empty.
          */
         static bool getPossibleFunctionTargets(CallInst &callInst, std::set<Function*> &targetFunctions);
+
+        static bool similarStName(const std::string &s0, const std::string &s1);
     };
 
 }

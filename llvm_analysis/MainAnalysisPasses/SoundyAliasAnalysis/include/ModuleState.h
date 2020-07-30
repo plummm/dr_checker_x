@@ -378,17 +378,16 @@ namespace DRCHECKER {
                                               llvm::GlobalVariable *globalVariable,
                                       std::map<Value*, AliasObject*> &globalObjectCache) {
 
+            if (!globalVariable) {
+                return nullptr;
+            }
             if(std::find(visitedCache.begin(), visitedCache.end(), globalVariable) != visitedCache.end()) {
 #ifdef DEBUG_GLOBALS
                 dbgs() << "Cycle Detected for: " << InstructionUtils::getValueStr(globalVariable) << "\n";
 #endif
                 return nullptr;
             }
-
             Value *objectCacheKey = dyn_cast<Value>(globalVariable);
-            if (!objectCacheKey) {
-                return nullptr;
-            }
             Type *baseType = globalVariable->getType();
             // global variables are always pointers
             if (!baseType || !baseType->isPointerTy()) {
@@ -416,20 +415,25 @@ namespace DRCHECKER {
                 // Just create a default object.
                 toRet = new GlobalObject(globalVariable, objType);
             }
-            //hz: since this is the pre-set pto for gv, there is no calling context. 
-            std::set<PointerPointsTo*> *newPointsTo = new std::set<PointerPointsTo*>();
-            PointerPointsTo *pointsToObj = new PointerPointsTo(globalVariable, 0, toRet, 0, new InstLoc(globalVariable,nullptr), false);
-            newPointsTo->insert(newPointsTo->end(), pointsToObj);
-            assert(GlobalState::globalVariables.find(globalVariable) == GlobalState::globalVariables.end());
-            GlobalState::globalVariables[globalVariable] = newPointsTo;
-            //dbgs() << "Adding:" << *globalVariable << " into cache\n";
-            // make sure that object cache doesn't already contain the object.
-            assert(globalObjectCache.find(objectCacheKey) == globalObjectCache.end());
-            // insert into object cache.
-            globalObjectCache[objectCacheKey] = toRet;
-            // Make sure that we have created a pointsTo information for globals.
-            assert(GlobalState::globalVariables.find(globalVariable) != GlobalState::globalVariables.end());
-            assert(GlobalState::globalVariables[globalVariable] != nullptr);
+            //Update the global pto records.
+            if (toRet != nullptr) {
+                //TODO: confirm that the global variable is const equals to the pointee object is also const.
+                toRet->is_const = globalVariable->isConstant();
+                //hz: since this is the pre-set pto for gv, there is no calling context. 
+                std::set<PointerPointsTo*> *newPointsTo = new std::set<PointerPointsTo*>();
+                PointerPointsTo *pointsToObj = new PointerPointsTo(globalVariable, 0, toRet, 0, new InstLoc(globalVariable,nullptr), false);
+                newPointsTo->insert(newPointsTo->end(), pointsToObj);
+                assert(GlobalState::globalVariables.find(globalVariable) == GlobalState::globalVariables.end());
+                GlobalState::globalVariables[globalVariable] = newPointsTo;
+                //dbgs() << "Adding:" << *globalVariable << " into cache\n";
+                // make sure that object cache doesn't already contain the object.
+                assert(globalObjectCache.find(objectCacheKey) == globalObjectCache.end());
+                // insert into object cache.
+                globalObjectCache[objectCacheKey] = toRet;
+                // Make sure that we have created a pointsTo information for globals.
+                assert(GlobalState::globalVariables.find(globalVariable) != GlobalState::globalVariables.end());
+                assert(GlobalState::globalVariables[globalVariable] != nullptr);
+            }
             visitedCache.pop_back();
             return toRet;
         }
@@ -795,33 +799,41 @@ namespace DRCHECKER {
             }
             //Always includes itself.
             res.insert(obj);
+            //Look up the cache.
+            std::set<AliasObject*> *eqcls = nullptr;
             for (std::set<AliasObject*> *cls : eqObjs) {
                 if (cls && cls->find(obj) != cls->end()) {
-                    for (AliasObject *co : *cls) {
-                        if (obj->auto_generated || co->auto_generated) {
-                            res.insert(co);
+                    //Found the equivelant class in the cache...
+                    eqcls = cls;
+                    break;
+                }
+            }
+            if (eqcls == nullptr) {
+                //No equivelant class found in the cache, need to do the dirty work now...
+                //By default the obj itself is in its own equivelant class.
+                std::set<AliasObject*> *eqcls = new std::set<AliasObject*>();
+                eqcls->insert(obj);
+                eqObjs.insert(eqcls);
+                //First we need to collect all access paths to current object.
+                std::set<std::vector<TypeField*>*> *hty = getTagHierarchyTy(tag);
+                //Then based on each access path, we identify all the equivelant objects (i.e. those w/ the same access path).
+                if (hty && hty->size()) {
+                    for (std::vector<TypeField*> *ap : *hty) {
+                        if (!ap || !ap->size()) {
+                            continue;
                         }
+                        getAllObjsForPath(ap,*eqcls);
                     }
-                    return 0;
                 }
             }
-            //No equivelant class found in the cache, need to do the dirty work now...
-            //By default the obj itself is in its own equivelant class.
-            std::set<AliasObject*> *newCls = new std::set<AliasObject*>();
-            newCls->insert(obj);
-            eqObjs.insert(newCls);
-            //First we need to collect all access paths to current object.
-            std::set<std::vector<TypeField*>*> *hty = getTagHierarchyTy(tag);
-            //Then based on each access path, we identify all the equivelant objects (i.e. those w/ the same access path).
-            if (hty && hty->size()) {
-                for (std::vector<TypeField*> *ap : *hty) {
-                    if (!ap || !ap->size()) {
-                        continue;
-                    }
-                    getAllObjsForPath(ap,*newCls);
+            for (AliasObject *co : *eqcls) {
+                //Objects bearing the same path may still have different types (e.g. those ->private pointers),
+                //so it's necessary to make another type-based filtering here.
+                if (!InstructionUtils::same_types(obj->targetType,co->targetType)) {
+                    continue;
                 }
-            }
-            for (AliasObject *co : *newCls) {
+                //If the target obj is a dummy one, then it can match any other object (dummy or not), 
+                //otherwise, it can only match other dummy objects (i.e. two real objects cannot match).
                 if (obj->auto_generated || co->auto_generated) {
                     res.insert(co);
                 }

@@ -19,6 +19,7 @@ namespace DRCHECKER {
 //#define MAX_ALIAS_OBJ 50
 //hz: Enable creating new outside objects on the fly when the pointer points to nothing.
 #define CREATE_DUMMY_OBJ_IF_NULL
+#define DEBUG_CREATE_DUMMY_OBJ
 #define DEBUG_UPDATE_POINTSTO
 //#define AGGRESSIVE_PTO_DUP_FILTER
 //#define DEBUG_TMP
@@ -30,13 +31,24 @@ namespace DRCHECKER {
         if (!p) {
             return nullptr;
         }
+        if (dyn_cast<GlobalVariable>(p)) {
+            //We have already set up all the global pto relationship before all analysis begin, so if now we cannot
+            //find the pointee of a certain global variable, that must be we have decided that there is no need to
+            //create a pointee object for it (e.g. the gv is a constant string pointer). So we will not create
+            //an OutsideObject for it either.
+#ifdef DEBUG_CREATE_DUMMY_OBJ
+            dbgs() << "AliasAnalysisVisitor::createOutsideObj(): we will not create dummy object for the global variable: "
+            << InstructionUtils::getValueStr(p) << "\n";
+#endif
+            return nullptr;
+        }
         InstLoc *loc = nullptr;
         if (I) {
             loc = new InstLoc(I,this->currFuncCallSites);
         }else {
             loc = new InstLoc(p,this->currFuncCallSites);
         }
-        std::map<Value *, std::set<PointerPointsTo*>*> *currPointsTo = this->currState.getPointsToInfo(this->currFuncCallSites);
+        std::map<Value*, std::set<PointerPointsTo*>*> *currPointsTo = this->currState.getPointsToInfo(this->currFuncCallSites);
 #ifdef INFER_XENTRY_SHARED_OBJ
         //Can we get a same-typed object from the global cache (generated when analyzing another entry function)?
         //NOTE: there are multiple places in the code that create a new OutsideObject, but we onlyd do this multi-entry cache mechanism here,
@@ -82,7 +94,7 @@ namespace DRCHECKER {
             DRCHECKER::addToSharedObjCache(robj);
 #endif
         }else {
-#ifdef CREATE_DUMMY_OBJ_IF_NULL
+#ifdef DEBUG_CREATE_DUMMY_OBJ
             dbgs() << "AliasAnalysisVisitor::createOutsideObj(): failed to create the dummy obj!\n";
 #endif
         }
@@ -1083,7 +1095,8 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
         //TODO: are there any ASAN inserted GEP insts and do we need to exclude them?
         if (!hasPointsToObjects(srcPointer)) {
 #ifdef DEBUG_GET_ELEMENT_PTR
-            dbgs() << "AliasAnalysisVisitor::processGEPFirstDimension(): Try to create an OutsideObject for srcPointer: " << InstructionUtils::getValueStr(srcPointer) << "\n";
+            dbgs() << "AliasAnalysisVisitor::processGEPFirstDimension(): Try to create an OutsideObject for srcPointer: " 
+            << InstructionUtils::getValueStr(srcPointer) << "\n";
 #endif
             this->createOutsideObj(srcPointer,propInst,true);
         }
@@ -1091,7 +1104,8 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
         if (!hasPointsToObjects(srcPointer)) {
             //No way to sort this out...
 #ifdef DEBUG_GET_ELEMENT_PTR
-            errs() << "AliasAnalysisVisitor::processGEPFirstDimension(): No points-to for: " << InstructionUtils::getValueStr(srcPointer) << ", return\n";
+            errs() << "AliasAnalysisVisitor::processGEPFirstDimension(): No points-to for: " 
+            << InstructionUtils::getValueStr(srcPointer) << ", return\n";
 #endif
             return nullptr;
         }

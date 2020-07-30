@@ -638,7 +638,7 @@ namespace DRCHECKER {
                 GlobalState::addGlobalFunction(&(*mi), globalObjectCache);
             }
             Module::GlobalListType &currGlobalList = m.getGlobalList();
-            for(Module::global_iterator gstart = currGlobalList.begin(), gend = currGlobalList.end(); gstart != gend; gstart++) {
+            for (Module::global_iterator gstart = currGlobalList.begin(), gend = currGlobalList.end(); gstart != gend; gstart++) {
                 //We cannot simply ignore the constant global structs (e.g. some "ops" structs are constant, but we still need
                 //to know their field function pointers to resolve the indirect call sites involving them).
                 /*
@@ -650,11 +650,7 @@ namespace DRCHECKER {
                 if (!GlobalState::toCreateObjForGV(&(*gstart))) {
                     continue;
                 }
-                AliasObject *obj = GlobalState::addGlobalVariable(visitorCache, &(*gstart), globalObjectCache);
-                if (obj) {
-                    //TODO: confirm that the global variable is const equals to the pointee object is also const.
-                    obj->is_const = (*gstart).isConstant();
-                }
+                GlobalState::addGlobalVariable(visitorCache, &(*gstart), globalObjectCache);
 #ifdef DEBUG_GLOBAL_VARIABLES
                 printGVInfo(*gstart);
 #endif
@@ -813,27 +809,26 @@ namespace DRCHECKER {
         }
 
         //hz: try to set all global variables as taint source.
-        void addGlobalTaintSource(GlobalState &targetState){
+        void addGlobalTaintSource(GlobalState &targetState) {
             //Type of globalVariables: std::map<Value *, std::set<PointerPointsTo*>*>
             for (auto const &it : GlobalState::globalVariables) {
                 Value *v = it.first;
                 std::set<PointerPointsTo*> *ps = it.second;
-                if (ps->size() <= 0) {
+                if (!v || !ps || ps->empty()) {
                     continue;
                 }
-                if (v->getType()){
-                    Type *ty = v->getType();
-                    if (ty->isPointerTy()){
-                        ty = ty->getPointerElementType();
-                    }
+                GlobalVariable *gv = dyn_cast<GlobalVariable>(v);
+                //Exclude the constants which cannot be modified.
+                if (gv && gv->isConstant()) {
+                    continue;
+                }
+                //Don't set as taint source for several object types, e.g. function.
+                if (v->getType() && v->getType()->isPointerTy()) {
+                    Type *ty = v->getType()->getPointerElementType();
                     //Exclude certain types, e.g. function.
-                    if (ty->isFunctionTy() || ty->isLabelTy() || ty->isMetadataTy()){
+                    if (ty->isFunctionTy() || ty->isLabelTy() || ty->isMetadataTy()) {
                         continue;
                     }
-                }
-                //Exclude the constants which cannot be modified.
-                if (dyn_cast<ConstantData>(v) || dyn_cast<ConstantAggregate>(v)) {
-                    continue;
                 }
 #ifdef DEBUG_GLOBAL_TAINT
                 dbgs() << "addGlobalTaintSource(): Set the glob var as taint source: " << InstructionUtils::getValueStr(v) << "\n";
@@ -841,6 +836,10 @@ namespace DRCHECKER {
                 InstLoc *loc = new InstLoc(v,nullptr);
                 for(auto const &p : *ps){
                     if (!p->targetObject) {
+                        continue;
+                    }
+                    //Exclude the const object.
+                    if (p->targetObject->is_const) {
                         continue;
                     }
                     p->targetObject->setAsTaintSrc(loc,true);

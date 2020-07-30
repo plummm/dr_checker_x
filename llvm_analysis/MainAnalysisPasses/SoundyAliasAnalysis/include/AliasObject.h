@@ -638,8 +638,13 @@ namespace DRCHECKER {
             }
             Module *currModule = inst->getFunction()->getParent();
             std::string fname = "";
+            std::string tname = "";
             if (dyn_cast<StructType>(host_ty)) {
                 fname = InstructionUtils::getStFieldName(currModule,dyn_cast<StructType>(host_ty),field);
+                if (dyn_cast<StructType>(host_ty)->hasName()) {
+                    tname = dyn_cast<StructType>(host_ty)->getName().str();
+                    InstructionUtils::trim_num_suffix(&tname);
+                }
             }
             //Put the potential callees into three categories (from mostly likely to unlikely):
             //(1) Both host struct type and pointer field ID match;
@@ -715,6 +720,19 @@ namespace DRCHECKER {
                                 dbgs() << "getPossibleMemberFunctions: matched! (field name).\n";
 #endif
                                 match_2 = true;
+                                break;
+                            }
+                        }
+                        //If besides the field name matching, their host struct names are also highly similar, we may treat
+                        //this as the highest type 1 matching.
+                        if (match_2 && dyn_cast<StructType>(curHostTy)->hasName()) {
+                            std::string curTname = dyn_cast<StructType>(curHostTy)->getName().str();
+                            InstructionUtils::trim_num_suffix(&curTname);
+                            if (InstructionUtils::similarStName(curTname,tname)) {
+#ifdef DEBUG_SMART_FUNCTION_PTR_RESOLVE
+                                dbgs() << "getPossibleMemberFunctions: matched! (field name + similar struct name).\n";
+#endif
+                                match_1 = true;
                                 break;
                             }
                         }
