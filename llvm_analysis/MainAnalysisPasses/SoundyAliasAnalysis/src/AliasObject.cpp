@@ -780,14 +780,13 @@ namespace DRCHECKER {
         dbgs() << "AliasObject::createEmbObj(): host type: " << InstructionUtils::getTypeStr(this->targetType) 
         << " | " << fid << " ID: " << (const void*)(this) << "\n";
 #endif
-        if (dyn_cast<SequentialType>(this->targetType)) {
-            //We collapse the array/vector to a single element.
-#ifdef DEBUG_CREATE_EMB_OBJ
-            dbgs() << "AliasObject::createEmbObj(): host is an array/vector, set fid to 0.\n";
-#endif
-            fid = 0;
-        }
         Type *ety = this->getFieldTy(fid);
+        if (!ety || !dyn_cast<CompositeType>(ety)) {
+#ifdef DEBUG_CREATE_EMB_OBJ
+            dbgs() << "AliasObject::createEmbObj(): invalid field type for an embedded object!\n";
+#endif
+            return nullptr;
+        }
         Type *expectedPointeeTy = nullptr;
         if (v && v->getType() && v->getType()->isPointerTy()) {
             expectedPointeeTy = v->getType()->getPointerElementType();
@@ -796,13 +795,11 @@ namespace DRCHECKER {
         dbgs() << "AliasObject::createEmbObj(): ety: " << InstructionUtils::getTypeStr(ety) 
         << " expectedPointeeTy: " << InstructionUtils::getTypeStr(expectedPointeeTy) << "\n";
 #endif
-        if (v) {
-            if (!ety || !InstructionUtils::same_types(ety,expectedPointeeTy)) {
+        if (v && !InstructionUtils::same_types(ety,expectedPointeeTy)) {
 #ifdef DEBUG_CREATE_EMB_OBJ
-                dbgs() << "AliasObject::createEmbObj(): ety and expectedPointeeTy are different...\n";
+            dbgs() << "AliasObject::createEmbObj(): ety and expectedPointeeTy are different...\n";
 #endif
-                return nullptr;
-            }
+            return nullptr;
         }
         if (this->embObjs.find(fid) != this->embObjs.end()) {
             //We have created that embedded object previously.
@@ -867,22 +864,27 @@ namespace DRCHECKER {
                         newObj->setAsTaintSrc(loc,(this->is_taint_src>0));
                     }
                 }
-                //Now propagate non-inherent flags in the host object, no need to 
-                //propagate inherent ones since emb obj is a part of the host. 
-                //NOTE: these propagated TFs may override the previously set-up inherent TFs 
-                //("setAsTaintSrc"), which is just the correct and expected bahavior.
-                std::set<TaintFlag*> tfs;
-                this->getFieldTaintInfo(fid,tfs,loc);
+                //If fid is "-1", we're currently working on an emb object representing a variable field, when later we need
+                //to get its TFs, we will automatically try to get all TFs from all available fields, so no need to propagate
+                //the TFs to it at this point.
+                if (fid >= 0) {
+                    //Now propagate non-inherent flags in the host object, no need to 
+                    //propagate inherent ones since emb obj is a part of the host. 
+                    //NOTE: these propagated TFs may override the previously set-up inherent TFs 
+                    //("setAsTaintSrc"), which is just the correct and expected bahavior.
+                    std::set<TaintFlag*> tfs;
+                    this->getFieldTaintInfo(fid,tfs,loc);
 #ifdef DEBUG_CREATE_EMB_OBJ
-                dbgs() << "AliasObject::createEmbObj(): try to taint the emb obj (all fields), #TaintFlag: " << tfs.size() << "\n";
+                    dbgs() << "AliasObject::createEmbObj(): try to taint the emb obj (all fields), #TaintFlag: " << tfs.size() << "\n";
 #endif
-                for (TaintFlag *tf : tfs) {
-                    //NOTE: we don't need to add current "loc" into the taint trace since this emb obj was tainted as early as the field.
-                    //And no worry that "newObj" will be tainted by an inherent TF not 
-                    //belonging to itself, since we only propagate non-inherent ones here.
-                    if (tf && !tf->is_inherent) {
-                        //NOTE: "is_weak" is inherited.
-                        newObj->taintAllFields(tf);
+                    for (TaintFlag *tf : tfs) {
+                        //NOTE: we don't need to add current "loc" into the taint trace since this emb obj was tainted as early as the field.
+                        //And no worry that "newObj" will be tainted by an inherent TF not 
+                        //belonging to itself, since we only propagate non-inherent ones here.
+                        if (tf && !tf->is_inherent) {
+                            //NOTE: "is_weak" is inherited.
+                            newObj->taintAllFields(tf);
+                        }
                     }
                 }
                 //Record it in the "embObjs".
@@ -1595,7 +1597,8 @@ namespace DRCHECKER {
         for (++i; i < std::min(limit,(int)fd->fid.size()); ++i) {
 #ifdef DEBUG_CREATE_HOST_OBJ_CHAIN
             dbgs() << "createHostObjChain(): current sub obj type: " << InstructionUtils::getTypeStr(pto->targetObject->targetType) << "\n";
-            dbgs() << "createHostObjChain(): Index " << i << ", about to create its host obj: " << InstructionUtils::getTypeStr(fd->host_tys[i]) << " | " << fd->fid[i] << "\n";
+            dbgs() << "createHostObjChain(): Index " << i << ", about to create its host obj: " 
+            << InstructionUtils::getTypeStr(fd->host_tys[i]) << " | " << fd->fid[i] << "\n";
 #endif
             AliasObject *hObj = pto->targetObject->createHostObj(fd->host_tys[i], fd->fid[i], loc);
             if (hObj) {
@@ -1628,43 +1631,52 @@ namespace DRCHECKER {
         }
     }
 
-    bool ObjectPointsTo::inArray(Type *ty) {
+    int ObjectPointsTo::inArray(Type *ty) {
         if (!ty || !this->targetObject) {
-            return false;
+            return 0;
         }
         Type *curHostTy = this->targetObject->targetType;
         if (!curHostTy) {
-            return false;
+            return 0;
         }
         long fid = this->dstfieldId;
-        Type *ety = nullptr;
-        if (dyn_cast<CompositeType>(curHostTy)) {
-            if (fid) {
-                if (InstructionUtils::isIndexValid(curHostTy,fid)) {
-                    ety = dyn_cast<CompositeType>(curHostTy)->getTypeAtIndex((unsigned)fid);
-                    return (InstructionUtils::same_types(ty,ety) && curHostTy->isArrayTy());
-                }else {
-                    return false;
-                }
-            }else {
-                ety = dyn_cast<CompositeType>(curHostTy)->getTypeAtIndex((unsigned)0);
-                if (InstructionUtils::same_types(ty,curHostTy)) {
-                    return (this->targetObject->parent && this->targetObject->parent->targetType 
-                    && this->targetObject->parent->targetType->isArrayTy());
-                }else if (InstructionUtils::same_types(ty,ety)) {
-                    return curHostTy->isArrayTy();
-                }else {
-                    return false;
-                }
-            }
-        }else {
-            if (InstructionUtils::same_types(ty,curHostTy)) {
-                return (fid == 0 && this->targetObject->parent && this->targetObject->parent->targetType 
-                && this->targetObject->parent->targetType->isArrayTy());
-            }else {
-                return false;
+        Type *ety = this->targetObject->getFieldTy(fid);
+        if (!ety) {
+            return 0;
+        }
+        if (dyn_cast<SequentialType>(curHostTy) && InstructionUtils::same_types(ty,ety)) {
+            return 1;
+        }
+        if (fid == 0 && InstructionUtils::same_types(ty,curHostTy) && this->targetObject->parent) {
+            Type *pty = this->targetObject->parent->targetType;
+            if (pty && dyn_cast<SequentialType>(pty)) {
+                return 2;
             }
         }
-        return false;
+        return 0;
+    }
+
+    int ObjectPointsTo::switchArrayElm(Type *ty, long fid) {
+        int r = this->inArray(ty);
+        if (r == 0) {
+            return 0;
+        }
+        if (r == 1) {
+            if (InstructionUtils::isIndexValid(this->targetObject->targetType,fid)) {
+                this->dstfieldId = fid;
+                return r;
+            }
+            return 0;
+        }
+        if (r == 2) {
+            AliasObject *newObj = this->targetObject->parent;
+            if (InstructionUtils::isIndexValid(newObj->targetType,fid)) {
+                //TODO: maybe try to get/create the embedded element.
+                this->targetObject = newObj;
+                this->dstfieldId = fid;
+                return r;
+            }
+        }
+        return 0;
     }
 }

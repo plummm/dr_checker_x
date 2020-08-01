@@ -1380,10 +1380,15 @@ namespace DRCHECKER {
         return nullptr;
     }
 
-    bool InstructionUtils::isIndexValid(Type *ty, unsigned fid) {
+    bool InstructionUtils::isIndexValid(Type *ty, long fid) {
         if (!ty) {
             return false;
         }
+        //A special case: if it's a sequential type, we allow "-1" to represent a variable index. 
+        if (fid == -1 && dyn_cast<SequentialType>(ty)) {
+            return true;
+        }
+        //From now on the negative index is not allowed...
         if (ty->isStructTy()) {
             return (fid >= 0 && fid < ty->getStructNumElements());
         }else if (ty->isArrayTy()) {
@@ -1394,6 +1399,41 @@ namespace DRCHECKER {
         }
         //We have already covered all composite types. 
         return (fid == 0);
+    }
+
+    Type *InstructionUtils::getTypeAtIndex(Type *ty, long fid, int *err) {
+        int r;
+        if (!err) 
+            err = &r;
+        *err = 0;
+        if (!ty) {
+            *err = 1;
+            return nullptr;
+        }
+        Type *ety = ty;
+        if (dyn_cast<CompositeType>(ety)) {
+            //If this object has an opaque type, we cannot get the field type info..
+            if (InstructionUtils::isOpaqueSt(ety)) {
+                *err = 4;
+                return nullptr;
+            }
+            //Allow the variable index for the sequential type.
+            if (fid == -1 && dyn_cast<SequentialType>(ety)) {
+                return dyn_cast<SequentialType>(ety)->getElementType();
+            }
+            //Boundary check
+            if (!InstructionUtils::isIndexValid(ety,fid)) {
+                *err = 2;
+                return nullptr;
+            }
+            //TODO: when fid is 0, we're actually not sure whether it points to the host obj itself, or the field 0 in the obj...
+            ety = dyn_cast<CompositeType>(ety)->getTypeAtIndex(fid);
+        }else if (fid) {
+            //This is not a composite obj, so we don't know the field type at the non-zero fid.
+            *err = 3;
+            return nullptr;
+        }
+        return ety;
     }
 
     //////////////////////////////////////////////////////////////////////////////////////////////////////////

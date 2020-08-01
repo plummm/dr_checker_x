@@ -223,7 +223,9 @@ namespace DRCHECKER {
 
         static bool isTyUsedByFunc(Type *ty, Function *func);
 
-        static bool isIndexValid(Type *ty, unsigned fid);
+        static bool isIndexValid(Type *ty, long fid);
+
+        static Type *getTypeAtIndex(Type *ty, long fid, int *err = nullptr);
 
         //Given a type's type desc vector, locate the first desc node for a specified field "fid",
         //returning the index of this desc node within the vector.

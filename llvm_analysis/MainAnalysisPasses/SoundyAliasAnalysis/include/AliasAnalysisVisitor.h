@@ -123,8 +123,8 @@ namespace DRCHECKER {
          */
         std::set<PointerPointsTo*>* getPointsToObjects(Value *srcPointer);
         bool isPtoDuplicated(const PointerPointsTo *p0, const PointerPointsTo *p1, bool dbg);
-        bool matchPtoTy(Value *srcPointer, PointerPointsTo *pto, Instruction *I = nullptr, bool create_host = true);
-        bool matchPtoTy(Type *srcTy, PointerPointsTo *pto, Instruction *I = nullptr, bool create_host = true);
+        int matchPtoTy(Value *srcPointer, PointerPointsTo *pto, Instruction *I = nullptr, bool create_host = true);
+        int matchPtoTy(Type *srcTy, PointerPointsTo *pto, Instruction *I = nullptr, bool create_host = true);
         /***
          * Update points to information for the provided pointer.
          * @param srcPointer pointer whose points to information need to be updated.
@@ -199,9 +199,6 @@ namespace DRCHECKER {
 
         //hz: A helper method to create and (taint) a new OutsideObject.
         OutsideObject* createOutsideObj(Value *p, Instruction *I, bool taint);
-
-        //hz:
-        void processOneDimensionGEP(Instruction *propInst, GEPOperator *I);
 
         void processMultiDimensionGEP(Instruction *propInst, GEPOperator *I, std::set<PointerPointsTo*> *srcPointsTo);
 

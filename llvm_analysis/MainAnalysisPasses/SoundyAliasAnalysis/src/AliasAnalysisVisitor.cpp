@@ -133,7 +133,8 @@ namespace DRCHECKER {
         AliasObject *o0 = p0->targetObject;
         AliasObject *o1 = p1->targetObject;
         if(dbg){
-            dbgs() << (o0?"t":"f") << (o1?"t":"f") << (o0?(o0->isOutsideObject()?"t":"f"):"n") << (o1?(o1->isOutsideObject()?"t":"f"):"n") << "\n";
+            dbgs() << (o0?"t":"f") << (o1?"t":"f") << (o0?(o0->isOutsideObject()?"t":"f"):"n") 
+            << (o1?(o1->isOutsideObject()?"t":"f"):"n") << "\n";
         }
         if ((!o0) != (!o1)) {
             return false;
@@ -158,7 +159,8 @@ namespace DRCHECKER {
         Value *v0 = o0->getObjectPtr();
         Value *v1 = o1->getObjectPtr();
         if(dbg){
-            dbgs() << "Ptr0: " << InstructionUtils::getValueStr(v0) << " Ptr1: " << InstructionUtils::getValueStr(v1) << " RES: " << (v0==v1?"T":"F") << "\n";
+            dbgs() << "Ptr0: " << InstructionUtils::getValueStr(v0) << " Ptr1: " 
+            << InstructionUtils::getValueStr(v1) << " RES: " << (v0==v1?"T":"F") << "\n";
         }
         return (v0 == v1);
 #else
@@ -169,38 +171,39 @@ namespace DRCHECKER {
     //Basically we try to see whether the pointee object type matches that of srcPointer, if not, we try adjust the PointerPointsTo, e.g.,
     //by walking through the embed/parent hierarchy of the pointee object.
     //"loc" is the instruction site where we need to match the pto.
-    //"create_host" indicates whether to automatically create a host object if that's necessary for a match (i.e. current pto points to a struct that can be embedded in a host object).
+    //"create_host" indicates whether to automatically create a host object if that's necessary for 
+    //a match (i.e. current pto points to a struct that can be embedded in a host object).
     //Return: whether the type is matched in the end.
-    bool AliasAnalysisVisitor::matchPtoTy(Value *srcPointer, PointerPointsTo *pto, Instruction *I, bool create_host) {
+    int AliasAnalysisVisitor::matchPtoTy(Value *srcPointer, PointerPointsTo *pto, Instruction *I, bool create_host) {
         if (!srcPointer || !pto || !pto->targetObject) {
-            return false;
+            return 0;
         }
         Type *srcTy = srcPointer->getType();
         if (!srcTy || !srcTy->isPointerTy()) {
-            return false;
+            return 0;
         }
         srcTy = srcTy->getPointerElementType();
         return this->matchPtoTy(srcTy,pto,I,create_host);
     }
 
     //srcTy is the type we should point to.
-    bool AliasAnalysisVisitor::matchPtoTy(Type *srcTy, PointerPointsTo *pto, Instruction *I, bool create_host) {
+    int AliasAnalysisVisitor::matchPtoTy(Type *srcTy, PointerPointsTo *pto, Instruction *I, bool create_host) {
         if (!pto || !pto->targetObject) {
-            return false;
+            return 0;
         }
         AliasObject *obj = pto->targetObject;
         Type *pTy = obj->targetType;
         if (!srcTy || !pTy) {
-            return false;
+            return 0;
         }
         long dstfieldId = pto->dstfieldId;
         if (InstructionUtils::same_types(obj->getFieldTy(dstfieldId),srcTy)) {
-            //Quick path.
-            return true;
+            //Quick path: field match.
+            return 1;
         }
         if (dstfieldId == 0 && InstructionUtils::same_types(srcTy,pTy)) {
-            //Quick path.
-            return true;
+            //Quick path: direct host match.
+            return 2;
         }
         //DataLayout *dl = this->currState.targetDataLayout;
         //Ok, first let's see whether srcTy can match the type of any embedded fields in the pto.
@@ -217,18 +220,21 @@ namespace DRCHECKER {
                 if (eobj && eobj != obj && InstructionUtils::same_types(eobj->getFieldTy(0),srcTy)) {
                     pto->targetObject = eobj;
                     pto->dstfieldId = 0;
-                    return true;
+                    //Matched: emb obj.
+                    return 3;
                 }
-                //Here, (1) "srcTy" cannot directly match the given field type in "pto", (2) we're sure that it can match one emb obj of the given field,
-                //but the thing is we failed to get/create that specific emb obj at the given field w/ "getNestedObj", though strange, we can do nothing now..
+                //Here, (1) "srcTy" cannot directly match the given field type in "pto", 
+                //(2) we're sure that it can match one emb obj of the given field,
+                //but the thing is we failed to get/create that specific emb obj at the given field w/ "getNestedObj", i
+                //though strange, we can do nothing now..
                 dbgs() << "!!! AliasAnalysisVisitor::matchPtoTy(): Failed to get/create the emb obj that should be there!\n";
-                return false;
+                return 0;
             }
         }
         //Ok, we cannot match the "srcTy" in any layer of embedded objects at the given field, now consider whether
         //we can match any parent object of current "obj".
         if (dstfieldId || !dyn_cast<CompositeType>(srcTy)) {
-            return false;
+            return 0;
         }
         //First, is there existing parent object on record that can match "srcTy"?
         while (obj && obj->parent && obj->parent_field == 0) {
@@ -238,14 +244,16 @@ namespace DRCHECKER {
             if (InstructionUtils::same_types(srcTy,obj->targetType)) {
                 //Got the match!
 #ifdef DEBUG_UPDATE_POINTSTO
-                dbgs() << "AliasAnalysisVisitor::matchPtoTy(): We need to adjust the current pto to an existing parent object to match the srcPointer!\n";
+                dbgs() << "AliasAnalysisVisitor::matchPtoTy(): We need to adjust the current pto to\
+                an existing parent object to match the srcPointer!\n";
 #endif
-                return true;
+                //Matched: host obj.
+                return 4;
             }
         }
         //No matching parent objects on file, now consider whether we can create one, according to the given "srcTy".
         if (!create_host) {
-            return false;
+            return 0;
         }
 #ifdef DEBUG_UPDATE_POINTSTO
         dbgs() << "AliasAnalysisVisitor::matchPtoTy(): try to create a host object to match the srcTy!\n";
@@ -255,12 +263,13 @@ namespace DRCHECKER {
 #ifdef DEBUG_UPDATE_POINTSTO
             dbgs() << "!!! AliasAnalysisVisitor::matchPtoTy(): failed to get the header FieldDesc of srcTy, or the FieldDesc is invalid!\n";
 #endif
-            return false;
+            return 0;
         }
         if (fd->findTy(obj->targetType) >= 0) {
             //Ok, the "srcTy" can be a parent type for the "obj", there are two possibilities now:
             //(1) current obj is composite, then we will treat it as an emb obj and recursively create its host objs.
-            //(2) it's not composite, then we need to first expand (reset) it to the innermost emb obj, whose host objs will then be created recursively. 
+            //(2) it's not composite, then we need to first expand (reset) it to the innermost 
+            //emb obj, whose host objs will then be created recursively. 
 #ifdef DEBUG_UPDATE_POINTSTO
             dbgs() << "AliasAnalysisVisitor::matchPtoTy(): srcTy is a valid host type of current pointee object, creating the host obj...\n";
 #endif
@@ -278,16 +287,18 @@ namespace DRCHECKER {
 #ifdef DEBUG_UPDATE_POINTSTO
                 dbgs() << "AliasAnalysisVisitor::matchPtoTy(): successfully created the required host obj!\n";
 #endif
-                return true;
+                //Matched: host obj.
+                return 4;
             }
-        }else if (obj->targetType && obj->targetType->isIntegerTy(8)) {
+        } else if (obj->targetType && obj->targetType->isIntegerTy(8)) {
             //NOTE: if the current obj is of type "i8", we consider it as a wildcard that can match the heading field of any struct.
             //In this case, we will directly reset current obj to an obj of "srcTy". 
             InstLoc *loc = (I ? new InstLoc(I,this->currFuncCallSites) : nullptr);
             obj->reset(obj->getValue(),srcTy,loc);
-            return true;
+            //Matched: i8 wildcard.
+            return 5;
         }
-        return false;
+        return 0;
     }
 
     void AliasAnalysisVisitor::updatePointsToObjects(Value *p, AliasObject *obj, InstLoc *propInst, long fid, long dfid, bool is_weak) {
@@ -375,6 +386,9 @@ namespace DRCHECKER {
 #ifdef DEBUG_GET_ELEMENT_PTR
         dbgs() << "AliasAnalysisVisitor::makePointsToCopy_emb(): elements in *srcPointsTo: " << srcPointsTo->size() << " \n";
 #endif
+        if (is_var_fid) {
+            fieldId = -1;
+        }
         std::set<PointerPointsTo*>* newPointsToInfo = new std::set<PointerPointsTo*>();
         for (PointerPointsTo *currPointsToObj : *srcPointsTo) {
             AliasObject *hostObj = currPointsToObj->targetObject;
@@ -384,7 +398,8 @@ namespace DRCHECKER {
             long dstField = currPointsToObj->dstfieldId;
             Type *host_type = hostObj->targetType;
 #ifdef DEBUG_GET_ELEMENT_PTR
-            dbgs() << "AliasAnalysisVisitor::makePointsToCopy_emb(): host_type: " << InstructionUtils::getTypeStr(host_type) << " | " << dstField << "\n";
+            dbgs() << "AliasAnalysisVisitor::makePointsToCopy_emb(): host_type: " 
+            << InstructionUtils::getTypeStr(host_type) << " | " << dstField << "\n";
 #endif
             //We must ensure that it points to an embedded composite type in another composite.
             if (!host_type || !dyn_cast<CompositeType>(host_type)) {
@@ -393,7 +408,7 @@ namespace DRCHECKER {
 #endif
                 continue;
             }
-            //Boundary check.
+            //Boundary check for src pto.
             if (!InstructionUtils::isIndexValid(host_type,dstField)) {
 #ifdef DEBUG_GET_ELEMENT_PTR
                 dbgs() << "AliasAnalysisVisitor::makePointsToCopy_emb(): invalid dstField for the host_type!\n";
@@ -401,7 +416,7 @@ namespace DRCHECKER {
                 continue;
             }
             //Get the dst field type (must be composite) in the host obj.
-            Type *ety = dyn_cast<CompositeType>(host_type)->getTypeAtIndex(dstField);
+            Type *ety = InstructionUtils::getTypeAtIndex(host_type,dstField);
 #ifdef DEBUG_GET_ELEMENT_PTR
             dbgs() << "AliasAnalysisVisitor::makePointsToCopy_emb(): ety: " << InstructionUtils::getTypeStr(ety) <<  " | " << fieldId << "\n";
 #endif
@@ -411,17 +426,7 @@ namespace DRCHECKER {
 #endif
                 continue;
             }
-            //Variable index check.
-            if (is_var_fid) {
-                fieldId = 0;
-                if (!dyn_cast<SequentialType>(ety)) {
-#ifdef DEBUG_GET_ELEMENT_PTR
-                    dbgs() << "AliasAnalysisVisitor::makePointsToCopy_emb(): got a variable index but the ety is not sequential!\n";
-#endif
-                    continue;
-                }
-            }
-            //Boundary check.
+            //Boundary check for dst pto.
             if (!InstructionUtils::isIndexValid(ety,fieldId)) {
 #ifdef DEBUG_GET_ELEMENT_PTR
                 dbgs() << "AliasAnalysisVisitor::makePointsToCopy_emb(): boundary check fails for the ety!\n";
@@ -434,7 +439,8 @@ namespace DRCHECKER {
 #endif
             AliasObject *newObj = this->createEmbObj(hostObj,dstField,srcPointer,propInstruction);
             if(newObj){
-                PointerPointsTo *newPointsToObj = new PointerPointsTo(resPointer,0,newObj,fieldId,new InstLoc(propInstruction,this->currFuncCallSites),false);
+                PointerPointsTo *newPointsToObj = new PointerPointsTo(resPointer,0,newObj,fieldId,
+                                                                      new InstLoc(propInstruction,this->currFuncCallSites),false);
                 newPointsToInfo->insert(newPointsToInfo->begin(), newPointsToObj);
             }else{
 #ifdef DEBUG_GET_ELEMENT_PTR
@@ -471,20 +477,21 @@ namespace DRCHECKER {
 
     //NOTE: "is_var_fid" indicates whether the target fieldId is a variable instead of a constant.
     std::set<PointerPointsTo*>* AliasAnalysisVisitor::makePointsToCopy(Instruction *propInstruction, Value *srcPointer,
-            std::set<PointerPointsTo*>* srcPointsTo, long fieldId, bool is_var_fid) {
+            std::set<PointerPointsTo*> *srcPointsTo, long fieldId, bool is_var_fid) {
         /***
          * Makes copy of points to information from srcPointer to propInstruction
          */
-        std::set<PointerPointsTo*>* newPointsToInfo = new std::set<PointerPointsTo*>();
-        // set of all visited objects.
-        // to avoid added duplicate pointsto objects
-        std::set<AliasObject*> visitedObjects;
+        if (!srcPointsTo || srcPointsTo->empty()) {
+            return nullptr;
+        }
+        std::set<PointerPointsTo*> *newPointsToInfo = new std::set<PointerPointsTo*>();
+        // set of all visited objects to avoid added duplicate pointsto objects.
+        std::set<std::pair<long,AliasObject*>> visitedObjects;
 #ifdef DEBUG_GET_ELEMENT_PTR
         dbgs() << "AliasAnalysisVisitor::makePointsToCopy(): #elements in *srcPointsTo: " << srcPointsTo->size() << " \n";
 #endif
-        //"fieldId" will make no sense if "is_var_fid" is set true, we temporarily set "fieldId" to 0 here.
         if (is_var_fid) {
-            fieldId = 0;
+            fieldId = -1;
         }
         //The arg "srcPointer" actually is not related to arg "srcPointsTo", it's indeed "dstPointer" that we need to copy point-to inf for.
         GEPOperator *gep = (srcPointer ? dyn_cast<GEPOperator>(srcPointer) : nullptr);
@@ -492,156 +499,95 @@ namespace DRCHECKER {
         //call this makePointsToCopy().
         Type *basePointerType = (gep ? gep->getPointerOperand()->getType() : nullptr);
         Type *basePointToType = (basePointerType ? basePointerType->getPointerElementType() : nullptr);
+        InstLoc *loc = new InstLoc(propInstruction,this->currFuncCallSites);
         for (PointerPointsTo *currPointsToObj : *srcPointsTo) {
-            //Try to match the pto w/ the GEP base pointer.
+            if (!currPointsToObj || !currPointsToObj->targetObject) {
+                continue;
+            }
             PointerPointsTo *pto = currPointsToObj->makeCopyP();
-            this->matchPtoTy(basePointToType,pto,propInstruction);
-            AliasObject *hostObj = pto->targetObject;
-            // if the target object is not visited, then add into points to info.
-            if(hostObj && visitedObjects.find(hostObj) == visitedObjects.end()) {
-                PointerPointsTo *newPointsToObj = new PointerPointsTo();
-                newPointsToObj->propagatingInst = new InstLoc(propInstruction,this->currFuncCallSites);
-                long host_dstFieldId = pto->dstfieldId;
-                //Get type information about current point-to object.
-                Type *host_type = hostObj->targetType;
-                bool is_emb = false;
-                Type *src_ety = nullptr;
 #ifdef DEBUG_GET_ELEMENT_PTR
-                dbgs() << "AliasAnalysisVisitor::makePointsToCopy(): basePointerType: " << InstructionUtils::getTypeStr(basePointerType) << "\n";
-                dbgs() << "Cur Points-to, host_type: " << InstructionUtils::getTypeStr(host_type) << " | " << host_dstFieldId;
-                dbgs() << " hostObj: " << (const void*)hostObj <<  " target field id: " << fieldId << " is_var_fid: " << is_var_fid << "\n";
+            dbgs() << "AliasAnalysisVisitor::makePointsToCopy(): basePointerType: " << InstructionUtils::getTypeStr(basePointerType)
+            << " cur pto: " << InstructionUtils::getTypeStr(pto->targetObject->targetType) << " | " << pto->dstfieldId
+            << ", obj: " << (const void*)(pto->targetObject) <<  " dst fid: " << fieldId << " is_var_fid: " << is_var_fid << "\n";
 #endif
-                if (!host_type || !InstructionUtils::isIndexValid(host_type,host_dstFieldId)){
-                    //TODO: It's unlikely, but is this skip safe?
+            //Try to match the pto w/ the GEP base pointee type.
+            int r = this->matchPtoTy(basePointToType,pto,propInstruction);
+            AliasObject *hostObj = pto->targetObject;
+            long hostfid = pto->dstfieldId;
+            auto to_check = std::make_pair(hostfid, hostObj);
+            if(std::find(visitedObjects.begin(), visitedObjects.end(), to_check) != visitedObjects.end()) {
+                //Already visited the obj|field.
 #ifdef DEBUG_GET_ELEMENT_PTR
-                    dbgs() << "AliasAnalysisVisitor::makePointsToCopy(): null host type or invalid host_dstFieldId.\n";
+                dbgs() << "AliasAnalysisVisitor::makePointsToCopy(): this pto was processed before.\n";
+#endif
+                continue;
+            }
+            visitedObjects.insert(to_check);
+            //Some common assignments.
+            pto->fieldId = 0;
+            pto->targetPointer = srcPointer;
+            pto->propagatingInst = loc;
+            if (r > 0) {
+                //The pointee can be matched w/ the gep base pointer
+                //First perform a boundary check for the new fieldId.
+                if (!InstructionUtils::isIndexValid(basePointToType,fieldId)) {
+#ifdef DEBUG_GET_ELEMENT_PTR
+                    dbgs() << "AliasAnalysisVisitor::makePointsToCopy(): base pointer matched but new field id is OOB!\n";
 #endif
                     goto fail_next;
                 }
-                if (host_type->isPointerTy()) {
-                    host_type = host_type->getPointerElementType();
+                if (r == 1 || r == 3) {
+                    //Need to get/create the field embed object..
+                    assert(InstructionUtils::same_types(hostObj->getFieldTy(hostfid),basePointToType));
+                    AliasObject *newObj = this->createEmbObj(hostObj,hostfid,gep->getPointerOperand(),propInstruction);
+                    if (newObj) {
+                        pto->targetObject = newObj;
+                        pto->dstfieldId = fieldId;
+                    }else {
+                        //This seems strange...
 #ifdef DEBUG_GET_ELEMENT_PTR
-                    dbgs() << "AliasAnalysisVisitor::makePointsToCopy(): host type to its pointee type: " << InstructionUtils::getTypeStr(host_type) << "\n";
-#endif
-                }
-                //hz: 'dstField' is a complex issue, we first apply original logic to set the default "dstfieldId", then
-                //make some modifications if possible:
-                //(1) if src pointer points to a non-composite type field in the src object, we simply update "dstField" with the arg "fieldId". (the pointee #field should be 0 in this case...)
-                //(2) if the pointee field is of a composite type (e.g. struct or array) in the src object, then the arg "fieldId" indexes into the composite field.
-                //Original logic is too simple and error-prone...
-                //----------ORIGINAL-----------
-                newPointsToObj->fieldId = 0;
-                newPointsToObj->targetObject = hostObj;
-                newPointsToObj->targetPointer = srcPointer;
-                if(fieldId >= 0) {
-                    newPointsToObj->dstfieldId = fieldId;
-                } else {
-                    newPointsToObj->dstfieldId = pto->dstfieldId;
-                    //NOTE: fieldId < 0 means that we simply want to copy the passed-in points-to information as is.
-                    //TODO: is it possible that we have a negative 1st index?
-                    goto update;
-                }
-                //----------ORIGINAL-----------
-                //----------MOD----------
-                //Ok, handle two cases here: (1) target field is a composite type (2) host obj is an array.
-                if (InstructionUtils::same_types(host_type,basePointToType) && host_dstFieldId == 0) {
-                    //The current host object type matches the base pointer, no composite field.
-                    //bound check, if fails we discard this point-to, otherwise do nothing.
-                    if (!InstructionUtils::isIndexValid(host_type,fieldId)) {
-#ifdef DEBUG_GET_ELEMENT_PTR
-                        dbgs() << "AliasAnalysisVisitor::makePointsToCopy(): host obj matches the base pointer, but the fieldId is invalid...\n";
-#endif
-                        goto fail_next;
-                    }
-                    if (is_var_fid && !dyn_cast<SequentialType>(host_type)) {
-#ifdef DEBUG_GET_ELEMENT_PTR
-                        dbgs() << "AliasAnalysisVisitor::makePointsToCopy(): host obj matches the base pointer, but we don't support variable index in the non-sequential host obj.\n";
+                        dbgs() << "!!! AliasAnalysisVisitor::makePointsToCopy(): cannot get or create embedded object: " 
+                        << InstructionUtils::getValueStr(gep) << "\n";
 #endif
                         goto fail_next;
                     }
                 }else {
-                    //Ok, type mismatch, let's see whether the point-to field type in the host obj matches the base pointer.
-                    if (dyn_cast<CompositeType>(host_type)) {
-                        src_ety = dyn_cast<CompositeType>(host_type)->getTypeAtIndex(host_dstFieldId);
-                    }else {
-                        src_ety = host_type;
-                    }
-#ifdef DEBUG_GET_ELEMENT_PTR
-                    dbgs() << "AliasAnalysisVisitor::makePointsToCopy(): src_ety: " << InstructionUtils::getTypeStr(src_ety) << "\n";
-#endif
-                    if (!src_ety || !InstructionUtils::same_types(src_ety,basePointToType)) {
-#ifdef DEBUG_GET_ELEMENT_PTR
-                        dbgs() << "AliasAnalysisVisitor::makePointsToCopy(): src_ety doesn't match the base pointer as well.\n ";
-#endif
-                        //TODO: Discard it or still update?
-                        goto fail_next;
-                    }
-                    if (!InstructionUtils::isIndexValid(src_ety,fieldId)) {
-#ifdef DEBUG_GET_ELEMENT_PTR
-                        dbgs() << "AliasAnalysisVisitor::makePointsToCopy(): we need to index into the embedded field but the fieldId is invalid for it...\n ";
-#endif
-                        goto fail_next;
-                    }
-                    if (is_var_fid && !dyn_cast<SequentialType>(src_ety)) {
-#ifdef DEBUG_GET_ELEMENT_PTR
-                        dbgs() << "AliasAnalysisVisitor::makePointsToCopy(): we need to index into the embedded field but the index is a variable while the src_ety is non-sequential!\n ";
-#endif
-                        goto fail_next;
-                    }
-                    //Great, create a new object for the composite field.
-                    is_emb = true;
-#ifdef DEBUG_GET_ELEMENT_PTR
-                    dbgs() << "AliasAnalysisVisitor::makePointsToCopy(): index into an embedded struct/array in the host object!\n";
-#endif
-                    //Ok, the src points to a struct/array embedded in the host object, we cannot just use
-                    //the arg "fieldId" as "dstfieldId" of the host object because it's an offset into the embedded struct/array.
-                    //We have two candidate methods here:
-                    //(1) Create a separate TargetObject representing this embedded struct, then make the pointer operand in original GEP point to it.
-                    //(2) Directly create an outside object for the resulted pointer of this GEP. (i.e. the parameter "srcPointer")
-                    //Method (1):
-                    AliasObject *newObj = this->createEmbObj(hostObj,host_dstFieldId,gep->getPointerOperand(),propInstruction);
-                    if(newObj){
-                        newPointsToObj->targetObject = newObj;
-                        newPointsToObj->dstfieldId = fieldId;
-                    }else{
-                        //We cannot create the new OutsideObject, it's possibly because the target pointer doesn't point to a struct.
-                        //In this case, rather than using the original wrong logic, we'd better make it point to nothing.
-#ifdef DEBUG_GET_ELEMENT_PTR
-                        errs() << "AliasAnalysisVisitor::makePointsToCopy(): cannot get or create embedded object for: " << InstructionUtils::getValueStr(gep->getPointerOperand()) << "\n";
-#endif
-                        delete newObj;
-                        goto fail_next;
-                    }
+                    //We can directly change the field in this case, since the host object already matches the base pointer now.
+                    assert(InstructionUtils::same_types(hostObj->targetType,basePointToType));
+                    pto->dstfieldId = fieldId;
                 }
-                //----------MOD----------
-update:
-                if (newPointsToObj){
-                    //Insert the points-to info.
+                newPointsToInfo->insert(pto);
+            }else {
+                //Fail to match the base pointer type...
+                //TODO: what should we do? Discard this pto? Try to invoke bit2field()? Keep the pto anyway?
 #ifdef DEBUG_GET_ELEMENT_PTR
-                    dbgs() << "makePointsToCopy: Assign points-to object: ";
-                    if(newPointsToObj->targetObject){
-                        dbgs() << InstructionUtils::getTypeStr(newPointsToObj->targetObject->targetType);
-                    }
-                    dbgs() << " | " << newPointsToObj->dstfieldId << " ID: " << (const void*)(newPointsToObj->targetObject) << "\n";
+                dbgs() << "!!! AliasAnalysisVisitor::makePointsToCopy(): fail to match the base gep pointer!\n";
 #endif
-                    newPointsToInfo->insert(newPointsToInfo->begin(), newPointsToObj);
-                }
-                visitedObjects.insert(visitedObjects.begin(), hostObj);
-                goto next;
+                goto fail_next;
+            }
+            continue;
 fail_next:
-                delete newPointsToObj;
-                visitedObjects.insert(visitedObjects.begin(), hostObj);
-        }//if in visitedObjects
-next:
-        delete pto;
-    }//for
+            delete(pto);
+        }
+        if (newPointsToInfo->empty()) {
+            delete(newPointsToInfo);
+            newPointsToInfo = nullptr;
+        }
 #ifdef DEBUG_GET_ELEMENT_PTR
-    dbgs() << "makePointsToCopy: returned newPointsToInfo size: " << newPointsToInfo->size() << "\n";
+        if (newPointsToInfo) {
+            for (PointerPointsTo *p : *newPointsToInfo) {
+                dbgs() << "AliasAnalysisVisitor::makePointsToCopy(): ++ ret pto: " 
+                << InstructionUtils::getTypeStr(p->targetObject->targetType) << " | " << p->dstfieldId
+                << ", obj: " << (const void*)(p->targetObject) << "\n";
+            }
+            dbgs() << "AliasAnalysisVisitor::makePointsToCopy(): #ret: " << newPointsToInfo->size() << "\n";
+        }
 #endif
-    return newPointsToInfo;
-}
+        return newPointsToInfo;
+    }
 
-std::set<PointerPointsTo*>* AliasAnalysisVisitor::mergePointsTo(std::set<Value*> &valuesToMerge, Instruction *targetInstruction, Value *targetPtr) {
+std::set<PointerPointsTo*>* AliasAnalysisVisitor::mergePointsTo(std::set<Value*> &valuesToMerge, 
+                                                                Instruction *targetInstruction, Value *targetPtr) {
     /***
      * Merge pointsToInformation of all the objects pointed by pointers in
      * valuesToMerge
@@ -671,7 +617,8 @@ std::set<PointerPointsTo*>* AliasAnalysisVisitor::mergePointsTo(std::set<Value*>
     if (targetObjects.size() > 0) {
         std::set<PointerPointsTo*>* toRetPointsTo = new std::set<PointerPointsTo*>();
         for(auto currItem: targetObjects) {
-            PointerPointsTo* currPointsToObj = new PointerPointsTo(targetPtr ? targetPtr : targetInstruction, 0, currItem.second, currItem.first, new InstLoc(targetInstruction,this->currFuncCallSites), false);
+            PointerPointsTo* currPointsToObj = new PointerPointsTo(targetPtr ? targetPtr : targetInstruction, 0, 
+                                              currItem.second, currItem.first, new InstLoc(targetInstruction,this->currFuncCallSites), false);
             toRetPointsTo->insert(toRetPointsTo->begin(), currPointsToObj);
         }
         return toRetPointsTo;
@@ -785,13 +732,15 @@ void AliasAnalysisVisitor::visitCastInst(CastInst &I) {
             newPointsToObj->targetPointer = &I;
             Type *currTgtObjType = newPointsToObj->targetObject->targetType;
 #ifdef DEBUG_CAST_INSTR
-            dbgs() << "AliasAnalysisVisitor::visitCastInst(): current target object: " << InstructionUtils::getTypeStr(currTgtObjType) << " | " << currPointsToObj->dstfieldId << "\n";
+            dbgs() << "AliasAnalysisVisitor::visitCastInst(): current target object: " 
+            << InstructionUtils::getTypeStr(currTgtObjType) << " | " << currPointsToObj->dstfieldId << "\n";
 #endif
             if (dstPointeeTy) {
                 this->matchPtoTy(dstPointeeTy,newPointsToObj,&I);
             }else {
 #ifdef DEBUG_CAST_INSTR
-                dbgs() << "AliasAnalysisVisitor::visitCastInst(): the cast destination is not a pointer, simply propagate the point-to record from src to dst...\n";
+                dbgs() << "AliasAnalysisVisitor::visitCastInst(): the cast destination is not a pointer\
+                , simply propagate the point-to record from src to dst...\n";
 #endif
             }
             newPointsToInfo->insert(newPointsToObj);
@@ -934,7 +883,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
 #endif
         //Null pointer or we have processed it before.
         if(!gep || hasPointsToObjects(gep)){
-        return gep;
+            return gep;
         }
         if(gep->getNumOperands() <= 0 || !gep->getPointerOperand()){
             //What happens...
@@ -965,7 +914,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
          *  this is where accessing structure fields happen.
          */
 #ifdef TIMING
-         auto t0 = InstructionUtils::getCurTime();
+        auto t0 = InstructionUtils::getCurTime();
 #endif
 #ifdef DEBUG_GET_ELEMENT_PTR
         dbgs() << "AliasAnalysisVisitor::visitGetElementPtrInst(): " << InstructionUtils::getValueStr(&I) << "\n";
@@ -1143,8 +1092,8 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
             //The logic here is that if the base pointer is of an integer pointer type, that means it will possibly do some pointer
             //arithmetics w/ a variable offset, in which case we don't know anything about the result pointee, so we just return nullptr.
             //If it's not an integer pointer, then possibly it's a struct pointer and the first variable index intends to retrieve a
-            //struct element from an array, so we just return the original point-to (i.e. collapse the whole array to one element).
-            if (basePointeeTy && dyn_cast<IntegerType>(basePointeeTy)) {
+            //struct element from an array, so we just return the original pointee (i.e. collapse the whole array to one element).
+            if (basePointeeTy && InstructionUtils::isPrimitiveTy(basePointeeTy)) {
                 return nullptr;
             }else {
                 return srcPointsTo;
@@ -1152,16 +1101,19 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
         }
         long index = CI->getSExtValue();
 #ifdef DEBUG_GET_ELEMENT_PTR
-        dbgs() << "AliasAnalysisVisitor::processGEPFirstDimension():: basePointeeTy: " << InstructionUtils::getTypeStr(basePointeeTy) << " 0st index: " << index << "\n";
+        dbgs() << "AliasAnalysisVisitor::processGEPFirstDimension():: basePointeeTy: " 
+        << InstructionUtils::getTypeStr(basePointeeTy) << " 0st index: " << index << "\n";
 #endif
         std::set<PointerPointsTo*> *resPointsTo = new std::set<PointerPointsTo*>();
         DataLayout *dl = this->currState.targetDataLayout;
         if (basePointeeTy && dl && index) {
             bool is_primitive = InstructionUtils::isPrimitiveTy(basePointeeTy);
-            //NOTE: we use alloc size here since 1st GEP index is intended to index an array of the basePointeeTy (i.e. the basePointeeTy will be stored consecutively so we need its alloc size).
+            //NOTE: we use alloc size here since 1st GEP index is intended to index an array 
+            //of the basePointeeTy (i.e. the basePointeeTy will be stored consecutively so we need its alloc size).
             unsigned width = dl->getTypeAllocSizeInBits(basePointeeTy);
 #ifdef DEBUG_GET_ELEMENT_PTR
-            dbgs() << "AliasAnalysisVisitor::processGEPFirstDimension(): basePointeeTy size: " << width << ", is_primitive: " << is_primitive << "\n";
+            dbgs() << "AliasAnalysisVisitor::processGEPFirstDimension(): basePointeeTy size: " 
+            << width << ", is_primitive: " << is_primitive << "\n";
 #endif
             for (PointerPointsTo *currPto : *srcPointsTo) {
                 if (!currPto || !currPto->targetObject) {
@@ -1173,26 +1125,32 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
                 }
                 //The "newPto" will be the point-to record after we process the 1st dimension.
                 //By default it will the same as the original point-to.
-                PointerPointsTo *newPto = new PointerPointsTo(I, 0, currPto->targetObject, currPto->dstfieldId, new InstLoc(propInst,this->currFuncCallSites), false);
+                PointerPointsTo *newPto = new PointerPointsTo(I, 0, currPto->targetObject, currPto->dstfieldId, 
+                                                              new InstLoc(propInst,this->currFuncCallSites), false);
                 //Type match in the object parent/embed hierarchy.
                 bool ty_match = matchPtoTy(basePointeeTy,newPto,propInst);
                 if (newPto->inArray(basePointeeTy)) {
-                    //We will not invoke bit2Field() to do the pointer arithmetic in one situation: host object is an array of the basePointeeTy (i.e. we are array-insensitive).
+                    //We will not invoke bit2Field() to do the pointer arithmetic in one 
+                    //situation: host object is an array of the basePointeeTy (i.e. we are array-insensitive).
 #ifdef DEBUG_GET_ELEMENT_PTR
                     dbgs() << "AliasAnalysisVisitor::processGEPFirstDimension(): ignore the 1st index since we're in an array.\n";
 #endif
                     resPointsTo->insert(newPto);
                 } else {
                     if (!is_primitive) {
-                        //The 1st index is not for an array, instead it's for pointer arithmetic, this usually only happens when the GEP base pointee is primitive (e.g. i8)
-                        //in which case the GEP has just one index, but now we have a non-primitive base pointer for pointer arithmetic (and the GEP can have multiple indices)...
-                        //What we do here is we convert this GEP to a one-index GEP w/ primitive base pointee, by calculating the overall bit offset of this multi-index GEP. 
+                        //The 1st index is not for an array, instead it's for pointer arithmetic, 
+                        //this usually only happens when the GEP base pointee is primitive (e.g. i8)
+                        //in which case the GEP has just one index, but now we have a non-primitive 
+                        //base pointer for pointer arithmetic (and the GEP can have multiple indices)...
+                        //What we do here is we convert this GEP to a one-index GEP w/ primitive base 
+                        //pointee, by calculating the overall bit offset of this multi-index GEP. 
                         int rc;
                         index = InstructionUtils::calcGEPTotalOffsetInBits(I,dl,&rc);
                         if (rc) {
                             //This means we fail to calculate the total offset of current GEP... No way to handle it then.
 #ifdef DEBUG_GET_ELEMENT_PTR
-                            dbgs() << "AliasAnalysisVisitor::processGEPFirstDimension(): fail to get the total offset of current non-primitive GEP to handle the non-zero 1st index...\n";
+                            dbgs() << "AliasAnalysisVisitor::processGEPFirstDimension(): fail to get the\
+                            total offset of current non-primitive GEP to handle the non-zero 1st index...\n";
 #endif
                             continue;
                         }
@@ -1200,7 +1158,8 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
                         dbgs() << "AliasAnalysisVisitor::processGEPFirstDimension(): calculated offset sum in bits: " << index << "\n";
 #endif
                         width = 1; //bit unit.
-                        //Tell the visitGEP() that it doesn't need to process the remainig indices (if any) since we have converted this GEP to single-index for this pto.
+                        //Tell the visitGEP() that it doesn't need to process the remainig indices 
+                        //(if any) since we have converted this GEP to single-index for this pto.
                         newPto->flag = 1;
                     }
 #ifdef DEBUG_GET_ELEMENT_PTR
@@ -1222,8 +1181,10 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
         return resPointsTo;
     }
 
-    //Starting from "dstfieldId" in the target object (struct) as specified in "pto", if we step bitWidth*index bits, which field will we point to then?
-    //The passed-in "pto" will be updated to point to the resulted object and field. (e.g. we may end up reaching a field in an embed obj in the host obj).
+    //Starting from "dstfieldId" in the target object (struct) as specified in "pto", 
+    //if we step bitWidth*index bits, which field will we point to then?
+    //The passed-in "pto" will be updated to point to the resulted object and field. 
+    //(e.g. we may end up reaching a field in an embed obj in the host obj).
     //NOTE: we assume the "pto" has been verified to be a struct pointer.
     int AliasAnalysisVisitor::bit2Field(Instruction *propInst, GEPOperator *I, PointerPointsTo *pto, unsigned bitWidth, long index) {
         if (index == 0) {
@@ -1383,78 +1344,12 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
         if (r > limit) {
             //There must be something wrong in the createEmbObjChain()...
 #ifdef DEBUG_GET_ELEMENT_PTR
-            dbgs() << "!!! AliasAnalysisVisitor::bit2Field(): something wrong w/ the createEmbObjChain(), point-to result will be unreliable, discard..\n";
+            dbgs() << "!!! AliasAnalysisVisitor::bit2Field(): something wrong w/ the createEmbObjChain()\
+            , point-to result will be unreliable, discard..\n";
 #endif
             return -1;
         }
         return 0;
-    }
-
-    //NOTE: this function wraps the logic of the original Dr.Checker to process GEP w/ only one index/dimension.
-    void AliasAnalysisVisitor::processOneDimensionGEP(Instruction *propInst, GEPOperator *I) {
-        if (!I) {
-            return;
-        }
-        if (I->getNumOperands() > 2) {
-            return;
-        }
-        for(int i=0;i<I->getNumOperands();i++) {
-            if(dyn_cast<Constant>(I->getOperand(i))) {
-                continue;
-            }
-            Value *srcPointer = I->getOperand(i);
-
-#ifdef DEBUG_GET_ELEMENT_PTR
-            dbgs() << "GEP instruction for array, operand: " << i << " srcPointer: " << InstructionUtils::getValueStr(srcPointer) << "\n";
-#endif
-
-            // OK, we are not indexing a struct. This means, we are indexing an array
-            //ConstantInt *CI = dyn_cast<ConstantInt>(I.getOperand(1));
-            // OK, we are trying to access an array, first number should be constant, actually it should be zero
-
-            // are we incrementing pointer? if yes, then index 1 may not be constant.
-            /*if (I.getNumOperands() > 2) {
-              assert(CI != nullptr);
-              }*/
-            //dbgs() << "CURRINST:" << I << "\n";
-            //for (int i = 0; i < I.getNumOperands(); i++) {
-            //dbgs() << "Oper:" << *(I.getOperand(i)) << "\n";
-            //}
-
-            // we could have array operand as first operand, rather than pointer operand.
-            // array operand could be at end
-            if (!hasPointsToObjects(srcPointer)) {
-                // check if this is the array operand.
-                // srcPointer = I->getOperand(1);
-                if (!hasPointsToObjects(srcPointer)) {
-                    srcPointer = srcPointer->stripPointerCasts();
-                }
-            }
-            //Ignore the index.
-#ifdef CREATE_DUMMY_OBJ_IF_NULL
-            //hz: try to create dummy objects if there is no point-to information about the pointer variable,
-            //since it can be an outside global variable. (e.g. platform_device).
-            if(!hasPointsToObjects(srcPointer)) {
-                this->createOutsideObj(srcPointer,propInst,true);
-            }
-#endif
-            if (hasPointsToObjects(srcPointer)) {
-                std::set<PointerPointsTo *> *srcPointsTo = getPointsToObjects(srcPointer);
-                std::set<PointerPointsTo *> *newPointsToInfo = makePointsToCopy(propInst, I, srcPointsTo, -1);
-                if(newPointsToInfo && !newPointsToInfo->empty()){
-                    this->updatePointsToObjects(I, newPointsToInfo);
-                }
-                break;
-            } else {
-                // we are trying to dereference an array
-                // however the src pointer does not point to any object.
-                // How sad??
-#ifdef DEBUG_GET_ELEMENT_PTR
-                errs() << "Array pointer does not point to any object: " << InstructionUtils::getValueStr(srcPointer) << " Ignoring.\n";
-#endif
-                //assert(false);
-            }
-        }
     }
 
     void AliasAnalysisVisitor::visitLoadInst(LoadInst &I) {
@@ -1478,7 +1373,8 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
             if(!hasPointsToObjects(srcPointer)) {
                 srcPointer = srcPointer->stripPointerCasts();
 #ifdef DEBUG_LOAD_INSTR
-                errs() << "AliasAnalysisVisitor::visitLoadInst(): No point-to info, after stripping the pointer casts -0, srcPointer: " << InstructionUtils::getValueStr(srcPointer) << "\n";
+                errs() << "AliasAnalysisVisitor::visitLoadInst(): No point-to info, after stripping the pointer casts -0, srcPointer: " 
+                << InstructionUtils::getValueStr(srcPointer) << "\n";
 #endif
             }
         }
@@ -1487,7 +1383,8 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
         if(!hasPointsToObjects(srcPointer)) {
             srcPointer = srcPointer->stripPointerCasts();
 #ifdef DEBUG_LOAD_INSTR
-            errs() << "AliasAnalysisVisitor::visitLoadInst(): No point-to info, after stripping the pointer casts -1, srcPointer: " << InstructionUtils::getValueStr(srcPointer) << "\n";
+            errs() << "AliasAnalysisVisitor::visitLoadInst(): No point-to info, after stripping the pointer casts -1, srcPointer: " 
+            << InstructionUtils::getValueStr(srcPointer) << "\n";
 #endif
         }
 

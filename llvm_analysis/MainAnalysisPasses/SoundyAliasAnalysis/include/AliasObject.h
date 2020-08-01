@@ -134,7 +134,10 @@ namespace DRCHECKER {
 
         void print(llvm::raw_ostream& OS);
 
-        bool inArray(Type *ety);
+        int inArray(Type *ety);
+
+        //If current pto points to an array element, this can change the pto to another desired element in the same array.
+        int switchArrayElm(Type *ty, long fid);
     };
 
 
@@ -422,34 +425,7 @@ namespace DRCHECKER {
 
         //Get the type of a specific field in this object.
         Type *getFieldTy(long fid, int *err = nullptr) {
-            int r;
-            if (!err) 
-                err = &r;
-            *err = 0;
-            if (!this->targetType) {
-                *err = 1;
-                return nullptr;
-            }
-            Type *ety = this->targetType;
-            if (dyn_cast<CompositeType>(this->targetType)) {
-                //If this object has an opaque type, we cannot get the field type info..
-                if (InstructionUtils::isOpaqueSt(this->targetType)) {
-                    *err = 4;
-                    return nullptr;
-                }
-                //Boundary check
-                if (!InstructionUtils::isIndexValid(this->targetType,fid)) {
-                    *err = 2;
-                    return nullptr;
-                }
-                //TODO: when fid is 0, we're actually not sure whether it points to the host obj itself, or the field 0 in the obj...
-                ety = dyn_cast<CompositeType>(this->targetType)->getTypeAtIndex(fid);
-            }else if (fid) {
-                //This is not a composite obj, so we don't know the field type at the non-zero fid.
-                *err = 3;
-                return nullptr;
-            }
-            return ety;
+            return InstructionUtils::getTypeAtIndex(this->targetType,fid,err);
         }
 
         //Sometimes the field itself can be another embedded struct, this function intends to return all types at a specific field.
