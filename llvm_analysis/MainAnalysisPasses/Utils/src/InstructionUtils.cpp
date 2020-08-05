@@ -835,21 +835,12 @@ namespace DRCHECKER {
         int i = 1;
         while (++i < gep->getNumOperands() && curTy) {
             ConstantInt *CI = dyn_cast<ConstantInt>(gep->getOperand(i));
-            long fid = 0;
-            if (!CI) {
-                //If the index is a variable, we assume that current host type must be sequential, so that
-                //we can continue w/ its element type, otherwise we don't know what's the next type...
-                if (!dyn_cast<SequentialType>(curTy)) {
-                    break;
-                }
-            }else {
-                fid = CI->getZExtValue();
-            }
+            long fid = (CI ? CI->getZExtValue() : -1);
             res.ty = curTy;
             res.fid = fid;
             if (dyn_cast<CompositeType>(curTy) && InstructionUtils::isIndexValid(curTy,fid)) {
                 //Get the subsequent field type.
-                curTy = dyn_cast<CompositeType>(curTy)->getTypeAtIndex((unsigned)fid);
+                curTy = InstructionUtils::getTypeAtIndex(curTy,fid);
             } else {
                 break;
             }
@@ -1252,7 +1243,8 @@ namespace DRCHECKER {
         for (int i = 0; i < tydesc->size(); ++i) {
             FieldDesc *fd = (*tydesc)[i];
             if (fd) {
-                //There may exist some embedded composite typed fields in the host obj, but the "fid" here refers only to the index within the outmost host obj.
+                //There may exist some embedded composite typed fields in the host obj, 
+                //but the "fid" here refers only to the index within the outmost host obj.
                 unsigned curid = fd->fid[fd->fid.size()-1];
                 if (curid == fid) {
                     return i;
@@ -1631,7 +1623,7 @@ namespace DRCHECKER {
         if (ty) {
             return (ty->isVoidTy() || (bit > 0 ? ty->isIntegerTy(bit) : ty->isIntegerTy()));
         }
-        return true;
+        return false;
     }
 
     bool InstructionUtils::isNullCompTy(Type *ty) {

@@ -60,11 +60,13 @@ namespace DRCHECKER {
         InstLoc *propagatingInst;
         //Whether this pto record is a weak update (e.g. the original dst pointer points to multiple locations in multiple objects,
         //so we are not sure whether this pto will be for sure updated for a certain object field at the 'propagatingInst').
-        //NOTE that this concept is only useful when updating the object fieldPointsTo (i.e. for address-taken llvm objects), while for top-level variables (e.g. %x),
+        //NOTE that this concept is only useful when updating the object fieldPointsTo 
+        //(i.e. for address-taken llvm objects), while for top-level variables (e.g. %x),
         //when we update its pto record we always know which top-level variable is to be updated (i.e. always a strong update).
         bool is_weak = false;
         //For customized usage.
-        //E.g. when processing GEP, sometimes we may convert all indices into a single offset and skip "processGEPMultiDimension", use this flag to indicate this.
+        //E.g. when processing GEP, sometimes we may convert all indices into a single offset and 
+        //skip "processGEPMultiDimension", use this flag to indicate this.
         int flag = 0;
         //indicates whether this pto record is currently active (e.g. may be invalidated by another strong post-dom pto update.).
         bool is_active = true;
@@ -127,7 +129,7 @@ namespace DRCHECKER {
             os << "Field :" << fieldId << " points to " << dstfieldId <<" of the object, with ID:" << obj.targetObject;
             return os;
         }*/
-        friend llvm::raw_ostream& operator<<(llvm::raw_ostream& os, const ObjectPointsTo& obj) {
+        friend llvm::raw_ostream& operator<< (llvm::raw_ostream& os, const ObjectPointsTo& obj) {
             os << "Field :" << obj.fieldId << " points to " << obj.dstfieldId <<" of the object, with ID:" << obj.targetObject;
             return os;
         }
@@ -497,6 +499,14 @@ namespace DRCHECKER {
             }
         }
 
+        //Just return null if there is no embedded object at the specified field.
+        AliasObject *getEmbObj(long fieldId) {
+            if (this->embObjs.find(fieldId) != this->embObjs.end()) {
+                return this->embObjs[fieldId];
+            }
+            return nullptr;
+        }
+
         //Set the "dstObject" as embedded in field "fieldId".
         bool setEmbObj(long fieldId, AliasObject *dstObject, bool check_ty = false) {
             if (!dstObject) {
@@ -600,7 +610,7 @@ namespace DRCHECKER {
             if (!inst || !targetFunctionType || !host_ty || !dyn_cast<CompositeType>(host_ty)) {
                 return false;
             }
-            if (field < 0 || !InstructionUtils::isIndexValid(host_ty,(unsigned)field)) {
+            if (!InstructionUtils::isIndexValid(host_ty,field)) {
                 return false;
             }
 #ifdef DEBUG_SMART_FUNCTION_PTR_RESOLVE
@@ -656,7 +666,7 @@ namespace DRCHECKER {
                 bool match_1 = false, match_2 = false;
                 for (auto& x : *res) {
                     CompositeType *curHostTy = x.first;
-                    if (!curHostTy) {
+                    if (!curHostTy || x.second.empty()) {
                         continue;
                     }
 #ifdef DEBUG_SMART_FUNCTION_PTR_RESOLVE
@@ -667,25 +677,14 @@ namespace DRCHECKER {
                     dbgs() << "\n";
 #endif
                     if (InstructionUtils::same_types(curHostTy, host_ty)) {
-                        if (dyn_cast<StructType>(host_ty)) {
-                            //field-sensitive for the struct.
-                            if (x.second.find(field) != x.second.end()) {
+                        if (field == -1 || x.second.find(field) != x.second.end() ||
+                            x.second.find(-1) != x.second.end()) 
+                        {
 #ifdef DEBUG_SMART_FUNCTION_PTR_RESOLVE
-                                dbgs() << "getPossibleMemberFunctions: matched! (struct | field).\n";
-#endif
-                                match_1 = true;
-                                break;
-                            }
-                        }else if (dyn_cast<SequentialType>(host_ty)) {
-                            //Since we now collapse an array to one element, we need to return func pointers for all fields..
-#ifdef DEBUG_SMART_FUNCTION_PTR_RESOLVE
-                            dbgs() << "getPossibleMemberFunctions: matched! (sequential).\n";
+                            dbgs() << "getPossibleMemberFunctions: matched! (host | field).\n";
 #endif
                             match_1 = true;
                             break;
-                        }else {
-                            //Impossible.
-                            assert("Unrecognized CompositeType" && false);
                         }
                     }
                     if (dyn_cast<StructType>(curHostTy) && fname != "" && !match_2) {
@@ -783,7 +782,8 @@ namespace DRCHECKER {
             FieldTaint *targetFieldTaint = this->getFieldTaint(srcfieldId);
             if (!targetTaintFlag->is_tainted && (!targetFieldTaint || targetFieldTaint->empty())) {
 #ifdef DEBUG_UPDATE_FIELD_TAINT
-                dbgs() << "AliasObject::addFieldTaintFlag(): try to add a taint kill flag, but the target field hasn't been tainted yet, so no action...\n";
+                dbgs() << "AliasObject::addFieldTaintFlag(): try to add a taint kill flag, but the target\
+                field hasn't been tainted yet, so no action...\n";
 #endif
                 return false;
             }
@@ -829,9 +829,13 @@ namespace DRCHECKER {
 
         virtual void taintPointeeObj(AliasObject *newObj, long srcfieldId, InstLoc *targetInstr);
 
-        virtual void fetchPointsToObjects(long srcfieldId, std::set<std::pair<long, AliasObject*>> &dstObjects, InstLoc *currInst = nullptr);
+        virtual void fetchPointsToObjects(long srcfieldId, std::set<std::pair<long, AliasObject*>> &dstObjects, InstLoc *currInst = nullptr,
+                                          bool get_eqv = true, bool create_obj = true);
 
-        virtual void createFieldPointee(long fid, std::set<std::pair<long, AliasObject*>> &dstObjects, InstLoc *currInst = nullptr, InstLoc *siteInst = nullptr);
+        virtual void getEqvArrayElm(long fid, std::set<TypeField*> &res);
+
+        virtual void createFieldPointee(long fid, std::set<std::pair<long, AliasObject*>> &dstObjects, 
+                                        InstLoc *currInst = nullptr, InstLoc *siteInst = nullptr);
 
         virtual void logFieldAccess(long srcfieldId, Instruction *targetInstr = nullptr, const std::string &msg = "");
 
@@ -905,10 +909,14 @@ namespace DRCHECKER {
             return false;
         }
 
-        //In some situations we need to reset this AliasObject, e.g. the obj is originally allocated by kmalloc() w/ a type i8*, and then converted to a composite type.
+        //In some situations we need to reset this AliasObject, e.g. the obj is originally 
+        //allocated by kmalloc() w/ a type i8, and then converted to a composite type.
+        //NOTE that this is usually for the conversion from non-composite obj to the composite one,
+        //if current obj is already composite, we can create the host obj instead.
         void reset(Value *v, Type *ty, InstLoc *loc = nullptr) {
 #ifdef DEBUG_OBJ_RESET
-            dbgs() << "AliasObject::reset(): reset obj " << (const void*)this << " to type: " << InstructionUtils::getTypeStr(ty) << ", v: " << InstructionUtils::getValueStr(v) << "\n";
+            dbgs() << "AliasObject::reset(): reset obj " << (const void*)this << " to type: " 
+            << InstructionUtils::getTypeStr(ty) << ", v: " << InstructionUtils::getValueStr(v) << "\n";
 #endif
             std::set<long> oldFields = this->getAllAvailableFields();
             this->setValue(v);
@@ -1023,7 +1031,8 @@ namespace DRCHECKER {
             if (ty_name.find("struct.list_head") == 0 && fid >= 0 && fid <= 1) {
 #ifdef DEBUG_SPECIAL_FIELD_POINTTO
                 dbgs() << "AliasObject::handleSpecialFieldPointTo(): Handle the list_head case: set the prev and next properly..\n";
-                dbgs() << "AliasObject::handleSpecialFieldPointTo(): hobj: " << (const void*)this << " pobj: " << (const void*)pobj << " fid: " << fid << "\n";
+                dbgs() << "AliasObject::handleSpecialFieldPointTo(): hobj: " << (const void*)this 
+                << " pobj: " << (const void*)pobj << " fid: " << fid << "\n";
 #endif
                 pobj->addObjectToFieldPointsTo(1-fid,this,targetInstr,false);
                 return 1;

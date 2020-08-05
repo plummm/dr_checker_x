@@ -92,6 +92,15 @@ namespace DRCHECKER {
             this->priv = priv;
             this->tf = tf;
         }
+        
+        TypeField(TypeField *other) {
+            if (other) {
+                this->ty = other->ty;
+                this->fid = other->fid;
+                this->priv = other->priv;
+                this->tf = other->tf;
+            }
+        }
 
         bool is_same_ty(TypeField *tf);
 

@@ -47,13 +47,16 @@ namespace DRCHECKER {
             return;
         }
         /*
-        //TODO: we need to re-consider whether to propagate the host field TF (inherent or not or both?) to the new dummy pointee obj, consider the
-        //case where a "store" assigns the address of a real obj to the host field - in that situation we actually wouldn't propagate the host field TFs.
-        //If we disable the propagation, will we miss any potential bugs (e.g. to modify the host field is to select the pointee, indirectly controlling 
-        //the pointee obj content)? But on the other hand, we can still match this dummy obj w/ other potential real objs that can be selected by changing
+        //TODO: we need to re-consider whether to propagate the host field TF (inherent or not or both?) 
+        //to the new dummy pointee obj, consider the case where a "store" assigns the address of a real 
+        //obj to the host field - in that situation we actually wouldn't propagate the host field TFs.
+        //If we disable the propagation, will we miss any potential bugs (e.g. to modify the host field 
+        //is to select the pointee, indirectly controlling the pointee obj content)? But on the other hand, 
+        //we can still match this dummy obj w/ other potential real objs that can be selected by changing
         //the host field..
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-        dbgs() << "AliasObject::taintPointeeObj(): " << (const void*)this << " | " << srcfieldId << " (src) --> " << (const void*)newObj << " (sink)\n";
+        dbgs() << "AliasObject::taintPointeeObj(): " << (const void*)this << " | " << srcfieldId << " (src) --> " 
+        << (const void*)newObj << " (sink)\n";
 #endif
         std::set<TaintFlag*> tfs;
         this->getFieldTaintInfo(srcfieldId,tfs,targetInstr);
@@ -80,7 +83,8 @@ namespace DRCHECKER {
             if (ptrTy->isPointerTy()) {
                 Type *ty = ptrTy->getPointerElementType();
                 if (InstructionUtils::isPrimitiveTy(ty) || !dyn_cast<CompositeType>(ty)) {
-                    //If the pointee type is primitive (e.g. i8*) or not composite, we may be able to infer the real pointee struct type from the context.
+                    //If the pointee type is primitive (e.g. i8*) or not composite, we may be able to 
+                    //infer the real pointee struct type from the context.
                     Type *ity = InstructionUtils::inferPointeeTy(targetInstr);
                     if (ity) {
                         return ity;
@@ -226,7 +230,8 @@ namespace DRCHECKER {
                 if (loc->chainable(0,&blocklist,true)) {
                     //Ok, need to create the "default" dummy obj at the entry...
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-                    dbgs() << "AliasObject::getLivePtos(): The current live ptos cannot cover every path to the current use site, needs to create dummy pto at the entry...\n";
+                    dbgs() << "AliasObject::getLivePtos(): The current live ptos cannot cover every path\
+                    to the current use site, needs to create dummy pto at the entry...\n";
 #endif
                     if (loc->hasCtx() && (*loc->ctx)[0]) {
                         std::vector<Instruction*> *newCtx = new std::vector<Instruction*>(loc->ctx->begin(),loc->ctx->begin()+1);
@@ -267,8 +272,82 @@ namespace DRCHECKER {
         return;
     }
 
+    //If we are accessing a variable element (index: -1) of an array, that equals to access every normal element;
+    //If we are accessing a normal element, then we also need to consider the pto/TF in the variable element.
+    void AliasObject::getEqvArrayElm(long fid, std::set<TypeField*> &res) {
+        //First go to the top-level container.
+        std::vector<long> path;
+        AliasObject *obj = this;
+        bool has_seq = false;
+        while (obj->parent) {
+            path.push_back(obj->parent_field);
+            obj = obj->parent;
+            if (dyn_cast<SequentialType>(obj->targetType)) {
+                has_seq = true;
+            }
+        }
+        if (!dyn_cast<SequentialType>(this->targetType) && !has_seq) {
+            //No array at any layer, so impossible to have eqv elements.
+            return;
+        }
+        //Go down the hill and identify all equivalent array elements, if any.
+        std::set<AliasObject*> eqs;
+        eqs.insert(obj);
+        while (!path.empty()) {
+            long f = path.back();
+            path.pop_back();
+            std::set<AliasObject*> to_add;
+            if (dyn_cast<SequentialType>(obj->targetType)) {
+                for (AliasObject *e : eqs) {
+                    std::set<long> eqfs;
+                    if (f == -1) {
+                        eqfs = e->getAllAvailableFields();
+                    }else {
+                        eqfs.insert(f);
+                    }
+                    eqfs.insert(-1);
+                    for (long t : eqfs) {
+                        if (e->getEmbObj(t)) {
+                            to_add.insert(e->getEmbObj(t));
+                        }
+                    }
+                }
+            }else {
+                for (AliasObject *e : eqs) {
+                    if (e->getEmbObj(f)) {
+                        to_add.insert(e->getEmbObj(f));
+                    }
+                }
+            }
+            eqs.clear();
+            eqs.insert(to_add.begin(),to_add.end());
+            obj = obj->getEmbObj(f);
+        }
+        //Construct the final obj|field combinations.
+        for (AliasObject *e : eqs) {
+            if (dyn_cast<SequentialType>(e->targetType)) {
+                std::set<long> eqfs;
+                if (fid == -1) {
+                    eqfs = e->getAllAvailableFields();
+                }else {
+                    eqfs.insert(fid);
+                }
+                eqfs.insert(-1);
+                for (long t : eqfs) {
+                    TypeField *tf = new TypeField(e->targetType,t,e);
+                    res.insert(tf);
+                }
+            }else {
+                TypeField *tf = new TypeField(e->targetType,fid,e);
+                res.insert(tf);
+            }
+        }
+        return;
+    }
+
     //An improved version of "fetchPointsToObjects", we need to consider the type of each field.
-    void AliasObject::fetchPointsToObjects(long srcfieldId, std::set<std::pair<long, AliasObject*>> &dstObjects, InstLoc *currInst) {
+    void AliasObject::fetchPointsToObjects(long srcfieldId, std::set<std::pair<long, AliasObject*>> &dstObjects, InstLoc *currInst,
+                                           bool get_eqv, bool create_obj) {
         /***
          * Get all objects pointed by field identified by srcfieldID
          *
@@ -282,14 +361,6 @@ namespace DRCHECKER {
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
         logFieldAccess(srcfieldId, targetInstr, "FETCH");
 #endif
-        //Collapse the array/vector into a single element.
-        //TODO: index-sensitive array access.
-        if (this->targetType && dyn_cast<SequentialType>(this->targetType)) {
-#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-            dbgs() << "AliasObject::fetchPointsToObjects: the host is an array/vector, now set srcfieldId to 0.\n";
-#endif
-            srcfieldId = 0;
-        }
         AliasObject *host = this->getNestedObj(srcfieldId,nullptr,currInst);
         if (!host) {
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
@@ -306,6 +377,29 @@ namespace DRCHECKER {
         //ioctl_1) since last update to the field pto set, we then need a reset.
         if (currInst && currInst->hasCtx() && (*currInst->ctx)[0]) {
             host->resetPtos(srcfieldId,(*currInst->ctx)[0]);
+        }
+        //Handle the variable index here (i.e. srcfieldId == -1, or current pointee is an variable element in an array).
+        if (get_eqv) {
+            std::set<TypeField*> eqs;
+            host->getEqvArrayElm(srcfieldId,eqs);
+            if (eqs.size() > 1) {
+#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
+                dbgs() << "AliasObject::fetchPointsToObjects: equivalent obj|field identified!!\n";
+#endif
+                for (TypeField *e : eqs) {
+                    if (e->fid != srcfieldId && e->priv != host) {
+                        //This is an equivelant (but not identical) obj|field combo to the current pointee,
+                        //we simply retrieve their pointee (but not create dummy pointee) and we will not
+                        //recursively invoke "getEqvArrayElm" when doing so (which will trap into an
+                        //infinite loop).
+#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
+                        dbgs() << "AliasObject::fetchPointsToObjects: ~~>[EQV OBJ] " << (const void*)(e->priv) << "|" << e->fid << "\n";
+#endif
+                        ((AliasObject*)e->priv)->fetchPointsToObjects(e->fid,dstObjects,currInst,false,false);
+                    }
+                    delete(e);
+                }
+            }
         }
         //Fetch the pto from the specified field...
         bool hasObjects = false;
@@ -359,7 +453,7 @@ namespace DRCHECKER {
         }
         //If this is a const object, then no new field pto records are possible besides those set up at
         //the definition site, so just leave it as is.
-        if (hasObjects || this->is_const || InstructionUtils::isAsanInst(targetInstr)) {
+        if (hasObjects || this->is_const || InstructionUtils::isAsanInst(targetInstr) || !create_obj) {
             return;
         }
         //Try to create a dummy object.
@@ -531,13 +625,6 @@ namespace DRCHECKER {
         }
         AliasObject *host = this;
         if (host->targetType) {
-            //Array collapse
-            if (dyn_cast<SequentialType>(host->targetType)) {
-#ifdef DEBUG_UPDATE_FIELD_POINT
-                dbgs() << "updateFieldPointsTo(): sequential host, set srcfieldId to 0.\n";
-#endif
-                srcfieldId = 0;
-            }
             //If the "srcfieldId" is an embedded struct/array, we need to recursively update 
             //the fieldPointsTo in the embedded object instead of current host object.
             host = host->getNestedObj(srcfieldId,nullptr,propagatingInstr);
@@ -909,9 +996,6 @@ namespace DRCHECKER {
         dbgs() << "AliasObject::createHostObj(): curr emb ty: " << InstructionUtils::getTypeStr(this->targetType) << "\n";
         dbgs() << "AliasObject::createHostObj(): hostObj ty: " << InstructionUtils::getTypeStr(hostTy) << " | " << field << "\n";
 #endif
-        if (dyn_cast<SequentialType>(hostTy)) {
-            field = 0;
-        }
         //Have we already created this parent object?
         if (this->parent) {
             if (InstructionUtils::same_types(this->parent->targetType,hostTy) && this->parent_field == field) {
@@ -946,7 +1030,7 @@ namespace DRCHECKER {
 #endif
             return nullptr;
         }
-        if (!InstructionUtils::same_types(dyn_cast<CompositeType>(hostTy)->getTypeAtIndex(field),this->targetType)) {
+        if (!InstructionUtils::same_types(InstructionUtils::getTypeAtIndex(hostTy,field),this->targetType)) {
 #ifdef DEBUG_CREATE_HOST_OBJ
             dbgs() << "AliasObject::createHostObj(): field type doesn't match the host!\n";
 #endif
@@ -954,16 +1038,19 @@ namespace DRCHECKER {
         }
         AliasObject *hobj = DRCHECKER::createOutsideObj(hostTy);
         if (hobj) {
-            //The taint logic here is: if the emb object has inherent taint flags, then it's likely that its host object should also be treated as
+            //The taint logic here is: if the emb object has inherent taint flags, 
+            //then it's likely that its host object should also be treated as
             //a taint source, otherwise we just keep the newly available fields in the host untainted.
             //NOTE: the logic here is similar to that in "createEmbObject". 
             InstLoc *eloc = nullptr;
             if (this->is_taint_src) {
 #ifdef DEBUG_CREATE_HOST_OBJ
-                dbgs() << "AliasObject::createHostObj(): set the host obj as a taint source since its one emb is, is_taint_src: " << this->is_taint_src << "\n"; 
+                dbgs() << "AliasObject::createHostObj(): set the host obj as a taint source since its one emb is, is_taint_src: " 
+                << this->is_taint_src << "\n"; 
 #endif
                 TaintFlag *itf = this->all_contents_taint_flags.getInherentTf();
                 if (itf && itf->targetInstr) {
+                    //TODO: whether to avoid setting the inherent TF again for "this"...
                     hobj->setAsTaintSrc(itf->targetInstr,(this->is_taint_src>0));
                 }else {
 #ifdef DEBUG_CREATE_HOST_OBJ
@@ -1329,7 +1416,8 @@ namespace DRCHECKER {
                 }
             }
             delete c;
-            //We're sure that there must be a correct container type existing in the module, so as long as we have the only available candidate, we should stop and just use it.
+            //We're sure that there must be a correct container type existing in the module, 
+            //so as long as we have the only available candidate, we should stop and just use it.
             if (cands.size() <= 1) {
                 break;
             }
@@ -1357,7 +1445,8 @@ namespace DRCHECKER {
         */
         for (int i = 0; i < cands.size(); ++i) {
             Type *t = (*cands[i]->fds)[0]->getOutermostTy();
-            dbgs() << "inferContainerTy(): ==============CAND " << i << " SCORE " << cands[i]->score << " : " << InstructionUtils::getTypeStr(t) << "\n"; 
+            dbgs() << "inferContainerTy(): ==============CAND " << i << " SCORE " << cands[i]->score 
+            << " : " << InstructionUtils::getTypeStr(t) << "\n"; 
             dbgs() << "Ty0: ";
             (*cands[i]->fds)[cands[i]->ind[0]]->print_path(dbgs());
         }
@@ -1380,7 +1469,8 @@ namespace DRCHECKER {
 
     int addToSharedObjCache(OutsideObject *obj) {
 #ifdef DEBUG_SHARED_OBJ_CACHE
-        dbgs() << "addToSharedObjCache(): for the obj: " << (const void*)obj << " currEntryFunc: " << DRCHECKER::currEntryFunc->getName().str() << "\n";
+        dbgs() << "addToSharedObjCache(): for the obj: " << (const void*)obj << " currEntryFunc: " 
+        << DRCHECKER::currEntryFunc->getName().str() << "\n";
 #endif
         if (!obj || !DRCHECKER::currEntryFunc ||!obj->targetType) {
 #ifdef DEBUG_SHARED_OBJ_CACHE
@@ -1550,7 +1640,8 @@ namespace DRCHECKER {
         for (i = fd->fid.size() - 1; i > std::max(0,limit); --i) {
 #ifdef DEBUG_CREATE_EMB_OBJ_CHAIN
             dbgs() << "createEmbObjChain(): current host obj type: " << InstructionUtils::getTypeStr(currHostObj->targetType) << "\n";
-            dbgs() << "createEmbObjChain(): Index " << i << ", about to create an embedded obj for: " << InstructionUtils::getTypeStr(fd->host_tys[i]) << " | " << fd->fid[i] << "\n";
+            dbgs() << "createEmbObjChain(): Index " << i << ", about to create an embedded obj for: " 
+            << InstructionUtils::getTypeStr(fd->host_tys[i]) << " | " << fd->fid[i] << "\n";
 #endif
             if (!InstructionUtils::same_types(fd->host_tys[i],currHostObj->targetType)) {
 #ifdef DEBUG_CREATE_EMB_OBJ_CHAIN
