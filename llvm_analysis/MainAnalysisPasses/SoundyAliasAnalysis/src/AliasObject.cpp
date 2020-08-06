@@ -198,7 +198,8 @@ namespace DRCHECKER {
         //If not we need to create dummy objs for the uncovered paths.
         //If no live ptos then the caller will create dummy obj itself, no need for us. 
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-        dbgs() << "AliasObject::getLivePtos(): There are currently " << retPto->size() << " live ptos in the return set, before path coverage test.\n";
+        dbgs() << "AliasObject::getLivePtos(): There are currently " << retPto->size() 
+        << " live ptos in the return set, before path coverage test.\n";
 #endif
         if (retPto->size() > 0) {
             bool has_global_pto= false;
@@ -218,7 +219,8 @@ namespace DRCHECKER {
                     break;
                 }
             }
-            //Already have global pto (can follow any path) -> It's either activated now, or deactivated because it's completely blocked -> no need to test the path coverage any more.
+            //Already have global pto (can follow any path) -> It's either activated now, 
+            //or deactivated because it's completely blocked -> no need to test the path coverage any more.
             if (!has_global_pto) {
                 //Test whether current active ptos can cover all paths from entry to "loc".
                 blocklist.clear();
@@ -1102,7 +1104,8 @@ namespace DRCHECKER {
         dbgs() << "matchFieldName(): fd->findHostTy(ty): " << i << " #host_tys: " << fd->host_tys.size() << "\n";
 #endif
         if (i < ((int)fd->host_tys.size()) - 1) {
-            //NOTE that this can also handle the case wherer "i = -1", which means "ty" is the innermost field and its direct host object is host_tys[0].
+            //NOTE that this can also handle the case wherer "i = -1", which means 
+            //"ty" is the innermost field and its direct host object is host_tys[0].
             std::string fn = InstructionUtils::getStFieldName(mod,dyn_cast<StructType>(fd->host_tys[i+1]),fd->fid[i+1]);
 #ifdef DEBUG_CREATE_HOST_OBJ
             dbgs() << "matchFieldName(): got the field name: " << fn << "\n";
@@ -1115,7 +1118,8 @@ namespace DRCHECKER {
         return false;
     }
 
-    int matchFieldsInDesc(Module *mod, Type *ty0, std::string& n0, Type *ty1, std::string& n1, int bitoff, std::vector<FieldDesc*> *fds, std::vector<unsigned> *res) {
+    int matchFieldsInDesc(Module *mod, Type *ty0, std::string& n0, Type *ty1, std::string& n1, 
+                          int bitoff, std::vector<FieldDesc*> *fds, std::vector<unsigned> *res) {
         if (!ty0 || !ty1 || !fds || !res) {
             return 0;
         }
@@ -1129,7 +1133,8 @@ namespace DRCHECKER {
             int step = (bitoff > 0 ? 1 : -1);
             for (int j = i; j >= 0 && j < fds->size(); j+=step) {
                 if ((*fds)[j]->bitoff == dstoff && (*fds)[j]->findTy(ty1) >= 0) {
-                    //Ok, now we're sure that we get a type match for the two fields in the struct, we'll see whether the field names are also matched.
+                    //Ok, now we're sure that we get a type match for the two fields in the struct, 
+                    //we'll see whether the field names are also matched.
                     //If so, put the matching field id in a special priority queue.
 #ifdef DEBUG_CREATE_HOST_OBJ
                     /*
@@ -1226,7 +1231,8 @@ namespace DRCHECKER {
         return;
     }
 
-    std::vector<CandStructInf*> *getStructFrom2Fields(DataLayout *dl, Type *ty0, std::string& n0, Type *ty1, std::string& n1, long bitoff, Module *mod) {
+    std::vector<CandStructInf*> *getStructFrom2Fields(DataLayout *dl, Type *ty0, std::string& n0, 
+                                                      Type *ty1, std::string& n1, long bitoff, Module *mod) {
         if (!dl || !mod || !ty0 || !ty1) {
             return nullptr;
         }
@@ -1287,7 +1293,8 @@ namespace DRCHECKER {
     //NOTE: this function is time-consuming!
     CandStructInf *inferContainerTy(Module *m, Value *v, Type *ty, long bitoff) {
 #ifdef DEBUG_INFER_CONTAINER
-        dbgs() << "inferContainerTy(): v: " << InstructionUtils::getValueStr(v) << " ty: " << InstructionUtils::getTypeStr(ty) << " bitoff: " << bitoff << "\n";
+        dbgs() << "inferContainerTy(): v: " << InstructionUtils::getValueStr(v) << " ty: " 
+        << InstructionUtils::getTypeStr(ty) << " bitoff: " << bitoff << "\n";
 #endif
         //We record all failure cases (i.e. cannot find any container objects) in this cache to accelerate future processing,
         //note that we don't set up a 'success' cache because as soon as we find a container, the parent object will be created, thus later
@@ -1512,7 +1519,8 @@ namespace DRCHECKER {
                     continue;
                 }
                 Type *t = cinst->getDestTy();
-                //NOTE: the gep itself is a pointer to the file->private, where ->private is also a pointer, so the cast result should be a pointer of a pointer.
+                //NOTE: the gep itself is a pointer to the file->private, where ->private is 
+                //also a pointer, so the cast result should be a pointer of a pointer.
                 if (t && t->isPointerTy()) {
                     t = t->getPointerElementType();
                     if (t->isPointerTy()) {
@@ -1538,7 +1546,8 @@ namespace DRCHECKER {
         if (InstructionUtils::isPrimitiveTy(pointeeTy)) {
             return 0;
         }
-        //TODO: For the composite type in theory we need to inspect its type desc, but for now we assume that "p" can point to any composite type,
+        //TODO: For the composite type in theory we need to inspect its type desc, 
+        //but for now we assume that "p" can point to any composite type,
         //except for some special cases that we will deal with as below.
         //***Special processing for "struct.file" type: match its "->private" pointee object type.
         std::set<Type*> fty0;
@@ -1566,7 +1575,8 @@ namespace DRCHECKER {
 
     OutsideObject *getSharedObjFromCache(Value *v, Type *ty) {
 #ifdef DEBUG_SHARED_OBJ_CACHE
-        dbgs() << "getSharedObjFromCache(): At the entrance. Type: " << InstructionUtils::getTypeStr(ty) << " currEntryFunc: " << DRCHECKER::currEntryFunc->getName().str() << "\n";
+        dbgs() << "getSharedObjFromCache(): At the entrance. Type: " << InstructionUtils::getTypeStr(ty) 
+        << " currEntryFunc: " << DRCHECKER::currEntryFunc->getName().str() << "\n";
 #endif
         if (!ty || !DRCHECKER::currEntryFunc) {
 #ifdef DEBUG_SHARED_OBJ_CACHE

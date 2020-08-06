@@ -743,10 +743,28 @@ namespace DRCHECKER {
         //TaintInfo helpers start
 
         //This is basically a wrapper of "getTf" in FieldTaint..
-        void getFieldTaintInfo(long fid, std::set<TaintFlag*> &r, InstLoc *loc = nullptr) {
-            FieldTaint *targetFieldTaint = this->getFieldTaint(fid);
-            if (targetFieldTaint) {
-                targetFieldTaint->getTf(loc,r);
+        void getFieldTaintInfo(long fid, std::set<TaintFlag*> &r, InstLoc *loc = nullptr, bool get_eqv = true) {
+            if (get_eqv) {
+                std::set<TypeField*> eqs;
+                this->getEqvArrayElm(fid,eqs);
+                if (eqs.size() > 1) {
+#ifdef DEBUG_UPDATE_FIELD_TAINT
+                    //dbgs() << "getFieldTaintInfo(): found eqv obj|fid to current combination, processing...\n";
+#endif
+                    for (TypeField *e : eqs) {
+                        if (e->fid != fid && e->priv != this) {
+#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
+                            //dbgs() << "AliasObject::getFieldTaintInfo(): ~~>[EQV OBJ] " << (const void*)(e->priv) << "|" << e->fid << "\n";
+#endif
+                            ((AliasObject*)e->priv)->getFieldTaintInfo(e->fid,r,loc,false);
+                        }
+                        delete(e);
+                    }
+                }
+            }
+            FieldTaint *ft = this->getFieldTaint(fid);
+            if (ft) {
+                ft->getTf(loc,r);
             }else if (!this->all_contents_taint_flags.empty()) {
                 this->all_contents_taint_flags.getTf(loc,r);
             }
@@ -754,7 +772,25 @@ namespace DRCHECKER {
         }
 
         //Get the winner TFs of a certain field.
-        void getWinnerTfs(long fid, std::set<TaintFlag*> &r) {
+        void getWinnerTfs(long fid, std::set<TaintFlag*> &r, bool get_eqv = true) {
+            if (get_eqv) {
+                std::set<TypeField*> eqs;
+                this->getEqvArrayElm(fid,eqs);
+                if (eqs.size() > 1) {
+#ifdef DEBUG_UPDATE_FIELD_TAINT
+                    //dbgs() << "getWinnerTfs(): found eqv obj|fid to current combination, processing...\n";
+#endif
+                    for (TypeField *e : eqs) {
+                        if (e->fid != fid && e->priv != this) {
+#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
+                            //dbgs() << "AliasObject::getWinnerTfs(): ~~>[EQV OBJ] " << (const void*)(e->priv) << "|" << e->fid << "\n";
+#endif
+                            ((AliasObject*)e->priv)->getWinnerTfs(e->fid,r,false);
+                        }
+                        delete(e);
+                    }
+                }
+            }
             FieldTaint *ft = this->getFieldTaint(fid);
             if (ft) {
                 ft->getWinners(r);
@@ -1133,10 +1169,12 @@ namespace DRCHECKER {
             return -1;
         }
 
-        //NOTE: "is_weak" by default is "-1", this means whether it's a weak update is decided by "is_weak" field of each PointerPointsTo in "dstPointsTo",
-        //in some cases, the arg "is_weak" can be set to 0 (strong update) or 1 (weak update) to override the "is_weak" field in "dstPointsTo".
-        //NOTE: this function will make a copy of "dstPointsTo" and will not do any modifications to "dstPointsTo", the caller is responsible to free
-        //"dstPointsTo" if necessary.
+        //NOTE: "is_weak" by default is "-1", this means whether it's a weak update is 
+        //decided by "is_weak" field of each PointerPointsTo in "dstPointsTo",
+        //in some cases, the arg "is_weak" can be set to 0 (strong update) or 1 (weak update) 
+        //to override the "is_weak" field in "dstPointsTo".
+        //NOTE: this function will make a copy of "dstPointsTo" and will not do any modifications 
+        //to "dstPointsTo", the caller is responsible to free "dstPointsTo" if necessary.
         void updateFieldPointsTo(long srcfieldId, std::set<PointerPointsTo*>* dstPointsTo, InstLoc *propagatingInstr, int is_weak = -1);
 
         FieldTaint* getFieldTaint(long srcfieldId) {

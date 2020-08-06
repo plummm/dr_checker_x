@@ -694,17 +694,6 @@ namespace DRCHECKER {
             //in which the obj|field still bear the effect of that TF...)
             std::set<TaintFlag*> tflgs;
             obj->getWinnerTfs(fid,tflgs);
-            /*
-            FieldTaint* ft = obj->getFieldTaint(fid);
-            if (!ft || !ft->targetTaint.size()) {
-                //No field taint found, any all_content taint flag?
-                if (!obj->all_contents_taint_flags.empty()) {
-                    tflgs.insert(obj->all_contents_taint_flags.targetTaint.begin(),obj->all_contents_taint_flags.targetTaint.end());
-                }
-            }else {
-                tflgs.insert(ft->targetTaint.begin(),ft->targetTaint.end());
-            }
-            */
             for (TaintFlag *flg : tflgs) {
                 if (!flg || !flg->isTainted() || !flg->tag) {
                     continue;

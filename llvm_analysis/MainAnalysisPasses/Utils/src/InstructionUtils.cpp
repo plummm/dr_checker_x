@@ -1116,7 +1116,7 @@ namespace DRCHECKER {
                 //We need to reserve the innermost to outermost host order.
                 fd->host_tys.insert(fd->host_tys.begin(),ety);
                 fd->fid.push_back(0);
-                ety = dyn_cast<CompositeType>(ety)->getTypeAtIndex((unsigned)0);
+                ety = InstructionUtils::getTypeAtIndex(ety,0);
             }else {
                 break;
             }
@@ -1418,7 +1418,6 @@ namespace DRCHECKER {
                 *err = 2;
                 return nullptr;
             }
-            //TODO: when fid is 0, we're actually not sure whether it points to the host obj itself, or the field 0 in the obj...
             ety = dyn_cast<CompositeType>(ety)->getTypeAtIndex(fid);
         }else if (fid) {
             //This is not a composite obj, so we don't know the field type at the non-zero fid.
@@ -1746,6 +1745,8 @@ namespace DRCHECKER {
             bool is_var_fid = false;
             if (!CI) {
                 //TODO: should we directly return here? We cannot get the accurate total offset anyway.
+                dbgs() << "!!! InstructionUtils::calcGEPTotalOffsetInBits(): variable index! gep: "
+                << InstructionUtils::getValueStr(gep) << "\n";
                 is_var_fid = true;
             }else {
                 fid = CI->getZExtValue();
@@ -1769,7 +1770,7 @@ namespace DRCHECKER {
                     }
                     sumoff += (long)((*tyd)[ind]->bitoff);
                     //Get the subsequent field type.
-                    curTy = dyn_cast<CompositeType>(curTy)->getTypeAtIndex((unsigned)fid);
+                    curTy = InstructionUtils::getTypeAtIndex(curTy,fid);
                 } else {
                     break;
                 }

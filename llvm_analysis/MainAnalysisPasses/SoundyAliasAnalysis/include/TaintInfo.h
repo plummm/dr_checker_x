@@ -118,7 +118,7 @@ namespace DRCHECKER {
             }
             /*
             if (dyn_cast<CompositeType>(ty) && InstructionUtils::isIndexValid(ty,fieldId)) {
-                return dyn_cast<CompositeType>(ty)->getTypeAtIndex(fieldId);
+                return InstructionUtils::getTypeAtIndex(ty,fieldId);
             }
             */
             return ty;
@@ -126,10 +126,7 @@ namespace DRCHECKER {
 
         Type *getFieldTy() {
             Type *hostTy = this->getTy();
-            if (!hostTy || !dyn_cast<CompositeType>(hostTy) || !InstructionUtils::isIndexValid(hostTy,this->fieldId)) {
-                return nullptr;
-            }
-            return dyn_cast<CompositeType>(hostTy)->getTypeAtIndex(this->fieldId);
+            return InstructionUtils::getTypeAtIndex(hostTy,this->fieldId);
         }
 
         bool isTagEquals(TaintTag *dstTag) {
@@ -147,7 +144,8 @@ namespace DRCHECKER {
                    this->priv == dstTag->priv;
             /*
             if ( (this->priv == dstTag->priv && this->fieldId == dstTag->fieldId) ||
-                 (dyn_cast<CompositeType>(this->type) && InstructionUtils::same_types(this->type,dstTag->type) && this->fieldId == dstTag->fieldId && this->is_global == dstTag->is_global)
+                 (dyn_cast<CompositeType>(this->type) && InstructionUtils::same_types(this->type,dstTag->type) 
+                  && this->fieldId == dstTag->fieldId && this->is_global == dstTag->is_global)
                ){
                 return true;
             }
@@ -194,7 +192,8 @@ namespace DRCHECKER {
         }
         */
 
-        //NOTE: we now assume a context can only be created once in AnalysisContext and thus the ptr "call_ctx" is different for different contexts.
+        //NOTE: we now assume a context can only be created once in AnalysisContext and 
+        //thus the ptr "call_ctx" is different for different contexts.
         void insertModInst(Instruction *inst, std::vector<Instruction *> *call_ctx) {
             if (!inst || !call_ctx){
 #ifdef DEBUG_INSERT_MOD_INST
@@ -216,7 +215,8 @@ namespace DRCHECKER {
         }
 
         void dumpInfo_light(raw_ostream &OS, bool lbreak = true) {
-            OS << "TAG(" << (const void *)this << "):" << InstructionUtils::getTypeName(this->type) << "|" << this->fieldId << "(OBJ:" << (const void*)this->priv << ",G:" << this->is_global << ")";
+            OS << "TAG(" << (const void *)this << "):" << InstructionUtils::getTypeName(this->type) 
+            << "|" << this->fieldId << "(OBJ:" << (const void*)this->priv << ",G:" << this->is_global << ")";
             if (lbreak) {
                 OS << "\n";
             }
@@ -405,7 +405,8 @@ namespace DRCHECKER {
                 this->targetInstr->print_light(OS,false);
             }
             //Print states.
-            OS << " tan/inh/act/wea: " << (int)this->is_tainted << "/" << (int)this->is_inherent << "/" << (int)this->is_active << "/" << (int)this->is_weak;
+            OS << " tan/inh/act/wea: " << (int)this->is_tainted << "/" << (int)this->is_inherent << "/" 
+            << (int)this->is_active << "/" << (int)this->is_weak;
             if (lbreak) {
                 OS << "\n";
             }
@@ -421,7 +422,8 @@ namespace DRCHECKER {
         //Indicates whether the flag is currently in effect (e.g. it may be overwritten by another taint).
         bool is_active = true;
 
-        //Indicates whether this is a weak taint flag (i.e. it may or may not taint the target value/field since the "may point-to" results yielded by the pointer analysis).
+        //Indicates whether this is a weak taint flag (i.e. it may or may not taint the target 
+        //value/field since the "may point-to" results yielded by the pointer analysis).
         bool is_weak = false;
 
         // flag to indicate the taint flag.
@@ -477,7 +479,8 @@ namespace DRCHECKER {
         //This is very similar to the logic of "updateFieldPointsTo" in the Alias Analysis, we also need to rely on memory SSA.
         bool addTf(TaintFlag *ntf) {
 #ifdef DEBUG_UPDATE_FIELD_TAINT
-            dbgs() << "FieldTaint::addTf(): add TF for field " << this->fieldId << ", FieldTaint: " << (const void*)this << ", Host: " << this->priv << "\n";
+            dbgs() << "FieldTaint::addTf(): add TF for field " << this->fieldId << ", FieldTaint: " 
+            << (const void*)this << ", Host: " << this->priv << "\n";
 #endif
             if (!ntf) {
 #ifdef DEBUG_UPDATE_FIELD_TAINT
@@ -607,7 +610,8 @@ namespace DRCHECKER {
             }
             //Ok, we need to do the reset...
 #ifdef DEBUG_UPDATE_FIELD_TAINT
-            dbgs() << "FieldTaint::resetTfs(): reset field (" << this->fieldId << ", FieldTaint: " << (const void*)this << ", Host: " << this->priv << ") taint since we have switched to a new entry: ";
+            dbgs() << "FieldTaint::resetTfs(): reset field (" << this->fieldId << ", FieldTaint: " 
+            << (const void*)this << ", Host: " << this->priv << ") taint since we have switched to a new entry: ";
             InstructionUtils::printInst(entry,dbgs());
 #endif
             //Before the actual reset, let's first record the winner TFs in the previous entry function.
@@ -712,6 +716,8 @@ namespace DRCHECKER {
                 if (!tf || !tf->is_active) {
                     continue;
                 }
+                //The taint kill TF (i.e. ->is_tainted == false) will not be added to "actTf", but they will be added
+                //to the "blocklist", so that we will only return the normal TFs, or null if all normal TFs are sanitized.
                 if (tf->is_tainted) {
                     actTf.insert(tf);
                 }
