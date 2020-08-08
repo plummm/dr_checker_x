@@ -33,6 +33,7 @@ using json = nlohmann::json;
 #define DEBUG_TAINT_DUMP_PROGRESS
 #define DEBUG_TAINT_SERIALIZE_PROGRESS
 //#define DEBUG_HIERARCHY
+#define DEBUG_CONSTRUCT_TAINT_CHAIN
 
 using namespace llvm;
 
@@ -682,6 +683,10 @@ namespace DRCHECKER {
             }
             AliasObject *obj = (AliasObject*)(tf->priv);
             long fid = tf->fid;
+#ifdef DEBUG_CONSTRUCT_TAINT_CHAIN
+            dbgs() << "getAllUserTaintPaths(): #history " << history.size() << ": Get taint paths for " 
+            << (const void*)obj << "|" << fid << "\n"; 
+#endif
             if (this->in_taint_history(tf,history,true)) {
                 //A taint loop, stop here.
                 return 0;
@@ -694,6 +699,9 @@ namespace DRCHECKER {
             //in which the obj|field still bear the effect of that TF...)
             std::set<TaintFlag*> tflgs;
             obj->getWinnerTfs(fid,tflgs);
+#ifdef DEBUG_CONSTRUCT_TAINT_CHAIN
+            dbgs() << "getAllUserTaintPaths(): #winnerTFs: " << tflgs.size() << "\n";
+#endif
             for (TaintFlag *flg : tflgs) {
                 if (!flg || !flg->isTainted() || !flg->tag) {
                     continue;
@@ -840,6 +848,10 @@ namespace DRCHECKER {
                 return 1;
             }
             TaintTag *tag = tf->tag;
+#ifdef DEBUG_CONSTRUCT_TAINT_CHAIN
+            dbgs() << "getAllUserTaintChains(): enum user taint chains for tag: ";
+            tag->dumpInfo_light(dbgs(),true);
+#endif
             if (tagPathMap.find(tag) == tagPathMap.end()) {
                 //Find all paths from an user input to this tag.
                 tagPathMap[tag].clear();
@@ -848,6 +860,9 @@ namespace DRCHECKER {
                     //First need to get all equivelant objects as that in the tag.
                     std::set<AliasObject*> eqObjs;
                     getAllEquivelantObjs(tag,eqObjs);
+#ifdef DEBUG_CONSTRUCT_TAINT_CHAIN
+                    dbgs() << "getAllUserTaintChains(): Got " << eqObjs.size() << " eqv objs for the tag.\n"; 
+#endif
                     //Get all taint paths for each object.
                     std::vector<TypeField*> history;
                     for (AliasObject *obj : eqObjs) {
