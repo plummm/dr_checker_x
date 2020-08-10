@@ -204,14 +204,11 @@ namespace DRCHECKER {
         if (retPto->size() > 0) {
             bool has_global_pto= false;
             for (ObjectPointsTo *pto : *srcPto) {
-                if (!pto->propagatingInst) {
-                    continue;
-                }
-                InstLoc *pil = pto->propagatingInst;
-                if (!pil->inEntry()) {
+                if (!pto->propagatingInst || !pto->propagatingInst->inEntry()) {
                     has_global_pto = true;
                     break;
                 }
+                InstLoc *pil = pto->propagatingInst;
                 if (pil->ctx->size() == 1 && loc->hasCtx() && 
                     (*loc->ctx)[0] == (*pil->ctx)[0] && pil->inst && pil->inst == (*pil->ctx)[0]) {
                     //Has a pto set up at the level 0 function entry.
@@ -232,8 +229,8 @@ namespace DRCHECKER {
                 if (loc->chainable(0,&blocklist,true)) {
                     //Ok, need to create the "default" dummy obj at the entry...
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-                    dbgs() << "AliasObject::getLivePtos(): The current live ptos cannot cover every path\
-                    to the current use site, needs to create dummy pto at the entry...\n";
+                    dbgs() << "AliasObject::getLivePtos(): The current live ptos cannot cover every path"
+                    << " to the current use site, needs to create dummy pto at the entry...\n";
 #endif
                     if (loc->hasCtx() && (*loc->ctx)[0]) {
                         std::vector<Instruction*> *newCtx = new std::vector<Instruction*>(loc->ctx->begin(),loc->ctx->begin()+1);
@@ -483,6 +480,12 @@ namespace DRCHECKER {
     //that means the pto is absent from the very beginning (e.g. function entry), so we actually need to create the pto in site 0 (i.e. siteInst)
     //so that site 2 later can also use it.
     void AliasObject::createFieldPointee(long fid, std::set<std::pair<long, AliasObject*>> &dstObjects, InstLoc *currInst, InstLoc *siteInst) {
+        if (this->is_const) {
+#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
+            dbgs() << "AliasObject::createFieldPointee(): cannot create the field pointee since this obj is constant!\n";
+#endif
+            return;
+        }
         if (siteInst == nullptr) {
             siteInst = currInst;
         }
@@ -855,9 +858,6 @@ namespace DRCHECKER {
     }
 
     AliasObject *AliasObject::createEmbObj(long fid, Value *v, InstLoc *loc) {
-#ifdef DEBUG_CREATE_EMB_OBJ
-        dbgs() << "Start AliasObject::createEmbObj()\n";
-#endif
         AliasObject *newObj = nullptr;
         if (!this->targetType) {
 #ifdef DEBUG_CREATE_EMB_OBJ

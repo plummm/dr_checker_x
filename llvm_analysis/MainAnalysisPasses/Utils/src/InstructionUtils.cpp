@@ -444,7 +444,11 @@ namespace DRCHECKER {
             if(v){
                 std::string str;
                 llvm::raw_string_ostream ss(str);
-                ss << *v;
+                if (dyn_cast<Function>(v)) {
+                    ss << dyn_cast<Function>(v)->getName().str();
+                }else {
+                    ss << *v;
+                }
                 ValueNameMap[v] = ss.str();
             }else{
                 ValueNameMap[v] = "";

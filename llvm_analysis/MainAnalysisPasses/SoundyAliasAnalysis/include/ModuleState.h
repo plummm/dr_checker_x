@@ -808,7 +808,7 @@ namespace DRCHECKER {
             if (eqcls == nullptr) {
                 //No equivelant class found in the cache, need to do the dirty work now...
                 //By default the obj itself is in its own equivelant class.
-                std::set<AliasObject*> *eqcls = new std::set<AliasObject*>();
+                eqcls = new std::set<AliasObject*>();
                 eqcls->insert(obj);
                 eqObjs.insert(eqcls);
                 //First we need to collect all access paths to current object.

@@ -332,6 +332,20 @@ namespace DRCHECKER {
                     return false;
                 }
                 //Property (4):
+                //NOTE: we will not compare the paths by the exact insts, but by the call chains behind the inst trace.
+                std::vector<std::vector<Instruction*>*> ctx0, ctx1;
+                getCtxOfLocTr(&(this->instructionTrace),ctx0);
+                getCtxOfLocTr(&(dstTaint->instructionTrace),ctx1);
+                if (ctx0.size() != ctx1.size()) {
+                    return false;
+                }
+                for (int i = 0; i < ctx0.size(); ++i) {
+                    if (*(ctx0[i]) != *(ctx1[i])) {
+                        return false;
+                    }
+                }
+                /*
+                //Compare by the exact inst trace.
                 if (this->instructionTrace.size() != dstTaint->instructionTrace.size()) {
                     return false;
                 }
@@ -343,6 +357,7 @@ namespace DRCHECKER {
                         return false;
                     }
                 }
+                */
                 return true;
             }
             return false;

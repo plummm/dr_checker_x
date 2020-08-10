@@ -148,6 +148,8 @@ namespace DRCHECKER {
 
     extern void printInstlocTraceJson(std::vector<InstLoc*> *instTrace, llvm::raw_ostream &O);
 
+    extern void getCtxOfLocTr(const std::vector<InstLoc*> *tr, std::vector<std::vector<Instruction*>*> &res);
+
     class BBTraversalHelper {
     public:
         /***

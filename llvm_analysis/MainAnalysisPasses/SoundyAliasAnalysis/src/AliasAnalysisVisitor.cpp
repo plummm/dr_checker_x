@@ -537,7 +537,11 @@ namespace DRCHECKER {
                 if (r == 1 || r == 3) {
                     //Need to get/create the field embed object..
                     assert(InstructionUtils::same_types(hostObj->getFieldTy(hostfid),basePointToType));
-                    AliasObject *newObj = this->createEmbObj(hostObj,hostfid,gep->getPointerOperand(),propInstruction);
+                    //We will not specify the "v" arg of "createEmbObj", because it will trigger the pto update of "v",
+                    //but "v" actually already has its pto - we just want to adjust the pointee across the nesting layer,
+                    //and the adjusted pto is for the resulting pointer of the GEP, but not for the original base GEP pointer (i.e. "v").
+                    //AliasObject *newObj = this->createEmbObj(hostObj,hostfid,gep->getPointerOperand(),propInstruction);
+                    AliasObject *newObj = this->createEmbObj(hostObj,hostfid,nullptr,propInstruction);
                     if (newObj) {
                         pto->targetObject = newObj;
                         pto->dstfieldId = fieldId;
@@ -648,7 +652,8 @@ std::set<PointerPointsTo*>* AliasAnalysisVisitor::copyPointsToInfo(Instruction *
     if(targetObjects.size() > 0) {
         std::set<PointerPointsTo*>* toRetPointsTo = new std::set<PointerPointsTo*>();
         for(auto currItem: targetObjects) {
-            PointerPointsTo* currPointsToObj = new PointerPointsTo(srcInstruction, 0, currItem.second, currItem.first, new InstLoc(srcInstruction,this->currFuncCallSites), false);
+            PointerPointsTo* currPointsToObj = new PointerPointsTo(srcInstruction, 0, currItem.second, currItem.first, 
+                                                                   new InstLoc(srcInstruction,this->currFuncCallSites), false);
             toRetPointsTo->insert(toRetPointsTo->begin(), currPointsToObj);
         }
         return toRetPointsTo;
@@ -1495,7 +1500,8 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
             // Create new pointsTo set and add all objects of srcPointsTo
             std::set<PointerPointsTo*>* newPointsToInfo = new std::set<PointerPointsTo*>();
             for(auto currPto:finalObjects) {
-                PointerPointsTo *newPointsToObj = new PointerPointsTo(&I, 0, currPto.second, currPto.first, new InstLoc(&I,this->currFuncCallSites), false);
+                PointerPointsTo *newPointsToObj = new PointerPointsTo(&I, 0, currPto.second, currPto.first, 
+                                                                      new InstLoc(&I,this->currFuncCallSites), false);
                 newPointsToInfo->insert(newPointsToInfo->end(), newPointsToObj);
             }
             // Just save the newly created set as points to set for this instruction.
@@ -1567,7 +1573,8 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
         //since it can be an outside global variable. (e.g. platform_device).
         if(!hasPointsToObjects(targetValue)) {
 #ifdef DEBUG_STORE_INSTR
-            dbgs() << "Still no point-to for targetValue, try to create an outside object for: " << InstructionUtils::getValueStr(targetValue_pre_strip) << "\n";
+            dbgs() << "Still no point-to for targetValue, try to create an outside object for: " 
+            << InstructionUtils::getValueStr(targetValue_pre_strip) << "\n";
 #endif
             if(this->createOutsideObj(targetValue_pre_strip,&I,true)){
 #ifdef DEBUG_STORE_INSTR
@@ -1618,7 +1625,8 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
                 dbgs() << "currPointsTo->targetPointer: " << InstructionUtils::getValueStr(currPointsTo->targetPointer) << "\n";
                 dbgs() << "targetPointer: " << InstructionUtils::getValueStr(targetPointer) << "\n";
                 dbgs() << "targetPointer->stripPointerCasts(): " << InstructionUtils::getValueStr(targetPointer->stripPointerCasts()) << "\n";
-                dbgs() << (currPointsTo->targetPointer == targetPointer) << " | " << (currPointsTo->targetPointer == targetPointer->stripPointerCasts()) << "\n";
+                dbgs() << (currPointsTo->targetPointer == targetPointer) << " | " 
+                << (currPointsTo->targetPointer == targetPointer->stripPointerCasts()) << "\n";
                 dbgs() << "currPointsTo->fieldId: " << currPointsTo->fieldId << "\n";
                 assert(false);
             }
@@ -1778,8 +1786,10 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
         //NOTE: count == 1 means that it's the first time we're analyzing current BB, among all call contexts.
         if ( this->currState.numTimeAnalyzed.find(I.getParent()) != this->currState.numTimeAnalyzed.end() &&
              this->currState.numTimeAnalyzed[I.getParent()] > 1 ) {
-            //TODO: "anon_inode_getfd" doesn't return the pointer to the created file struct, so we don't need to update the point-to of this call inst,
-            //but we may have other fd creation functions that needs us to do so. If that's the case, we need to retrieve the previously created obj and update the pointer.
+            //TODO: "anon_inode_getfd" doesn't return the pointer to the created file struct, 
+            //so we don't need to update the point-to of this call inst,
+            //but we may have other fd creation functions that needs us to do so. If that's the case, 
+            //we need to retrieve the previously created obj and update the pointer.
             return;
         }
         //Type based object creation.
@@ -1842,7 +1852,8 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
                 //std::set<PointerPointsTo*>* newPointsToInfo = KernelFunctionHandler::handleKernelFunction(I, currFunc, this->currFuncCallSites);
                 bool is_handled;
                 is_handled = false;
-                std::set<PointerPointsTo *> *newPointsToInfo = (std::set<PointerPointsTo *> *) ((AliasAnalysisVisitor::functionHandler)->handleFunction(
+                std::set<PointerPointsTo *> *newPointsToInfo = (std::set<PointerPointsTo *> *) (
+                            (AliasAnalysisVisitor::functionHandler)->handleFunction(
                             I, currFunc,
                             (void *) (this->currFuncCallSites),
                             AliasAnalysisVisitor::callback,

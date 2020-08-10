@@ -55,7 +55,8 @@ namespace DRCHECKER {
         TaintUtils::updateTaintInfo(this->currState, this->currFuncCallSites, targetVal, targetTaintInfo);
     }
 
-    std::set<TaintFlag*>* TaintAnalysisVisitor::makeTaintInfoCopy(Instruction *targetInstruction, std::set<TaintFlag*> *srcTaintInfo, std::set<TaintFlag*> *dstTaintInfo) {
+    std::set<TaintFlag*>* TaintAnalysisVisitor::makeTaintInfoCopy(Instruction *targetInstruction, std::set<TaintFlag*> *srcTaintInfo, 
+                                                                  std::set<TaintFlag*> *dstTaintInfo) {
         if(srcTaintInfo != nullptr) {
             std::set<TaintFlag*> *newTaintInfo = new std::set<TaintFlag*>();
             InstLoc *loc = this->makeInstLoc(targetInstruction);
@@ -115,7 +116,8 @@ namespace DRCHECKER {
         return nullptr;
     }
 
-    std::set<TaintFlag*>* TaintAnalysisVisitor::makeTaintInfoCopy(Instruction *targetInstruction, TaintFlag *srcTaintFlag, std::set<TaintFlag*> *dstTaintInfo) {
+    std::set<TaintFlag*>* TaintAnalysisVisitor::makeTaintInfoCopy(Instruction *targetInstruction, TaintFlag *srcTaintFlag, 
+                                                                  std::set<TaintFlag*> *dstTaintInfo) {
         if (!srcTaintFlag) {
             return nullptr;
         }
@@ -403,7 +405,8 @@ namespace DRCHECKER {
 
         //There are 2 situations here:
         //1. the src value is tainted, then we need to propagate the taint flags;
-        //2. it's not tainted, then this is actually a taint kill if (1) there is only one target mem location (otherwise this is a weak taint kill that we will not honor to be conservative). 
+        //2. it's not tainted, then this is actually a taint kill if (1) there is only one target 
+        //mem location (otherwise this is a weak taint kill that we will not honor to be conservative). 
         //and (2) the target mem location is tainted now (otherwise no need to kill). If so then we also need to propagate the taint kill flag.
         std::set<TaintFlag*> newTaintInfo;
         if (srcTaintInfo && !srcTaintInfo->empty()) {

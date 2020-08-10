@@ -981,4 +981,22 @@ namespace DRCHECKER {
         O << "]";
         return;
     }
+
+    void getCtxOfLocTr(const std::vector<InstLoc*> *tr, std::vector<std::vector<Instruction*>*> &res) {
+        if (!tr) {
+            return;
+        }
+        std::vector<Instruction*> *last = nullptr;
+        for (InstLoc *il : *tr) {
+            if (!il || !il->ctx) {
+                continue;
+            }
+            if (!last || *last != *(il->ctx)) {
+                res.push_back(il->ctx);
+                last = il->ctx;
+            }
+        }
+        return;
+    }
+
 }
