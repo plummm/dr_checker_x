@@ -808,11 +808,17 @@ namespace DRCHECKER {
             if (eqcls == nullptr) {
                 //No equivelant class found in the cache, need to do the dirty work now...
                 //By default the obj itself is in its own equivelant class.
+#ifdef DEBUG_CONSTRUCT_TAINT_CHAIN
+                dbgs() << "getAllEquivelantObjs(): identify eq objs for: " << (const void*)obj << "\n";
+#endif
                 eqcls = new std::set<AliasObject*>();
                 eqcls->insert(obj);
                 eqObjs.insert(eqcls);
                 //First we need to collect all access paths to current object.
                 std::set<std::vector<TypeField*>*> *hty = getTagHierarchyTy(tag);
+#ifdef DEBUG_CONSTRUCT_TAINT_CHAIN
+                dbgs() << "getAllEquivelantObjs(): #accessPaths: " << (hty ? hty->size() : 0) << "\n";
+#endif
                 //Then based on each access path, we identify all the equivelant objects (i.e. those w/ the same access path).
                 if (hty && hty->size()) {
                     for (std::vector<TypeField*> *ap : *hty) {
@@ -906,9 +912,11 @@ namespace DRCHECKER {
 
         //Visit every object hierarchy chain ending w/ field "fid" of "obj", for each chain, invoke the passed-in callback
         //to enable some user-defined functionalities.
-        static int traverseHierarchy(AliasObject *obj, long field, int layer, std::vector<std::pair<long, AliasObject*>>& history, traverseHierarchyCallback cb = nullptr) {
+        static int traverseHierarchy(AliasObject *obj, long field, int layer, std::vector<std::pair<long, AliasObject*>>& history, 
+                                     traverseHierarchyCallback cb = nullptr) {
 #ifdef DEBUG_HIERARCHY
-            dbgs() << layer << " traverseHierarchy(): " << (obj ? InstructionUtils::getTypeStr(obj->targetType) : "") << " | " << field << " ID: " << (const void*)obj << "\n";
+            dbgs() << layer << " traverseHierarchy(): " << (obj ? InstructionUtils::getTypeStr(obj->targetType) : "") 
+            << " | " << field << " ID: " << (const void*)obj << "\n";
 #endif
             if (!obj) {
 #ifdef DEBUG_HIERARCHY
@@ -938,7 +946,8 @@ namespace DRCHECKER {
                 return 1;
             }
             int r = 0;
-            if (obj->parent && obj->parent->embObjs.find(obj->parent_field) != obj->parent->embObjs.end() && obj->parent->embObjs[obj->parent_field] == obj) {
+            if (obj->parent && obj->parent->embObjs.find(obj->parent_field) != obj->parent->embObjs.end() 
+                && obj->parent->embObjs[obj->parent_field] == obj) {
                 //Current obj is embedded in another obj.
 #ifdef DEBUG_HIERARCHY
                 dbgs() << layer << " traverseHierarchy(): find a host obj that embeds this one..";

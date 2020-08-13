@@ -199,6 +199,10 @@ namespace DRCHECKER {
 
         static Value *stripAllCasts(Value*,bool);
 
+        static Value *stripAllSoleTrans(Value *v);
+
+        static bool isSelfStore(StoreInst *si);
+
         static void stripFuncNameSuffix(std::string *fn);
 
         static std::string getCalleeName(CallInst*,bool);

@@ -306,61 +306,64 @@ namespace DRCHECKER {
 
         //NOTE: we don't consider the "is_weak" and "is_active" properties in the comparison now.
         bool isTaintEquals(const TaintFlag *dstTaint) const {
-            if(dstTaint != nullptr) {
-                //hz: we consider the below three properties:
-                //(1) the targetInst of this taintFlag
-                //(2) whether it's tainted or not
-                //(3) the taint source, which is wrapped in our TaintTag class.
-                //(4) the taint path/trace
-                //These are properties we consider when comparing two taint flags.
-                //Property (1)
-                if (!this->targetInstr != !dstTaint->targetInstr) {
-                    return false;
-                }
-                if (this->targetInstr && !this->targetInstr->same(dstTaint->targetInstr)) {
-                    return false;
-                }
-                //Property (2)
-                if (this->isTainted() != dstTaint->isTainted()) {
-                    return false;
-                }
-                //Property (3):
-                if (!this->tag != !dstTaint->tag) {
-                    return false;
-                }
-                if (this->tag && !this->tag->isTagEquals(dstTaint->tag)) {
-                    return false;
-                }
-                //Property (4):
-                //NOTE: we will not compare the paths by the exact insts, but by the call chains behind the inst trace.
-                std::vector<std::vector<Instruction*>*> ctx0, ctx1;
-                getCtxOfLocTr(&(this->instructionTrace),ctx0);
-                getCtxOfLocTr(&(dstTaint->instructionTrace),ctx1);
-                if (ctx0.size() != ctx1.size()) {
-                    return false;
-                }
-                for (int i = 0; i < ctx0.size(); ++i) {
-                    if (*(ctx0[i]) != *(ctx1[i])) {
-                        return false;
-                    }
-                }
-                /*
-                //Compare by the exact inst trace.
-                if (this->instructionTrace.size() != dstTaint->instructionTrace.size()) {
-                    return false;
-                }
-                for (int i = 0; i < this->instructionTrace.size(); ++i) {
-                    if (!this->instructionTrace[i] != !dstTaint->instructionTrace[i]) {
-                        return false;
-                    }
-                    if (this->instructionTrace[i] && !(this->instructionTrace[i])->same(dstTaint->instructionTrace[i])) {
-                        return false;
-                    }
-                }
-                */
+            if (!dstTaint) {
+                return false;
+            }
+            if (dstTaint == this) {
                 return true;
             }
-            return false;
+            //hz: we consider the below three properties:
+            //(1) the targetInst of this taintFlag
+            //(2) whether it's tainted or not
+            //(3) the taint source, which is wrapped in our TaintTag class.
+            //(4) the taint path/trace
+            //These are properties we consider when comparing two taint flags.
+            //Property (1)
+            if (!this->targetInstr != !dstTaint->targetInstr) {
+                return false;
+            }
+            if (this->targetInstr && !this->targetInstr->same(dstTaint->targetInstr)) {
+                return false;
+            }
+            //Property (2)
+            if (this->isTainted() != dstTaint->isTainted()) {
+                return false;
+            }
+            //Property (3):
+            if (!this->tag != !dstTaint->tag) {
+                return false;
+            }
+            if (this->tag && !this->tag->isTagEquals(dstTaint->tag)) {
+                return false;
+            }
+            //Property (4):
+            //NOTE: we will not compare the paths by the exact insts, but by the call chains behind the inst trace.
+            std::vector<std::vector<Instruction*>*> ctx0, ctx1;
+            getCtxOfLocTr(&(this->instructionTrace),ctx0);
+            getCtxOfLocTr(&(dstTaint->instructionTrace),ctx1);
+            if (ctx0.size() != ctx1.size()) {
+                return false;
+            }
+            for (int i = 0; i < ctx0.size(); ++i) {
+                if (*(ctx0[i]) != *(ctx1[i])) {
+                    return false;
+                }
+            }
+            /*
+            //Compare by the exact inst trace.
+            if (this->instructionTrace.size() != dstTaint->instructionTrace.size()) {
+                return false;
+            }
+            for (int i = 0; i < this->instructionTrace.size(); ++i) {
+                if (!this->instructionTrace[i] != !dstTaint->instructionTrace[i]) {
+                    return false;
+                }
+                if (this->instructionTrace[i] && !(this->instructionTrace[i])->same(dstTaint->instructionTrace[i])) {
+                    return false;
+                }
+            }
+            */
+            return true;
         }
 
         void addInstructionToTrace(InstLoc *toAdd) {

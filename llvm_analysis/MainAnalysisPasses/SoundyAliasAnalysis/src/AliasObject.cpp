@@ -522,12 +522,12 @@ namespace DRCHECKER {
             //we will still use the "currInst", as in this case, the field may point to different things in different code paths...
             siteInst = currInst;
         }
-#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-        dbgs() << "AliasObject::createFieldPointee(): about to create dummy obj of type: " << InstructionUtils::getTypeStr(real_ty) << "\n"; 
-#endif
         if (!real_ty) {
             return;
         }
+#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
+        dbgs() << "AliasObject::createFieldPointee(): about to create dummy obj of type: " << InstructionUtils::getTypeStr(real_ty) << "\n"; 
+#endif
         //Create the dummy obj according to the dst type.
         if (real_ty->isFunctionTy()) {
             //This is a function pointer w/o point-to function, which can cause trobule later in resolving indirect function call.

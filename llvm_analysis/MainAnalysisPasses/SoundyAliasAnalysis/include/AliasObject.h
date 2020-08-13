@@ -815,6 +815,18 @@ namespace DRCHECKER {
             dbgs() << "AliasObject::addFieldTaintFlag(): " << InstructionUtils::getTypeStr(this->targetType) 
             << " | " << srcfieldId << " obj: " << (const void*)this << "\n";
 #endif
+            if (targetTaintFlag->targetInstr && targetTaintFlag->targetInstr->inst && 
+                dyn_cast<StoreInst>(targetTaintFlag->targetInstr->inst) &&
+                InstructionUtils::isSelfStore(dyn_cast<StoreInst>(targetTaintFlag->targetInstr->inst))) 
+            {
+                //This means current TF comes from the same mem location earlier and this is just a store-back,
+                //e.g. x = load %p; x = x + 1; store x, %p;
+                //so no need to add the TF again.
+#ifdef DEBUG_UPDATE_FIELD_TAINT
+                dbgs() << "AliasObject::addFieldTaintFlag(): self-store detected, skip current TF...\n";
+#endif
+                return false;
+            }
             FieldTaint *targetFieldTaint = this->getFieldTaint(srcfieldId);
             if (!targetTaintFlag->is_tainted && (!targetFieldTaint || targetFieldTaint->empty())) {
 #ifdef DEBUG_UPDATE_FIELD_TAINT

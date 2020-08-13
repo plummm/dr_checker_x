@@ -1088,8 +1088,8 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
             basePointeeTy = basePointerTy->getPointerElementType();
         }
 #ifdef DEBUG_GET_ELEMENT_PTR
-        dbgs() << "AliasAnalysisVisitor::processGEPFirstDimension():: basePointeeTy: " 
-        << InstructionUtils::getTypeStr(basePointeeTy) << "\n";
+        dbgs() << "AliasAnalysisVisitor::processGEPFirstDimension():: basePointerTy: " 
+        << InstructionUtils::getTypeStr(basePointerTy) << "\n";
 #endif
         //Get the 1st dimension, note that we can only process the constant dimension.
         ConstantInt *CI = dyn_cast<ConstantInt>(I->getOperand(1));

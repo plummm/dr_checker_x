@@ -549,6 +549,65 @@ namespace DRCHECKER {
         return v;
     }
 
+    //For a value "v", a sole transformation of it only involves "v" itself and (optionally) some constants,
+    //e.g. v+2, v++, cast of "v". This function tries to strip all simple transformations of "v" and get the
+    //very original value.
+    Value *InstructionUtils::stripAllSoleTrans(Value *v) {
+        while (v) {
+            if (!dyn_cast<Instruction>(v) && !dyn_cast<Operator>(v)) {
+                break;
+            }
+            //E.g. in case "v" is a storeInst which doesn't produce anything.
+            if (!v->getType() || v->getType()->isVoidTy()) {
+                break;
+            }
+            //Stop at the memory operations.
+            if (dyn_cast<LoadInst>(v) || dyn_cast<AllocaInst>(v)) {
+                break;
+            }
+            //See whether "v" is a sole transformation now, if so, continue w/ the variable operand.
+            User *u = dyn_cast<User>(v);
+            assert(u);
+            Value *nv = nullptr;
+            for (unsigned i = 0; i < u->getNumOperands(); ++i) {
+                Value *op = u->getOperand(i);
+                if (!op || dyn_cast<Constant>(op)) {
+                    continue;
+                }
+                if (nv && nv != op) {
+                    //More than one value involved, not sole transformation any more.
+                    return v;
+                }
+                nv = op;
+            }
+            if (!nv) {
+                //This means all operands are constant, stop tracing.
+                break;
+            }
+            //Continue tracing w/ the new sole value.
+            v = nv;
+        }
+        return v;
+    }
+
+    //Self-Store: load a value from a mem location, do some sole transformations, and then store back to the same mem location.
+    bool InstructionUtils::isSelfStore(StoreInst *si) {
+        static std::map<StoreInst*,bool> resCache;
+        if (!si) {
+            return false;
+        }
+        if (resCache.find(si) != resCache.end()) {
+            return resCache[si];
+        }
+        bool res = false;
+        Value *v = InstructionUtils::stripAllSoleTrans(si->getValueOperand());
+        if (v && dyn_cast<LoadInst>(v)) {
+            res = (dyn_cast<LoadInst>(v)->getPointerOperand() == si->getPointerOperand());
+        }
+        resCache[si] = res;
+        return res;
+    }
+
     std::string InstructionUtils::getCalleeName(CallInst* I, bool strip) {
         if (!I) {
             return "";

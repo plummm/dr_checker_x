@@ -105,7 +105,14 @@ namespace DRCHECKER {
             // if dstTaintInfo is not null.
             if(dstTaintInfo != nullptr && newTaintInfo != nullptr) {
                 // copy all the taint info into dstTaintInfo.
-                dstTaintInfo->insert(newTaintInfo->begin(), newTaintInfo->end());
+                if (dstTaintInfo->empty()) {
+                    //No need to check for duplication of existing elements in "dstTaintInfo".
+                    dstTaintInfo->insert(newTaintInfo->begin(), newTaintInfo->end());
+                }else {
+                    for (TaintFlag *tf : *newTaintInfo) {
+                        TaintAnalysisVisitor::addNewTaintFlag(dstTaintInfo,tf);
+                    }
+                }
                 // delete new taint info
                 delete(newTaintInfo);
                 // set return value of dstTaintInfo
@@ -276,7 +283,8 @@ namespace DRCHECKER {
                 srcTaintInfo = getTaintInfo(srcPointer);
                 already_stripped = true;
 #ifdef DEBUG_LOAD_INSTR
-                dbgs() << "TaintAnalysisVisitor::visitLoadInst(): Got taint info after stripping: " << InstructionUtils::getValueStr(srcPointer) << "\n";
+                dbgs() << "TaintAnalysisVisitor::visitLoadInst(): Got taint info after stripping: " 
+                << InstructionUtils::getValueStr(srcPointer) << "\n";
 #endif
             }
         }
