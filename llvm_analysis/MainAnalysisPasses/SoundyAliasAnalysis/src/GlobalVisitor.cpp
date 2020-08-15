@@ -359,10 +359,10 @@ out:
     void GlobalVisitor::analyze() {
         // the traversal order should not be null
         assert(this->traversalOrder != nullptr);
-        for(unsigned int i = 0; i < this->traversalOrder->size(); i++){
+        for (unsigned int i = 0; i < this->traversalOrder->size(); i++) {
             // current strongly connected component.
-            std::vector<BasicBlock *> *currSCC = (*(this->traversalOrder))[i];
-            if(currSCC->size() == 1) {
+            std::vector<BasicBlock*> *currSCC = (*(this->traversalOrder))[i];
+            if (currSCC->size() == 1) {
                 this->inside_loop = false;
                 for(VisitorCallback *currCallback:allCallbacks) {
                     currCallback->setLoopIndicator(false);
@@ -385,11 +385,11 @@ out:
 #endif
                 this->inside_loop = true;
 
-                for(VisitorCallback *currCallback:allCallbacks) {
+                for (VisitorCallback *currCallback:allCallbacks) {
                     currCallback->setLoopIndicator(true);
                 }
 
-                for(unsigned int l=0; l < opt_num_to_analyze; l++) {
+                for (unsigned int l=0; l < opt_num_to_analyze; l++) {
                     // ensure that loop has been analyzed minimum number of times.
                     if(l >= (opt_num_to_analyze-1)) {
                         this->inside_loop = false;

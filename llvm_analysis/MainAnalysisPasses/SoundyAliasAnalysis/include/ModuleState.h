@@ -15,6 +15,7 @@
 #include <ctime>
 #include <fstream>
 #include "../../Utils/include/CFGUtils.h"
+#include "../../Utils/include/Constraint.h"
 
 //for cereal serialization
 /*
@@ -108,7 +109,8 @@ namespace DRCHECKER {
         // Map, which contains at each instruction.
         // set of objects to which the pointer points to.
         // Information needed for AliasAnalysis
-        std::map<AnalysisContext*, std::map<Value *, std::set<PointerPointsTo*>*>*> pointToInformation;
+        std::map<AnalysisContext*, std::map<Value*, std::set<PointerPointsTo*>*>*> pointToInformation;
+
         static std::map<Value *, std::set<PointerPointsTo*>*> globalVariables;
 
         static std::map<Function*, std::set<BasicBlock*>*> loopExitBlocks;
@@ -117,7 +119,10 @@ namespace DRCHECKER {
         DataLayout *targetDataLayout;
 
         // Information needed for TaintAnalysis
-        std::map<AnalysisContext*, std::map<Value *, std::set<TaintFlag*>*>*> taintInformation;
+        std::map<AnalysisContext*, std::map<Value*, std::set<TaintFlag*>*>*> taintInformation;
+
+        // Store the value constraints imposed by different paths.
+        std::map<AnalysisContext*, std::map<Value*, Constraint*>> constraintInformation;
 
         //hz: the mapping between BBs in a switch-case structure to the leading switch variable values. 
         std::map<BasicBlock*,std::set<uint64_t>> switchMap;
@@ -623,6 +628,36 @@ namespace DRCHECKER {
                 return pointToInformation[currContext];
             //}
             //return nullptr;
+        }
+
+        Constraint *getConstraints(std::vector<Instruction*> *callSites, Value *v, bool create = true) {
+            if (!callSites || callSites->empty() || !v) {
+                return nullptr;
+            }
+            AnalysisContext* currContext = getContext(callSites);
+            if (!currContext) {
+                return nullptr;
+            }
+            if (this->constraintInformation.find(currContext) != this->constraintInformation.end() &&
+                this->constraintInformation[currContext].find(v) != this->constraintInformation[currContext].end()) {
+                Constraint *r = this->constraintInformation[currContext][v];
+                if (r) {
+                    //Got the existing Constraint.
+                    return r;
+                }
+            }
+            //This means there is no existing constraint, create one if specified.
+            if (create) {
+                Instruction *i = (*callSites)[callSites->size()-1];
+                Function *f = nullptr;
+                if (i && i->getParent()) {
+                    f = i->getParent()->getParent();
+                }
+                Constraint *r = new Constraint(v,f);
+                this->constraintInformation[currContext][v] = r;
+                return r;
+            }
+            return nullptr;
         }
 
         // Taint Handling functions

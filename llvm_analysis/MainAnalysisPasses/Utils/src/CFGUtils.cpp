@@ -7,7 +7,7 @@
 namespace DRCHECKER {
 
     // This code is copied from an online source.
-    std::vector<std::vector<BasicBlock *> *>* BBTraversalHelper::getSCCTraversalOrder(Function &currF) {
+    std::vector<std::vector<BasicBlock*>*> *BBTraversalHelper::getSCCTraversalOrder(Function &currF) {
         std::vector<std::vector<BasicBlock *> *> *bbTraversalList = new std::vector<std::vector<BasicBlock *> *>();
         const Function *F = &currF;
         for (scc_iterator<const Function *> I = scc_begin(F), IE = scc_end(F); I != IE; ++I) {
@@ -139,10 +139,12 @@ namespace DRCHECKER {
         return c;
     }
 
-    // The basic skeleton of the below code is from llvm, but we need to add support for "blocklist" and accurate reachability test instead of "potentially".
+    // The basic skeleton of the below code is from llvm, but we need to add support 
+    //for "blocklist" and accurate reachability test instead of "potentially".
     // "limit": Limit the number of blocks we visit. The goal is to avoid run-away compile times on large CFGs without hampering sensible code.
     // We can set "limit" to 0 to have an accurate reachability test (i.e. exhaust *all* the paths).
-    bool isPotentiallyReachableFromMany(SmallVectorImpl<BasicBlock*> &Worklist, Instruction *Stop, unsigned limit = 32, std::set<Instruction*> *blocklist = nullptr) {
+    bool isPotentiallyReachableFromMany(SmallVectorImpl<BasicBlock*> &Worklist, Instruction *Stop, 
+                                        unsigned limit = 32, std::set<Instruction*> *blocklist = nullptr) {
         bool has_limit = (limit > 0);
         SmallSet<const BasicBlock*, 32> Visited;
         do {
@@ -465,7 +467,8 @@ namespace DRCHECKER {
             }
         }
         //Start to inspect the callsites who can lead to blocking insts to see whether they can be bypassed (i.e. there is one path from 
-        //the callsite to the return w/o triggering the underlying blocking insts), if not, these callsites also need to be regarded as blocking insts.
+        //the callsite to the return w/o triggering the underlying blocking insts), if not, 
+        //these callsites also need to be regarded as blocking insts.
         for (auto &e : callsiteBis) {
             Instruction *cs = e.first;
             std::set<InstLoc*> &bis = e.second;
@@ -544,6 +547,54 @@ namespace DRCHECKER {
         return domMap[pfunc];
     }
 
+    void BBTraversalHelper::getDominators(llvm::BasicBlock *bb, std::set<llvm::BasicBlock*> &res, bool self) {
+        if (!bb || !bb->getParent()) {
+            return;
+        }
+        llvm::DominatorTree *domT = BBTraversalHelper::getDomTree(bb->getParent());
+        if (!domT) {
+            return;
+        }
+        DomTreeNodeBase<BasicBlock> *dtn = domT->getNode(bb);
+        while (dtn->getIDom()) {
+            dtn = dtn->getIDom();
+            res.insert(dtn->getBlock());
+        }
+        if (self) {
+            res.insert(bb);
+        }
+        return;
+    }
+
+    void getAllSuccsInDomTree(DomTreeNodeBase<BasicBlock> *dtn, std::set<llvm::BasicBlock*> &res) {
+        if (!dtn) {
+            return;
+        }
+        for (auto n : *dtn) {
+            if (n) {
+                res.insert(n->getBlock());
+                getAllSuccsInDomTree(n,res);
+            }
+        }
+        return;
+    }
+
+    void BBTraversalHelper::getDominatees(llvm::BasicBlock *bb, std::set<llvm::BasicBlock*> &res, bool self) {
+        if (!bb || !bb->getParent()) {
+            return;
+        }
+        llvm::DominatorTree *domT = BBTraversalHelper::getDomTree(bb->getParent());
+        if (!domT) {
+            return;
+        }
+        DomTreeNodeBase<BasicBlock> *dtn = domT->getNode(bb);
+        getAllSuccsInDomTree(dtn,res);
+        if (self) {
+            res.insert(bb);
+        }
+        return;
+    }
+
     void BBTraversalHelper::getRetBBs(llvm::Function* pfunc, std::set<llvm::BasicBlock*> &r) {
         if (!pfunc) {
             return;
@@ -571,8 +622,7 @@ namespace DRCHECKER {
     }
 
     void BBTraversalHelper::getDomsForRet(llvm::Function* pfunc, std::set<llvm::BasicBlock*> &r) {
-        llvm::DominatorTree *domT = BBTraversalHelper::getDomTree(pfunc);
-        if (!domT) {
+        if (!pfunc) {
             return;
         }
         //Ok, first get all ret nodes (i.e. #succ = 0).
@@ -583,11 +633,7 @@ namespace DRCHECKER {
         std::set<llvm::BasicBlock*> t;
         for (llvm::BasicBlock *bb : rets) {
             t.clear();
-            DomTreeNodeBase<BasicBlock> *dtn = domT->getNode(bb);
-            while (dtn) {
-                t.insert(dtn->getBlock());
-                dtn = dtn->getIDom();
-            }
+            BBTraversalHelper::getDominators(bb,t);
             if (r.empty()) {
                 r.insert(t.begin(),t.end());
             }else {
@@ -702,7 +748,8 @@ namespace DRCHECKER {
         int ip = 0;
         if (other->hasCtx()) {
             //Both "this" and "other" has some contexts.
-            //NOTE 1: the structure of the calling context is "entry inst -> call site -> entry inst -> call site -> ...", so odd ctx index indicates
+            //NOTE 1: the structure of the calling context is "entry inst -> call site -> entry inst -> call site -> ...", 
+            //so odd ctx index indicates
             //a call inst.
             //NOTE 2: the total size of a calling context must be odd. (i.e. it must end w/ the entry inst of the callee).
             assert(this->ctx->size() % 2);
@@ -876,7 +923,8 @@ namespace DRCHECKER {
         //1.3. "this" takes callee A while "other" is a normal inst
         //1.4. both are normal inst
         //For 1. we need to see whether "this" is reachable from "other" within the common caller, if so return true, otherwise false.
-        //2. They diverge at a same call site and take different callees (e.g. an indirect call), in this case "this" cannot be reached from "other".
+        //2. They diverge at a same call site and take different callees (e.g. an indirect call), 
+        //in this case "this" cannot be reached from "other".
         Instruction *end = nullptr, *src = nullptr;
         if (ip >= this->ctx->size()) {
             //Case 1.2. or 1.4.
@@ -998,5 +1046,40 @@ namespace DRCHECKER {
         }
         return;
     }
+
+    std::map<BasicBlock*,std::set<BasicBlock*>> BBTraversalHelper::succ_map;
+
+    void BBTraversalHelper::_get_all_successors(BasicBlock *bb, std::set<BasicBlock*> &res) {
+        if (!bb || res.find(bb) != res.end()) {
+            return;
+        }
+        //A result cache.
+        if (BBTraversalHelper::succ_map.find(bb) != BBTraversalHelper::succ_map.end()) {
+            res.insert(BBTraversalHelper::succ_map[bb].begin(),BBTraversalHelper::succ_map[bb].end());
+            return;
+        }
+        //inclusive
+        res.insert(bb);
+        for (llvm::succ_iterator sit = llvm::succ_begin(bb), set = llvm::succ_end(bb); sit != set; ++sit) {
+            BBTraversalHelper::_get_all_successors(*sit,res);
+        }
+        return;
+    }
+
+    //NOTE: this will be inclusive (the successor list also contains the root BB.)
+    std::set<BasicBlock*> *BBTraversalHelper::get_all_successors(BasicBlock *bb) {
+        if (!bb) {
+            return nullptr;
+        }
+        //A result cache.
+        if (BBTraversalHelper::succ_map.find(bb) != BBTraversalHelper::succ_map.end()) {
+            return &BBTraversalHelper::succ_map[bb];
+        }
+        std::set<BasicBlock*> res;
+        BBTraversalHelper::_get_all_successors(bb,res);
+        BBTraversalHelper::succ_map[bb] = res;
+        return &BBTraversalHelper::succ_map[bb];
+    }
+
 
 }

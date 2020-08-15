@@ -184,6 +184,10 @@ namespace DRCHECKER {
 
         static llvm::DominatorTree *getDomTree(llvm::Function*);
 
+        static void getDominators(llvm::BasicBlock *bb, std::set<llvm::BasicBlock*> &res, bool self = true);
+
+        static void getDominatees(llvm::BasicBlock *bb, std::set<llvm::BasicBlock*> &res, bool self = true);
+
         //NOTE: as long as we have the post-dom tree, we can invoke its member function "->dominates()" to decide the
         //post-dominance relationship of two Insts:
         //Prototype from the llvm src file:
@@ -201,6 +205,13 @@ namespace DRCHECKER {
         static void getRetBBs(llvm::Function* pfunc, std::set<llvm::BasicBlock*> &r);
         
         static void getRetInsts(llvm::Function* pfunc, std::set<llvm::Instruction*> &r);
+
+        //The mapping from one BB to all its successors (recursively).
+        static std::map<BasicBlock*,std::set<BasicBlock*>> succ_map;
+
+        static void _get_all_successors(BasicBlock *bb, std::set<BasicBlock*> &res);
+
+        static std::set<BasicBlock*> *get_all_successors(BasicBlock *bb);
     };
 }
 #endif //PROJECT_CFGUTILS_H
