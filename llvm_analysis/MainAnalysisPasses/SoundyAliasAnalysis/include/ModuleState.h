@@ -124,6 +124,9 @@ namespace DRCHECKER {
         // Store the value constraints imposed by different paths.
         std::map<AnalysisContext*, std::map<Value*, Constraint*>> constraintInformation;
 
+        // These are the infeasible (due to conflicting path constraints) basic blocks under each calling context.
+        std::map<AnalysisContext*, std::set<BasicBlock*>> deadBBs;
+
         //hz: the mapping between BBs in a switch-case structure to the leading switch variable values. 
         std::map<BasicBlock*,std::set<uint64_t>> switchMap;
 
@@ -567,7 +570,7 @@ namespace DRCHECKER {
          * @return Target context updated with the provided information.
          *
          */
-        AnalysisContext* getOrCreateContext(std::vector<Instruction *> *callSites, std::map<Value *,
+        AnalysisContext* getOrCreateContext(std::vector<Instruction*> *callSites, std::map<Value*,
                 std::set<PointerPointsTo*>*> *targetInfo = nullptr, std::map<Value *, std::set<TaintFlag*>*> *targetTaintInfo = nullptr) {
 
             AnalysisContext* currContext = getContext(callSites);
@@ -579,7 +582,7 @@ namespace DRCHECKER {
                 availableAnalysisContexts.insert(availableAnalysisContexts.end(), newContext);
 
                 // create new points to information.
-                std::map<Value *, std::set<PointerPointsTo *> *> *newInfo = new std::map<Value *, std::set<PointerPointsTo *> *>();
+                std::map<Value*, std::set<PointerPointsTo*>*> *newInfo = new std::map<Value*, std::set<PointerPointsTo*>*>();
                 if (targetInfo != nullptr) {
                     newInfo->insert(targetInfo->begin(), targetInfo->end());
                 } else {
@@ -624,10 +627,16 @@ namespace DRCHECKER {
         std::map<Value *, std::set<PointerPointsTo*>*>* getPointsToInfo(std::vector<Instruction *> *callSites) {
             AnalysisContext* currContext = getContext(callSites);
             assert(currContext != nullptr && pointToInformation.count(currContext));
-            //if(currContext != nullptr && pointToInformation.count(currContext)) {
-                return pointToInformation[currContext];
-            //}
-            //return nullptr;
+            return pointToInformation[currContext];
+        }
+
+        std::map<Value*, Constraint*> *getCtxConstraints(std::vector<Instruction*> *callSites) {
+            if (!callSites) {
+                return nullptr;
+            }
+            AnalysisContext* currContext = getContext(callSites);
+            assert(currContext);
+            return &(this->constraintInformation[currContext]);
         }
 
         Constraint *getConstraints(std::vector<Instruction*> *callSites, Value *v, bool create = true) {
@@ -635,9 +644,7 @@ namespace DRCHECKER {
                 return nullptr;
             }
             AnalysisContext* currContext = getContext(callSites);
-            if (!currContext) {
-                return nullptr;
-            }
+            assert(currContext);
             if (this->constraintInformation.find(currContext) != this->constraintInformation.end() &&
                 this->constraintInformation[currContext].find(v) != this->constraintInformation[currContext].end()) {
                 Constraint *r = this->constraintInformation[currContext][v];
@@ -656,6 +663,39 @@ namespace DRCHECKER {
                 Constraint *r = new Constraint(v,f);
                 this->constraintInformation[currContext][v] = r;
                 return r;
+            }
+            return nullptr;
+        }
+
+        bool setConstraints(std::vector<Instruction*> *callSites, Value *v, Constraint *c) {
+            if (!callSites || !v || !c) {
+                return false;
+            }
+            AnalysisContext* currContext = getContext(callSites);
+            assert(currContext);
+            this->constraintInformation[currContext][v] = c;
+            return true;
+        }
+
+        //Insert the provided dead BBs to the current records.
+        void updateDeadBBs(std::vector<Instruction*> *callSites, std::set<BasicBlock*> &bbs) {
+            if (!callSites || callSites->empty() || bbs.empty()) {
+                return;
+            }
+            AnalysisContext* currContext = getContext(callSites);
+            assert(currContext);
+            (this->deadBBs)[currContext].insert(bbs.begin(),bbs.end());
+            return;
+        }
+
+        std::set<BasicBlock*> *getDeadBBs(std::vector<Instruction*> *callSites) {
+            if (!callSites || callSites->empty()) {
+                return nullptr;
+            }
+            AnalysisContext* currContext = getContext(callSites);
+            assert(currContext);
+            if (this->deadBBs.find(currContext) != this->deadBBs.end()) {
+                return &((this->deadBBs)[currContext]);
             }
             return nullptr;
         }

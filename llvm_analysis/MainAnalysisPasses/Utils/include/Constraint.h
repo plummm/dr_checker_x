@@ -15,7 +15,7 @@ namespace DRCHECKER {
         Value *v = nullptr;
         Function *func = nullptr;
 
-        context z3c;
+        context *z3c = nullptr;
         solver *z3s = nullptr;
         expr *zv = nullptr;
 
@@ -27,12 +27,23 @@ namespace DRCHECKER {
         Constraint(Value *v, Function *func) {
             this->v = v;
             this->func = func;
+            this->z3c = new context();
             //We need to map the llvm value to the z3 domain.
             //For now we simply create a z3 integer for all llvm vars.
             //TODO: consider different z3 counterparts for different llvm vars.
-            this->zv = new expr(this->z3c);
-            *(this->zv) = z3c.int_const("v");
-            this->z3s = new solver(this->z3c);
+            this->zv = new expr(*(this->z3c));
+            *(this->zv) = this->z3c->int_const("v");
+            this->z3s = new solver(*(this->z3c));
+        }
+
+        //Make a copy of "c", but w/ value and function replaced and existing constraints removed.
+        Constraint(Constraint *c, Value *v, Function *func) {
+            assert(c);
+            this->z3c = c->z3c;
+            this->z3s = c->z3s;
+            this->zv = c->zv;
+            this->v = v;
+            this->func = func;
         }
 
         ~Constraint() {
@@ -53,6 +64,16 @@ namespace DRCHECKER {
             return false;
         }
 
+        expr *getConstraint(BasicBlock *bb) {
+            if (!bb) {
+                return nullptr;
+            }
+            if (this->cons.find(bb) != this->cons.end()) {
+                return this->cons[bb];
+            }
+            return nullptr;
+        }
+
         //Add a new constraint for the value in a certain BB, then returns whether for this BB the
         //value constraint can be satisfied.
         bool addConstraint(expr *con, BasicBlock *bb) {
@@ -64,7 +85,7 @@ namespace DRCHECKER {
                 return false;
             }
             if (this->cons.find(bb) == this->cons.end()) {
-                expr *e = new expr(this->z3c);
+                expr *e = new expr(*(this->z3c));
                 *e = *con;
                 this->cons[bb] = e;
             }else {
@@ -73,7 +94,7 @@ namespace DRCHECKER {
             }
             if (!this->satisfiable(this->cons[bb])) {
                 //Simplify the constraint to "false".
-                *(this->cons[bb]) = this->z3c.bool_val(false);
+                *(this->cons[bb]) = this->z3c->bool_val(false);
                 this->deadBBs.insert(bb);
                 return false;
             }
@@ -101,13 +122,40 @@ namespace DRCHECKER {
             return;
         }
 
+        //Return an expr that is true when "zv" is equal to any value in "vs".
         expr getEqvExpr(std::set<int64_t> &vs) {
-            expr e = this->z3c.bool_val(false);
             if (!this->zv) {
-                return e;
+                return this->z3c->bool_val(true);
             }
+            expr e(*(this->z3c));
+            bool first = true;
             for (int64_t i : vs) {
-                e = (e || (*(this->zv) == this->z3c.int_val(i)));
+                expr t = (*(this->zv) == this->z3c->int_val(i));
+                if (first) {
+                    e = t;
+                    first = false;
+                }else {
+                    e = (e || t);
+                }
+            }
+            return e;
+        }
+
+        //Return an expr that is true when "zv" is not equal to any value in "vs".
+        expr getNeqvExpr(std::set<int64_t> &vs) {
+            if (!this->zv) {
+                return this->z3c->bool_val(true);
+            }
+            expr e(*(this->z3c));
+            bool first = true;
+            for (int64_t i : vs) {
+                expr t = (*(this->zv) != this->z3c->int_val(i));
+                if (first) {
+                    e = t;
+                    first = false;
+                }else {
+                    e = (e && t);
+                }
             }
             return e;
         }

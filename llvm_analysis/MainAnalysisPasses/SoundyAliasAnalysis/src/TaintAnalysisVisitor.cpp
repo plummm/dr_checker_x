@@ -545,9 +545,9 @@ namespace DRCHECKER {
     }
 
     void TaintAnalysisVisitor::setupCallContext(CallInst &I, Function *currFunction,
-                                                std::vector<Instruction *> *newCallContext) {
+                                                std::vector<Instruction*> *newCallContext) {
 
-        std::map<Value *, std::set<TaintFlag*>*> *contextTaintInfo = currState.getTaintInfo(newCallContext);
+        std::map<Value*, std::set<TaintFlag*>*> *contextTaintInfo = currState.getTaintInfo(newCallContext);
 
         unsigned int arg_no = 0;
 
@@ -705,9 +705,7 @@ namespace DRCHECKER {
                                                          std::vector<Instruction *> *oldFuncCallSites,
                                                          std::vector<Instruction *> *callSiteContext) {
 #ifdef DEBUG_CALL_INSTR
-       dbgs() << "---------\nTaint analysis visits call instruction: ";
-       I.print(dbgs());
-       dbgs() << "\n";
+        dbgs() << "TaintAnalysisVisitor::visitCallInst(): " << InstructionUtils::getValueStr(&I) << "\n";
 #endif
         // if this is a kernel internal function.
         if(currFunc->isDeclaration()) {
@@ -718,15 +716,10 @@ namespace DRCHECKER {
         // else, we need to setup taint context and create a new visitor.
         setupCallContext(I, currFunc, callSiteContext);
 
-        // debugging
-        /*if(currFunc->getName() == "m4u_monitor_start") {
-            assert(false);
-        }*/
         // create a new TaintAnalysisVisitor
         TaintAnalysisVisitor *vis = new TaintAnalysisVisitor(currState, currFunc, callSiteContext);
 
         return vis;
-
     }
 
     void TaintAnalysisVisitor::stitchChildContext(CallInst &I, VisitorCallback *childCallback) {
