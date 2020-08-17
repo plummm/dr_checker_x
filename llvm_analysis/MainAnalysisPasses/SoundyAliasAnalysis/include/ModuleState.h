@@ -33,7 +33,7 @@ using json = nlohmann::json;
 
 #define DEBUG_TAINT_DUMP_PROGRESS
 #define DEBUG_TAINT_SERIALIZE_PROGRESS
-//#define DEBUG_HIERARCHY
+#define DEBUG_HIERARCHY
 #define DEBUG_CONSTRUCT_TAINT_CHAIN
 
 using namespace llvm;
@@ -942,6 +942,9 @@ namespace DRCHECKER {
             tag->dumpInfo_light(dbgs(),true);
 #endif
             if (tagPathMap.find(tag) == tagPathMap.end()) {
+#ifdef DEBUG_CONSTRUCT_TAINT_CHAIN
+                dbgs() << "getAllUserTaintChains(): no records in the cache, do the calculation...\n";
+#endif
                 //Find all paths from an user input to this tag.
                 tagPathMap[tag].clear();
                 //No need to find other paths if this is already a user input tag.
@@ -950,7 +953,11 @@ namespace DRCHECKER {
                     std::set<AliasObject*> eqObjs;
                     getAllEquivelantObjs(tag,eqObjs);
 #ifdef DEBUG_CONSTRUCT_TAINT_CHAIN
-                    dbgs() << "getAllUserTaintChains(): Got " << eqObjs.size() << " eqv objs for the tag.\n"; 
+                    dbgs() << "getAllUserTaintChains(): Got " << eqObjs.size() << " eqv objs for the tag: ";
+                    for (AliasObject *o : eqObjs) {
+                        dbgs() << (const void*)o << " ";
+                    }
+                    dbgs() << "\n";
 #endif
                     //Get all taint paths for each object.
                     std::vector<TypeField*> history;
@@ -964,6 +971,9 @@ namespace DRCHECKER {
                     }
                 }
             }
+#ifdef DEBUG_CONSTRUCT_TAINT_CHAIN
+            dbgs() << "getAllUserTaintChains(): Got " << tagPathMap[tag].size() << " user taint paths in total.\n";
+#endif
             //Iterate through every taint path to current "tag" and decide whether it's compatible to the taint path
             //in current TaintFlag (i.e. whether the prior path can reach current one), if so, we can concat two paths
             //and the result to "res".
@@ -1246,7 +1256,8 @@ namespace DRCHECKER {
                         is_prefix = true;
                         break;
                     }
-                    //A complementary filtering to the above, see whether the final resulting type of tag 0 matches any node in tag 1's type hierarchy.
+                    //A complementary filtering to the above, see whether the final resulting type 
+                    //of tag 0 matches any node in tag 1's type hierarchy.
                     if (ty0 && dyn_cast<CompositeType>(ty0) && in_hierarchy_ty(ty0,hty1)) {
                         is_prefix = true;
                         break;
