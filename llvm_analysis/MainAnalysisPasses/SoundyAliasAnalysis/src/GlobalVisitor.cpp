@@ -8,7 +8,7 @@
 
 namespace DRCHECKER {
 
-//#define DEBUG_GLOBAL_ANALYSIS
+#define DEBUG_GLOBAL_ANALYSIS
 #define DEBUG_CALL_INSTR
 #define DONOT_CARE_COMPLETION
 #define MAX_CALLSITE_DEPTH 7
@@ -363,17 +363,22 @@ out:
             // current strongly connected component.
             std::vector<BasicBlock*> *currSCC = (*(this->traversalOrder))[i];
             if (currSCC->size() == 1) {
-                this->inside_loop = false;
-                for(VisitorCallback *currCallback:allCallbacks) {
-                    currCallback->setLoopIndicator(false);
-                }
-                //Analyzing single basic block.
-                for(unsigned int j=0; j < currSCC->size(); j++) {
-                    BasicBlock* currBB = (*currSCC)[j];
+                BasicBlock* currBB = (*currSCC)[0];
+                if (!this->currState.isDeadBB(this->currFuncCallSites,currBB)) {
+                    this->inside_loop = false;
+                    for(VisitorCallback *currCallback:allCallbacks) {
+                        currCallback->setLoopIndicator(false);
+                    }
+                    //Analyzing single basic block.
                     this->visit(currBB);
+                }else {
+                    //Current BB is infeasible
+#ifdef DEBUG_GLOBAL_ANALYSIS
+                    dbgs() << "GlobalVisitor::analyze(): skip the BB since it's infeasible: " 
+                    << InstructionUtils::getBBStrID(currBB) << "\n"; 
+#endif
                 }
-
-            } else {
+            }else {
                 unsigned long opt_num_to_analyze = BBTraversalHelper::getNumTimesToAnalyze(currSCC);
 #ifdef HARD_LOOP_LIMIT
                 if (MAX_LOOP_CNT < opt_num_to_analyze) {
@@ -381,14 +386,12 @@ out:
                 }
 #endif
 #ifdef DEBUG_GLOBAL_ANALYSIS
-                dbgs() << "Analyzing Loop BBS for:" << opt_num_to_analyze <<" number of times\n";
+                dbgs() << "Analyzing Loop BBS for:" << opt_num_to_analyze << " number of times\n";
 #endif
                 this->inside_loop = true;
-
                 for (VisitorCallback *currCallback:allCallbacks) {
                     currCallback->setLoopIndicator(true);
                 }
-
                 for (unsigned int l=0; l < opt_num_to_analyze; l++) {
                     // ensure that loop has been analyzed minimum number of times.
                     if(l >= (opt_num_to_analyze-1)) {
@@ -399,7 +402,14 @@ out:
                     }
                     for (unsigned int j = 0; j < currSCC->size(); j++) {
                         BasicBlock *currBB = (*currSCC)[j];
-                        this->visit(currBB);
+                        if (!this->currState.isDeadBB(this->currFuncCallSites,currBB)) {
+                            this->visit(currBB);
+                        }else {
+#ifdef DEBUG_GLOBAL_ANALYSIS
+                            dbgs() << "GlobalVisitor::analyze(): skip the BB (in a loop) since it's infeasible: " 
+                            << InstructionUtils::getBBStrID(currBB) << "\n"; 
+#endif
+                        }
                     }
                 }
 #ifdef DEBUG_GLOBAL_ANALYSIS

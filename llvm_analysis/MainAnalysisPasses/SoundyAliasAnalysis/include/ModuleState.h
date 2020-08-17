@@ -700,6 +700,14 @@ namespace DRCHECKER {
             return nullptr;
         }
 
+        bool isDeadBB(std::vector<Instruction*> *callSites, BasicBlock *bb) {
+            std::set<BasicBlock*> *dbbs = this->getDeadBBs(callSites);
+            if (!dbbs || !bb) {
+                return false;
+            }
+            return (dbbs->find(bb) != dbbs->end());
+        }
+
         // Taint Handling functions
 
         /***

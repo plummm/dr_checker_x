@@ -112,6 +112,7 @@ namespace DRCHECKER {
             return;
         }
 
+        //Add the constraint to some specified basic blocks in the host function.
         void addConstraint2BBs(expr *con, std::set<BasicBlock*> &bbs) {
             if (!con || bbs.empty()) {
                 return;

@@ -29,19 +29,19 @@ namespace DRCHECKER {
 
         GlobalState &currState;
 
-        std::vector<VisitorCallback *> &allCallbacks;
+        std::vector<VisitorCallback*> &allCallbacks;
 
         // order in which BBs needs to be analyzed.
         // This ideally should be in topological order of the
         // SCCs (Strongly connected components) in the CFG
         // of the function.
-        std::vector<std::vector<BasicBlock *> *> *traversalOrder;
+        std::vector<std::vector<BasicBlock*>*> *traversalOrder;
 
         // is the analysis within loop.
         bool inside_loop;
 
         // context of the analysis, basically list of call sites
-        std::vector<Instruction *> *currFuncCallSites;
+        std::vector<Instruction*> *currFuncCallSites;
 
         // set of call sites already visited.
         // this will help in preventing analyzing function call

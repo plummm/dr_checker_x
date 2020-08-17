@@ -33,6 +33,7 @@
 #include <ctime>
 #include "ModAnalysisVisitor.h"
 #include "SwitchAnalysisVisitor.h"
+#include "PathAnalysisVisitor.h"
 
 
 using namespace llvm;
@@ -245,7 +246,8 @@ namespace DRCHECKER {
                         }
                     }
                 }
-                //"currFuncs" contains all _init_ functions that have used current gv, "is_used_in_main" indicates whether current gv is used in the target function to analyze.
+                //"currFuncs" contains all _init_ functions that have used current gv, 
+                //"is_used_in_main" indicates whether current gv is used in the target function to analyze.
                 //The assumption here is that we will never use an _init_ function as the target function.
                 if(is_used_in_main && currFuncs.size()) {
                     for(auto cg:currFuncs) {
@@ -265,7 +267,8 @@ namespace DRCHECKER {
             // create data layout for the current module
             DataLayout *currDataLayout = new DataLayout(&m);
 
-            RangeAnalysis::InterProceduralRA<RangeAnalysis::CropDFS> &range_analysis = getAnalysis<RangeAnalysis::InterProceduralRA<RangeAnalysis::CropDFS>>();
+            RangeAnalysis::InterProceduralRA<RangeAnalysis::CropDFS> &range_analysis = 
+            getAnalysis<RangeAnalysis::InterProceduralRA<RangeAnalysis::CropDFS>>();
             GlobalState currState(&range_analysis, currDataLayout);
             // set the read and write flag in global state, to be used by differect detectors.
             //TODO: this should be moved to the bug detect phase for every entry function.
@@ -305,17 +308,18 @@ namespace DRCHECKER {
                     auto t0 = InstructionUtils::getCurTime(&dbgs());
 #endif
                     this->printCurTime();
-                    std::vector<std::vector<BasicBlock *> *> *traversalOrder =
+                    std::vector<std::vector<BasicBlock*>*> *traversalOrder =
                             BBTraversalHelper::getSCCTraversalOrder(*currInitFunc);
 
                     std::vector<Instruction*> *pcallSites = new std::vector<Instruction*>();
                     pcallSites->push_back(currInitFunc->getEntryBlock().getFirstNonPHIOrDbg());
 
-                    VisitorCallback *aliasVisitorCallback = new AliasAnalysisVisitor(currState, currInitFunc,
-                                                                                     pcallSites);
+                    VisitorCallback *aliasVisitorCallback = new AliasAnalysisVisitor(currState, currInitFunc, pcallSites);
+                    VisitorCallback *pathVisitorCallback = new PathAnalysisVisitor(currState, currInitFunc, pcallSites);
 
-                    std::vector<VisitorCallback *> allCallBacks;
-                    allCallBacks.insert(allCallBacks.end(), aliasVisitorCallback);
+                    std::vector<VisitorCallback*> allCallBacks;
+                    allCallBacks.push_back(aliasVisitorCallback);
+                    allCallBacks.push_back(pathVisitorCallback);
 
                     GlobalVisitor *vis = new GlobalVisitor(currState, currInitFunc, pcallSites, traversalOrder,
                                                            allCallBacks);
@@ -548,8 +552,8 @@ namespace DRCHECKER {
 
         void addAllVisitorAnalysis(GlobalState &targetState,
                                    Function *toAnalyze,
-                                   std::vector<Instruction *> *srcCallSites,
-                                   std::vector<VisitorCallback *> *allCallbacks) {
+                                   std::vector<Instruction*> *srcCallSites,
+                                   std::vector<VisitorCallback*> *allCallbacks) {
 
             // This function adds all analysis that need to be run by the global visitor.
             // it adds analysis in the correct order, i.e the order in which they need to be
@@ -558,13 +562,17 @@ namespace DRCHECKER {
             VisitorCallback *currVisCallback = new AliasAnalysisVisitor(targetState, toAnalyze, srcCallSites);
 
             // first add AliasAnalysis, this is the main analysis needed by everyone.
-            allCallbacks->insert(allCallbacks->end(), currVisCallback);
+            allCallbacks->push_back(currVisCallback);
 
             currVisCallback = new TaintAnalysisVisitor(targetState, toAnalyze, srcCallSites);
 
             // next add taint analysis.
-            allCallbacks->insert(allCallbacks->end(), currVisCallback);
+            allCallbacks->push_back(currVisCallback);
 
+            // then the path analysis, which may need the info provided by the previous two analyses.
+            currVisCallback = new PathAnalysisVisitor(targetState, toAnalyze, srcCallSites);
+
+            allCallbacks->push_back(currVisCallback);
             /*
             //hz: add the 3rd basic analysis: mod analysis to figure out which instructions can modify the global states.
             currVisCallback = new ModAnalysisVisitor(targetState, toAnalyze, srcCallSites);
