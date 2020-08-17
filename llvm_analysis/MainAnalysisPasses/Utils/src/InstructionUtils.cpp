@@ -553,7 +553,17 @@ namespace DRCHECKER {
     //e.g. v+2, v++, cast of "v". This function tries to strip all simple transformations of "v" and get the
     //very original value.
     Value *InstructionUtils::stripAllSoleTrans(Value *v) {
+        //NOTE: we may have a loop in some cases, e.g.
+        //%indvars.iv = phi i64 [ 0, %for.cond30.preheader ], [ %indvars.iv.next, %for.inc44 ]
+        //%indvars.iv.next = add nuw nsw i64 %indvars.iv, 1
+        //%7 = trunc i64 %indvars.iv to i32
+        std::set<Value*> history;
         while (v) {
+            if (history.find(v) != history.end()) {
+                //Loop detected...
+                break;
+            }
+            history.insert(v);
             if (!dyn_cast<Instruction>(v) && !dyn_cast<Operator>(v)) {
                 break;
             }

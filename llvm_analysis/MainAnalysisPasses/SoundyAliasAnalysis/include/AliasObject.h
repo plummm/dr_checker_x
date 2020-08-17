@@ -815,7 +815,17 @@ namespace DRCHECKER {
             dbgs() << "AliasObject::addFieldTaintFlag(): " << InstructionUtils::getTypeStr(this->targetType) 
             << " | " << srcfieldId << " obj: " << (const void*)this << "\n";
 #endif
-            if (targetTaintFlag->targetInstr && targetTaintFlag->targetInstr->inst && 
+            FieldTaint *targetFieldTaint = this->getFieldTaint(srcfieldId);
+            //Don't propagate a taint kill to a field which has not been tainted so far...
+            if (!targetTaintFlag->is_tainted && (!targetFieldTaint || targetFieldTaint->empty())) {
+#ifdef DEBUG_UPDATE_FIELD_TAINT
+                dbgs() << "AliasObject::addFieldTaintFlag(): try to add a taint kill flag, but the target\
+                field hasn't been tainted yet, so no action...\n";
+#endif
+                return false;
+            }
+            //Don't propagate a taint which originally comes from the same place (e.g. load and store-back).
+            if (targetTaintFlag->is_tainted && targetTaintFlag->targetInstr && targetTaintFlag->targetInstr->inst && 
                 dyn_cast<StoreInst>(targetTaintFlag->targetInstr->inst) &&
                 InstructionUtils::isSelfStore(dyn_cast<StoreInst>(targetTaintFlag->targetInstr->inst))) 
             {
@@ -824,14 +834,6 @@ namespace DRCHECKER {
                 //so no need to add the TF again.
 #ifdef DEBUG_UPDATE_FIELD_TAINT
                 dbgs() << "AliasObject::addFieldTaintFlag(): self-store detected, skip current TF...\n";
-#endif
-                return false;
-            }
-            FieldTaint *targetFieldTaint = this->getFieldTaint(srcfieldId);
-            if (!targetTaintFlag->is_tainted && (!targetFieldTaint || targetFieldTaint->empty())) {
-#ifdef DEBUG_UPDATE_FIELD_TAINT
-                dbgs() << "AliasObject::addFieldTaintFlag(): try to add a taint kill flag, but the target\
-                field hasn't been tainted yet, so no action...\n";
 #endif
                 return false;
             }
