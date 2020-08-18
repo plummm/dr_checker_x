@@ -38,12 +38,6 @@ namespace DRCHECKER {
             if (!val || !bb) {
                 continue;
             }
-            //We now need to ensure that "bb" is dominated by the switch BB, otherwise we cannot enforce the constraints
-            //posed by the switch inst to it.
-            if (bb->getSinglePredecessor() != I.getParent()) {
-                dbgs() << "!!! PathAnalysisVisitor::visitSwitchInst(): current case BB is not dominated by the switch BB!\n";
-                continue;
-            }
             caseMap[bb].insert(c_val);
         }
         //Now inspect each branch of this switch, test the feasibility, and update the constraints of "cond_var" in each branch.
@@ -52,6 +46,12 @@ namespace DRCHECKER {
         assert(c);
         for (auto &e : caseMap) {
             BasicBlock *bb = e.first;
+            //We now need to ensure that "bb" is dominated by the switch BB, otherwise we cannot enforce the constraints
+            //posed by the switch inst to it.
+            if (InstructionUtils::getSinglePredecessor(bb) != I.getParent()) {
+                dbgs() << "!!! PathAnalysisVisitor::visitSwitchInst(): current case BB is not dominated by the switch BB!\n";
+                continue;
+            }
             //Get all BBs dominated by "bb", these are BBs belonging only to the current case branch.
             std::set<BasicBlock*> dombbs;
             BBTraversalHelper::getDominatees(bb, dombbs);
@@ -60,7 +60,7 @@ namespace DRCHECKER {
             c->addConstraint2BBs(&cons,dombbs);
         }
         //Deal with the default case.
-        if (def_bb && def_bb->getSinglePredecessor() == I.getParent()) {
+        if (def_bb && InstructionUtils::getSinglePredecessor(def_bb) == I.getParent()) {
             std::set<BasicBlock*> dombbs;
             BBTraversalHelper::getDominatees(def_bb, dombbs);
             expr e = c->getNeqvExpr(cns);

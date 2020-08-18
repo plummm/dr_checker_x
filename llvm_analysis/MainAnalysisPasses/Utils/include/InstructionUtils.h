@@ -303,6 +303,8 @@ namespace DRCHECKER {
         static bool getPossibleFunctionTargets(CallInst &callInst, std::set<Function*> &targetFunctions);
 
         static bool similarStName(const std::string &s0, const std::string &s1);
+        
+        static BasicBlock *getSinglePredecessor(BasicBlock *bb);
     };
 
 }

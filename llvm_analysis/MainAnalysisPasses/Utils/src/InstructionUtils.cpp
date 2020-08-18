@@ -2300,4 +2300,26 @@ out:
         }
         return false;
     }
+
+    //NOTE: llvm provides a same member function to BasicBlock, but one problem is: sometimes even a bb have more than
+    //one predecessors, they can be the same... (e.g. multiple switch-case brances point to a same BB, then this BB will
+    //have multiple identical predecessors), we need to handle this situation in this function.
+    BasicBlock *InstructionUtils::getSinglePredecessor(BasicBlock *bb) {
+        if (!bb) {
+            return nullptr;
+        }
+        BasicBlock *pb = nullptr;
+        for (auto it = pred_begin(bb), et = pred_end(bb); it != et; ++it) {
+            BasicBlock* p = *it;
+            if (!pb) {
+                pb = p;
+                continue;
+            }
+            if (pb != p) {
+                //More than one different predecessors.
+                return nullptr;
+            }
+        }
+        return pb;
+    }
 }
