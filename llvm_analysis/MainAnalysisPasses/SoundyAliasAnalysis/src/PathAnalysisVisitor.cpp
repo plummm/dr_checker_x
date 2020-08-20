@@ -88,39 +88,51 @@ namespace DRCHECKER {
         int arg_no = -1;
         for (Value *arg : I.args()) {
             ++arg_no;
-            if (!arg) {
+            //Get the formal argument.
+            Argument *farg = InstructionUtils::getArg(currFunc,arg_no);
+            if (!arg || !farg) {
                 continue;
             }
-            Constraint *cons = this->currState.getConstraints(this->currFuncCallSites, arg, false);
-            if (!cons) {
-                //Try to strip the pointer cast.
-                cons = this->currState.getConstraints(this->currFuncCallSites, arg->stripPointerCasts(), false);
-            }
-            if (!cons) {
-                // No constraints for current actual arg.
-                continue;
-            }
-            expr *e = cons->getConstraint(I.getParent());
-            if (!e) {
-                // No constraints in current BB.
-                continue;
-            }
-            //Ok we have some constraints for the actual arg, propagate it to the corresponding formal arg.
-            int farg_no = 0;
-            for (Argument &farg : currFunc->args()) {
-                if (farg_no == arg_no) {
-#ifdef DEBUG_CALL_INST
-                    dbgs() << "PathAnalysisVisitor::visitCallInst(): propagate constraint for arg " << arg_no
-                    << ": " << InstructionUtils::getValueStr(arg) << " -> " << InstructionUtils::getValueStr(&farg) 
-                    << ", constraint: " << e->to_string() << "\n";
-#endif
-                    Constraint *nc = new Constraint(cons,&farg,currFunc);
-                    nc->addConstraint2AllBBs(e);
-                    this->currState.setConstraints(callSiteContext,&farg,nc);
-                    break;
+            Constraint *nc = nullptr;
+            if (!dyn_cast<ConstantInt>(arg)) {
+                //The actual argument is a variable, see whether it has any constraints at current point.
+                Constraint *cons = this->currState.getConstraints(this->currFuncCallSites, arg, false);
+                if (!cons) {
+                    //Try to strip the pointer cast.
+                    cons = this->currState.getConstraints(this->currFuncCallSites, arg->stripPointerCasts(), false);
                 }
-                ++farg_no;
+                if (!cons) {
+                    // No constraints for current actual arg.
+                    continue;
+                }
+                expr *e = cons->getConstraint(I.getParent());
+                if (!e) {
+                    // No constraints in current BB.
+                    continue;
+                }
+#ifdef DEBUG_CALL_INST
+                dbgs() << "PathAnalysisVisitor::visitCallInst(): propagate constraint for arg " << arg_no
+                << ": " << InstructionUtils::getValueStr(arg) << " -> " << InstructionUtils::getValueStr(farg) 
+                << ", constraint: " << e->to_string() << "\n";
+#endif
+                nc = new Constraint(cons,farg,currFunc);
+                nc->addConstraint2AllBBs(e);
+            }else {
+                //The actual argument is a constant, so obviously we need to add a constraint to the formal arg.
+                nc = new Constraint(farg,currFunc);
+                int64_t c_val = dyn_cast<ConstantInt>(arg)->getSExtValue();
+                std::set<int64_t> vs;
+                vs.insert(c_val);
+                expr e = nc->getEqvExpr(vs);
+#ifdef DEBUG_CALL_INST
+                dbgs() << "PathAnalysisVisitor::visitCallInst(): actual arg " << arg_no << " is a constant int: "
+                << c_val << ", so add the constraint " << e.to_string() << " to the formal arg: " 
+                << InstructionUtils::getValueStr(farg) << "\n";
+#endif
+                nc->addConstraint2AllBBs(&e);
             }
+            //Add the formal arg constraint to the global state.
+            this->currState.setConstraints(callSiteContext,farg,nc);
         }
         // In the end create a new PathAnalysisVisitor for the callee.
         PathAnalysisVisitor *vis = new PathAnalysisVisitor(currState, currFunc, callSiteContext);

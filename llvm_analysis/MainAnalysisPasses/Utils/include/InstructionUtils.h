@@ -305,6 +305,8 @@ namespace DRCHECKER {
         static bool similarStName(const std::string &s0, const std::string &s1);
         
         static BasicBlock *getSinglePredecessor(BasicBlock *bb);
+        
+        static Argument *getArg(Function *func, unsigned n);
     };
 
 }

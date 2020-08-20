@@ -2322,4 +2322,18 @@ out:
         }
         return pb;
     }
+
+    Argument *InstructionUtils::getArg(Function *func, unsigned n) {
+        if (!func) {
+            return nullptr;
+        }
+        unsigned no = 0;
+        for (Argument &arg : func->args()) {
+            if (no == n) {
+                return &arg;
+            }
+            ++no;
+        }
+        return nullptr;
+    }
 }
