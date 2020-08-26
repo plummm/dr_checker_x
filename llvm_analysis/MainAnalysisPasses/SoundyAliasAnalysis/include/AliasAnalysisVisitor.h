@@ -132,7 +132,7 @@ namespace DRCHECKER {
          */
         void updatePointsToObjects(Value *srcPointer, std::set<PointerPointsTo*>* newPointsToInfo, bool free);
         //This is a wrapper for the single pto case.
-        void updatePointsToObjects(Value *p, AliasObject *obj, InstLoc *propInst = nullptr, long fid = 0, long dfid = 0, bool is_weak = false);
+        void updatePointsToObjects(Value *p, AliasObject *obj, InstLoc *propInst = nullptr, long dfid = 0, bool is_weak = false);
         /***
          * This function checks if the provided pointer has points to information.
          * @param srcPointer Pointer which needs to be checked for points to information.

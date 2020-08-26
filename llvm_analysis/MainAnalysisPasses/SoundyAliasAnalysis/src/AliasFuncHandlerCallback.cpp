@@ -63,7 +63,7 @@ namespace DRCHECKER {
         InstLoc *propInst = new InstLoc(&callInst,callSitesContext);
         targetObj->setAsTaintSrc(propInst,true);
 
-        PointerPointsTo *newPointsTo = new PointerPointsTo(&callInst,0,targetObj,0,propInst,false);
+        PointerPointsTo *newPointsTo = new PointerPointsTo(&callInst,targetObj,0,propInst,false);
         std::set<PointerPointsTo*> *newPointsToInfo = new std::set<PointerPointsTo*>();
         newPointsToInfo->insert(newPointsToInfo->end(), newPointsTo);
         return newPointsToInfo;

@@ -430,7 +430,7 @@ namespace DRCHECKER {
                 toRet->is_const = globalVariable->isConstant();
                 //hz: since this is the pre-set pto for gv, there is no calling context. 
                 std::set<PointerPointsTo*> *newPointsTo = new std::set<PointerPointsTo*>();
-                PointerPointsTo *pointsToObj = new PointerPointsTo(globalVariable, 0, toRet, 0, new InstLoc(globalVariable,nullptr), false);
+                PointerPointsTo *pointsToObj = new PointerPointsTo(globalVariable, toRet, 0, new InstLoc(globalVariable,nullptr), false);
                 newPointsTo->insert(newPointsTo->end(), pointsToObj);
                 assert(GlobalState::globalVariables.find(globalVariable) == GlobalState::globalVariables.end());
                 GlobalState::globalVariables[globalVariable] = newPointsTo;
@@ -457,7 +457,7 @@ namespace DRCHECKER {
             if(!currFunction->isDeclaration()) {
                 std::set<PointerPointsTo*> *newPointsTo = new std::set<PointerPointsTo*>();
                 GlobalObject *glob = new GlobalObject(currFunction);
-                PointerPointsTo *pointsToObj = new PointerPointsTo(currFunction, 0, glob, 0, new InstLoc(currFunction,nullptr), false);
+                PointerPointsTo *pointsToObj = new PointerPointsTo(currFunction, glob, 0, new InstLoc(currFunction,nullptr), false);
                 newPointsTo->insert(newPointsTo->end(), pointsToObj);
 
                 GlobalState::globalVariables[currFunction] = newPointsTo;

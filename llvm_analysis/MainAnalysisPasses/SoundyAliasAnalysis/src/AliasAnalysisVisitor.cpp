@@ -305,12 +305,12 @@ namespace DRCHECKER {
         return 0;
     }
 
-    void AliasAnalysisVisitor::updatePointsToObjects(Value *p, AliasObject *obj, InstLoc *propInst, long fid, long dfid, bool is_weak) {
+    void AliasAnalysisVisitor::updatePointsToObjects(Value *p, AliasObject *obj, InstLoc *propInst, long dfid, bool is_weak) {
         if (!p || !obj) {
             return;
         }
         std::set<PointerPointsTo*> ptos;
-        PointerPointsTo *pto = new PointerPointsTo(p,fid,obj,dfid,propInst,is_weak);
+        PointerPointsTo *pto = new PointerPointsTo(p,obj,dfid,propInst,is_weak);
         ptos.insert(pto);
         return this->updatePointsToObjects(p,&ptos,false);
     }
@@ -325,7 +325,7 @@ namespace DRCHECKER {
 #ifdef DEBUG_UPDATE_POINTSTO
         dbgs() << "updatePointsToObjects for : " << InstructionUtils::getValueStr(srcPointer) << "\n";
 #endif
-        if(!newPointsToInfo || newPointsToInfo->size() == 0){
+        if (!newPointsToInfo || newPointsToInfo->empty() || !srcPointer) {
             //nothing to update.
             return;
         }
@@ -337,6 +337,7 @@ namespace DRCHECKER {
 #ifdef DEBUG_UPDATE_POINTSTO
         dbgs() << "#newPointsToInfo: " << newPointsToInfo->size() << " #existingPointsTo: " << existingPointsTo->size() << "\n";
 #endif
+        std::set<PointerPointsTo*> matchedPtos, unmatchedPtos;
         for(PointerPointsTo *currPointsTo : *newPointsToInfo) {
             // Some basic sanity check.
             if (!currPointsTo || !currPointsTo->targetObject) {
@@ -346,21 +347,44 @@ namespace DRCHECKER {
             if(std::find_if(existingPointsTo->begin(), existingPointsTo->end(), [currPointsTo,this](const PointerPointsTo *n) {
                 return this->isPtoDuplicated(currPointsTo,n,false);
             }) == existingPointsTo->end()) {
-                //handle the implicit type cast (i.e. type cast that is not explicitly performed by the 'cast' inst) if any.
+                //Ok this pto doesn't appear in the existing records, now let's see whether it can match the type of srcPointer.
                 Instruction *propInst = nullptr;
                 if (currPointsTo->propagatingInst) {
                     propInst = dyn_cast<Instruction>(currPointsTo->propagatingInst->inst);
                 }
-                matchPtoTy(srcPointer,currPointsTo,propInst);
-#ifdef DEBUG_UPDATE_POINTSTO
-                dbgs() << "++ PTO: ";
-                currPointsTo->print(dbgs());
-#endif
-                existingPointsTo->insert(existingPointsTo->end(), currPointsTo);
+                if (InstructionUtils::isPrimitivePtr(srcPointer->getType(),8) || matchPtoTy(srcPointer,currPointsTo,propInst) > 0) {
+                    matchedPtos.insert(currPointsTo);
+                }else {
+                    unmatchedPtos.insert(currPointsTo);
+                }
             } else {
                 //delete the points to object, as we already have a similar pointsTo object.
                 delete(currPointsTo);
             }
+        }
+        //The logic to update the pto records:
+        //(1) if there exists type-matched ptos (i.e. "matchPtoTy" is not null), then only insert them - the type unmatched ones
+        //are likely due to the polymorphism (e.g. file->private is an i8* which may point to different structs in different ioctls
+        //even within a same driver).
+        //(2) if all ptos are not type matched, to be conservative, just insert them all.
+#ifdef DEBUG_UPDATE_POINTSTO
+        dbgs() << "#matchedPtos: " << matchedPtos.size() << " #unmatchedPtos: " << unmatchedPtos.size() << "\n";
+#endif
+        std::set<PointerPointsTo*> *toAdd = &matchedPtos;
+        if (matchedPtos.empty()) {
+            toAdd = &unmatchedPtos;
+        }else {
+            //free the memory of useless ptos.
+            for (PointerPointsTo *currPointsTo : unmatchedPtos) {
+                delete(currPointsTo);
+            }
+        }
+        for (PointerPointsTo *currPointsTo : *toAdd) {
+#ifdef DEBUG_UPDATE_POINTSTO
+            dbgs() << "++ PTO: ";
+            currPointsTo->print(dbgs());
+#endif
+            existingPointsTo->insert(existingPointsTo->end(), currPointsTo);
         }
         //Free the memory if required.
         if (free) {
@@ -385,7 +409,7 @@ namespace DRCHECKER {
 
     //In this version, we assume that "srcPointsTo" points to an embedded struct in a host struct.
     //NOTE: "srcPointer" in this function is related to "srcPointsTo".
-    std::set<PointerPointsTo*>* AliasAnalysisVisitor::makePointsToCopy_emb(Instruction *propInstruction, Value *srcPointer, Value *resPointer,
+    std::set<PointerPointsTo*> *AliasAnalysisVisitor::makePointsToCopy_emb(Instruction *propInstruction, Value *srcPointer, Value *resPointer,
                                                              std::set<PointerPointsTo*>* srcPointsTo, long fieldId) {
 #ifdef DEBUG_GET_ELEMENT_PTR
         dbgs() << "AliasAnalysisVisitor::makePointsToCopy_emb(): elements in *srcPointsTo: " << srcPointsTo->size() << " \n";
@@ -439,11 +463,11 @@ namespace DRCHECKER {
             dbgs() << "AliasAnalysisVisitor::makePointsToCopy_emb(): trying to get/create an object for the embedded struct/array..\n";
 #endif
             AliasObject *newObj = this->createEmbObj(hostObj,dstField,srcPointer,propInstruction);
-            if(newObj){
-                PointerPointsTo *newPointsToObj = new PointerPointsTo(resPointer,0,newObj,fieldId,
+            if (newObj) {
+                PointerPointsTo *newPointsToObj = currPointsToObj->makeCopyP(resPointer,newObj,fieldId,
                                                                       new InstLoc(propInstruction,this->currFuncCallSites),false);
                 newPointsToInfo->insert(newPointsToInfo->begin(), newPointsToObj);
-            }else{
+            } else{
 #ifdef DEBUG_GET_ELEMENT_PTR
                 errs() << "AliasAnalysisVisitor::makePointsToCopy_emb(): cannot get or create embedded object.\n";
 #endif
@@ -604,34 +628,32 @@ std::set<PointerPointsTo*>* AliasAnalysisVisitor::mergePointsTo(std::set<Value*>
     // Set of pairs of field and corresponding object.
     std::set<std::pair<long, AliasObject*>> targetObjects;
     targetObjects.clear();
-    for(Value *currVal : valuesToMerge) {
+    std::set<PointerPointsTo*> *toRetPointsTo = new std::set<PointerPointsTo*>();
+    for (Value *currVal : valuesToMerge) {
         // if the value doesn't have points to information.
         // try to strip pointer casts.
-        if(!hasPointsToObjects(currVal)) {
+        if (!hasPointsToObjects(currVal)) {
             currVal = currVal->stripPointerCasts();
         }
-        if(hasPointsToObjects(currVal)) {
-            std::set<PointerPointsTo*>* tmpPointsTo = getPointsToObjects(currVal);
-            for(PointerPointsTo *currPointsTo:*tmpPointsTo) {
+        if (hasPointsToObjects(currVal)) {
+            std::set<PointerPointsTo*> *tmpPointsTo = getPointsToObjects(currVal);
+            for (PointerPointsTo *currPointsTo : *tmpPointsTo) {
                 auto to_check = std::make_pair(currPointsTo->dstfieldId, currPointsTo->targetObject);
+                //de-duplication based on the pointee.
                 if(std::find(targetObjects.begin(), targetObjects.end(), to_check) == targetObjects.end()) {
                     targetObjects.insert(targetObjects.end(), to_check);
+                    PointerPointsTo *pto = currPointsTo->makeCopyP(targetPtr ? targetPtr : targetInstruction, currPointsTo->targetObject,
+                    currPointsTo->dstfieldId, new InstLoc(targetInstruction,this->currFuncCallSites), false);
+                    toRetPointsTo->insert(toRetPointsTo->begin(), pto);
                 }
             }
         }
     }
-    // if there are any objects?
-    if (targetObjects.size() > 0) {
-        std::set<PointerPointsTo*>* toRetPointsTo = new std::set<PointerPointsTo*>();
-        for(auto currItem: targetObjects) {
-            PointerPointsTo* currPointsToObj = new PointerPointsTo(targetPtr ? targetPtr : targetInstruction, 0, 
-                                              currItem.second, currItem.first, new InstLoc(targetInstruction,this->currFuncCallSites), false);
-            toRetPointsTo->insert(toRetPointsTo->begin(), currPointsToObj);
-        }
-        return toRetPointsTo;
+    if (toRetPointsTo->empty()) {
+        delete(toRetPointsTo);
+        return nullptr;
     }
-
-    return nullptr;
+    return toRetPointsTo;
 }
 
 std::set<PointerPointsTo*>* AliasAnalysisVisitor::copyPointsToInfo(Instruction *srcInstruction, std::set<PointerPointsTo*>* srcPointsTo) {
@@ -641,26 +663,22 @@ std::set<PointerPointsTo*>* AliasAnalysisVisitor::copyPointsToInfo(Instruction *
      */
     std::set<std::pair<long, AliasObject*>> targetObjects;
     targetObjects.clear();
-    for(auto currPointsToObj:(*srcPointsTo)) {
+    std::set<PointerPointsTo*>* toRetPointsTo = new std::set<PointerPointsTo*>();
+    for(auto currPointsToObj : *srcPointsTo) {
         auto to_check = std::make_pair(currPointsToObj->dstfieldId, currPointsToObj->targetObject);
+        //de-duplication based on the pointee.
         if(std::find(targetObjects.begin(), targetObjects.end(), to_check) == targetObjects.end()) {
             targetObjects.insert(targetObjects.end(), to_check);
+            PointerPointsTo* pto = currPointsToObj->makeCopyP(srcInstruction, currPointsToObj->targetObject, currPointsToObj->dstfieldId, 
+                                                              new InstLoc(srcInstruction,this->currFuncCallSites), false);
+            toRetPointsTo->insert(toRetPointsTo->begin(), pto);
         }
     }
-
-    // if there are any objects?
-    if(targetObjects.size() > 0) {
-        std::set<PointerPointsTo*>* toRetPointsTo = new std::set<PointerPointsTo*>();
-        for(auto currItem: targetObjects) {
-            PointerPointsTo* currPointsToObj = new PointerPointsTo(srcInstruction, 0, currItem.second, currItem.first, 
-                                                                   new InstLoc(srcInstruction,this->currFuncCallSites), false);
-            toRetPointsTo->insert(toRetPointsTo->begin(), currPointsToObj);
-        }
-        return toRetPointsTo;
+    if (toRetPointsTo->empty()) {
+        delete(toRetPointsTo);
+        return nullptr;
     }
-
-    return nullptr;
-
+    return toRetPointsTo;
 }
 
 void AliasAnalysisVisitor::setLoopIndicator(bool inside_loop) {
@@ -1474,36 +1492,41 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
             }
         }
 #ifdef DEBUG_LOAD_INSTR
-        dbgs() << "Number of target objects:" << targetObjects.size() << "\n";
+        dbgs() << "AliasAnalysisVisitor::visitLoadInst(): #targetObjects: " << targetObjects.size() << "\n";
 #endif
-
-
         // Now get the list of objects to which the fieldid of the corresponding object points to.
         std::set<std::pair<long,AliasObject*>> finalObjects;
         finalObjects.clear();
+        std::set<PointerPointsTo*> *newPointsToInfo = new std::set<PointerPointsTo*>();
         InstLoc *propInst = new InstLoc(&I,this->currFuncCallSites);
-        for(const std::pair<long, AliasObject*> &currObjPair : targetObjects) {
+        for (const std::pair<long, AliasObject*> &currObjPair : targetObjects) {
             // fetch objects that could be pointed by the field.
-            currObjPair.second->fetchPointsToObjects(currObjPair.first, finalObjects, propInst);
+            std::set<std::pair<long,AliasObject*>> pointees;
+            currObjPair.second->fetchPointsToObjects(currObjPair.first, pointees, propInst);
+            //De-duplication based on pointee.
+            for (auto &e : pointees) {
+                if(std::find(finalObjects.begin(), finalObjects.end(), e) == finalObjects.end()) {
+                    finalObjects.insert(e);
+                    //Create the pto for the fetched pointee.
+                    //NOTE that we also record the src obj|field here in the pto, to help handle the potential N * N update problem.
+                    PointerPointsTo *pto = new PointerPointsTo(&I, currObjPair.second, currObjPair.first, e.second, e.first, 
+                                                               new InstLoc(&I,this->currFuncCallSites), false);
+                    newPointsToInfo->insert(newPointsToInfo->end(), pto);
+                }
+            }
         }
-        if(finalObjects.size() > 0) {
+        if (newPointsToInfo->size() > 0) {
 #ifdef FAST_HEURISTIC
-            if(finalObjects.size() > MAX_ALIAS_OBJ) {
-                auto end = std::next(finalObjects.begin(), std::min((long)MAX_ALIAS_OBJ, (long)finalObjects.size()));
-                std::set<std::pair<long,AliasObject*>> tmpList;
+            //A hard limit on #pto, we need to try best to avoid this.
+            if(newPointsToInfo->size() > MAX_ALIAS_OBJ) {
+                auto end = std::next(newPointsToInfo->begin(), (long)MAX_ALIAS_OBJ);
+                std::set<PointerPointsTo*> tmpList;
                 tmpList.clear();
-                tmpList.insert(finalObjects.begin(), end);
-                finalObjects.clear();
-                finalObjects.insert(tmpList.begin(), tmpList.end());
+                tmpList.insert(newPointsToInfo->begin(), end);
+                newPointsToInfo->clear();
+                newPointsToInfo->insert(tmpList.begin(), tmpList.end());
             }
 #endif
-            // Create new pointsTo set and add all objects of srcPointsTo
-            std::set<PointerPointsTo*>* newPointsToInfo = new std::set<PointerPointsTo*>();
-            for(auto currPto:finalObjects) {
-                PointerPointsTo *newPointsToObj = new PointerPointsTo(&I, 0, currPto.second, currPto.first, 
-                                                                      new InstLoc(&I,this->currFuncCallSites), false);
-                newPointsToInfo->insert(newPointsToInfo->end(), newPointsToObj);
-            }
             // Just save the newly created set as points to set for this instruction.
             this->updatePointsToObjects(&I, newPointsToInfo);
         } else {
@@ -1618,8 +1641,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
         InstLoc *propInst = new InstLoc(&I,this->currFuncCallSites);
         for (PointerPointsTo *currPointsTo: *dstPointsTo) {
             //Basic Sanity
-            if(!((currPointsTo->targetPointer == targetPointer || currPointsTo->targetPointer == targetPointer->stripPointerCasts()) &&
-                currPointsTo->fieldId == 0)) {
+            if(!(currPointsTo->targetPointer == targetPointer || currPointsTo->targetPointer == targetPointer->stripPointerCasts())) {
                 dbgs() << "We're going to crash in AliasAnalysisVisitor::visitStoreInst() :( ...\n";
                 dbgs() << "Inst: " << InstructionUtils::getValueStr(&I) << "\n";
                 dbgs() << "currPointsTo->targetPointer: " << InstructionUtils::getValueStr(currPointsTo->targetPointer) << "\n";
@@ -1739,7 +1761,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
 
             std::set<PointerPointsTo*> targetElements;
             for(auto a:srcDrefObjects) {
-                PointerPointsTo *newRel = new PointerPointsTo(nullptr, 0, a.second, a.first, new InstLoc(&I,this->currFuncCallSites), false);
+                PointerPointsTo *newRel = new PointerPointsTo(nullptr, a.second, a.first, new InstLoc(&I,this->currFuncCallSites), false);
                 targetElements.insert(newRel);
             }
 

@@ -49,15 +49,16 @@ namespace DRCHECKER {
      */
     class ObjectPointsTo {
     public:
-        // field id, if the parent object is a structure.
-        long fieldId;
+        // the source object and field that points to the target object and field.
+        long fieldId = 0;
+        AliasObject *srcObject = nullptr;
         // field id of the destination object to which this pointer points tp
-        long dstfieldId;
+        long dstfieldId = 0;
         // object to which we point to.
-        AliasObject *targetObject;
+        AliasObject *targetObject = nullptr;
         // instruction which resulted in this points to information.
         //Value* propagatingInstruction;
-        InstLoc *propagatingInst;
+        InstLoc *propagatingInst = nullptr;
         //Whether this pto record is a weak update (e.g. the original dst pointer points to multiple locations in multiple objects,
         //so we are not sure whether this pto will be for sure updated for a certain object field at the 'propagatingInst').
         //NOTE that this concept is only useful when updating the object fieldPointsTo 
@@ -81,6 +82,7 @@ namespace DRCHECKER {
 
         ObjectPointsTo(ObjectPointsTo *srcObjPointsTo) {
             this->fieldId = srcObjPointsTo->fieldId;
+            this->srcObject = srcObjPointsTo->srcObject;
             this->dstfieldId = srcObjPointsTo->dstfieldId;
             this->targetObject = srcObjPointsTo->targetObject;
             this->propagatingInst = srcObjPointsTo->propagatingInst;
@@ -89,14 +91,24 @@ namespace DRCHECKER {
             this->is_active = srcObjPointsTo->is_active;
         }
 
-        ObjectPointsTo(long fieldId, AliasObject *targetObject, long dstfieldId, InstLoc *propagatingInst = nullptr, bool is_Weak = false) {
+        ObjectPointsTo(AliasObject *srcObject, long fieldId, AliasObject *targetObject, long dstfieldId, 
+                       InstLoc *propagatingInst = nullptr, bool is_Weak = false) 
+        {
             this->fieldId = fieldId;
+            this->srcObject = srcObject;
             this->targetObject = targetObject;
             this->dstfieldId = dstfieldId;
             this->propagatingInst = propagatingInst;
             this->is_weak = is_weak;
             this->flag = 0;
             this->is_active = true;
+        }
+
+        //A wrapper for convenience.
+        ObjectPointsTo(AliasObject *targetObject, long dstfieldId, InstLoc *propagatingInst = nullptr, bool is_Weak = false):
+        ObjectPointsTo(nullptr,0,targetObject,dstfieldId,propagatingInst,is_Weak)
+        {
+            //
         }
 
         virtual ObjectPointsTo* makeCopy() {
@@ -108,9 +120,8 @@ namespace DRCHECKER {
             if (!that) {
                 return false;
             }
-            return this->targetObject == that->targetObject &&
-                   this->fieldId == that->fieldId &&
-                   this->dstfieldId == that->dstfieldId;
+            return this->fieldId == that->fieldId &&
+                   this->pointsToSameObject(that);
         }
 
         virtual bool pointsToSameObject(const ObjectPointsTo *that) const {
@@ -156,22 +167,40 @@ namespace DRCHECKER {
             this->targetPointer = srcPointsTo->targetPointer;
         }
 
-        PointerPointsTo(Value *targetPointer, long fieldId, AliasObject *targetObject, long dstfieldId, 
+        PointerPointsTo(Value *targetPointer, AliasObject *srcObject, long fieldId, AliasObject *targetObject, long dstfieldId, 
                         InstLoc *propagatingInst = nullptr, bool is_Weak = false): 
-                        ObjectPointsTo(fieldId, targetObject, dstfieldId, propagatingInst, is_Weak) {
-                            this->targetPointer = targetPointer;
-                        }
+        ObjectPointsTo(srcObject, fieldId, targetObject, dstfieldId, propagatingInst, is_Weak) 
+        {
+            this->targetPointer = targetPointer;
+        }
+
+        //A wrapper for convenience
+        PointerPointsTo(Value *targetPointer, AliasObject *targetObject, long dstfieldId, 
+                        InstLoc *propagatingInst = nullptr, bool is_Weak = false): 
+        PointerPointsTo(targetPointer, nullptr, 0, targetObject, dstfieldId, propagatingInst, is_Weak) 
+        {
+            //
+        }
 
         PointerPointsTo() {
-
         }
 
-        ObjectPointsTo* makeCopy() {
+        ObjectPointsTo *makeCopy() {
             return new PointerPointsTo(this);
         }
 
-        PointerPointsTo* makeCopyP() {
+        PointerPointsTo *makeCopyP() {
             return new PointerPointsTo(this);
+        }
+
+        //We want to copy only a part of current pto but replace the remainings.
+        PointerPointsTo *makeCopyP(Value *targetPointer, AliasObject *targetObject, long dstfieldId,
+                                   InstLoc *propagatingInst = nullptr, bool is_Weak = false)
+        {
+            PointerPointsTo *pto = new PointerPointsTo(targetPointer,targetObject,dstfieldId,propagatingInst,is_Weak);
+            pto->fieldId = this->fieldId;
+            pto->srcObject = this->srcObject;
+            return pto;
         }
 
         long getTargetType() const {
@@ -334,12 +363,12 @@ namespace DRCHECKER {
             return num;
         }
 
-        int addPointerPointsTo(Value *p, InstLoc *loc, long fid = 0, long dfid = 0) {
+        int addPointerPointsTo(Value *p, InstLoc *loc, long dfid = 0) {
             if (!p) {
                 return 0;
             }
             //NOTE: default is_Weak setting (i.e. strong update) is ok for top-level vars.
-            PointerPointsTo *newPointsTo = new PointerPointsTo(p,fid,this,dfid,loc,false);
+            PointerPointsTo *newPointsTo = new PointerPointsTo(p,this,dfid,loc,false);
             //De-duplication
             bool is_dup = false;
             for (PointerPointsTo *pto : this->pointersPointsTo) {
@@ -491,7 +520,7 @@ namespace DRCHECKER {
 #endif
             if(dstObject != nullptr) {
                 std::set<PointerPointsTo*> dstPointsTo;
-                PointerPointsTo *newPointsTo = new PointerPointsTo(nullptr,fieldId,dstObject,0,propagatingInstr,is_weak);
+                PointerPointsTo *newPointsTo = new PointerPointsTo(nullptr,this,fieldId,dstObject,0,propagatingInstr,is_weak);
                 dstPointsTo.insert(newPointsTo);
                 this->updateFieldPointsTo(fieldId,&dstPointsTo,propagatingInstr);
                 //We can now delete the allocated objects since "updateFieldPointsTo" has made a copy.

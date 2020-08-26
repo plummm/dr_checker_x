@@ -799,7 +799,7 @@ namespace DRCHECKER {
                     obj->addPointerPointsTo(currArgVal,loc);
                     //Record the pto in the global state.
                     if (currPointsTo) {
-                        PointerPointsTo *pto = new PointerPointsTo(currArgVal,0,obj,0,loc,false);
+                        PointerPointsTo *pto = new PointerPointsTo(currArgVal,obj,0,loc,false);
                         if (currPointsTo->find(currArgVal) == currPointsTo->end()) {
                             (*currPointsTo)[currArgVal] = new std::set<PointerPointsTo*>();
                         }
