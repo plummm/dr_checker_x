@@ -576,19 +576,24 @@ namespace DRCHECKER {
                 break;
             }
             //See whether "v" is a sole transformation now, if so, continue w/ the variable operand.
-            User *u = dyn_cast<User>(v);
-            assert(u);
             Value *nv = nullptr;
-            for (unsigned i = 0; i < u->getNumOperands(); ++i) {
-                Value *op = u->getOperand(i);
-                if (!op || dyn_cast<Constant>(op)) {
-                    continue;
+            if (dyn_cast<GEPOperator>(v)) {
+                //We treat the variable index in the GEP as constants.
+                nv = dyn_cast<GEPOperator>(v)->getPointerOperand();
+            }else {
+                User *u = dyn_cast<User>(v);
+                assert(u);
+                for (unsigned i = 0; i < u->getNumOperands(); ++i) {
+                    Value *op = u->getOperand(i);
+                    if (!op || dyn_cast<Constant>(op)) {
+                        continue;
+                    }
+                    if (nv && nv != op) {
+                        //More than one value involved, not sole transformation any more.
+                        return v;
+                    }
+                    nv = op;
                 }
-                if (nv && nv != op) {
-                    //More than one value involved, not sole transformation any more.
-                    return v;
-                }
-                nv = op;
             }
             if (!nv) {
                 //This means all operands are constant, stop tracing.
@@ -615,6 +620,23 @@ namespace DRCHECKER {
             res = (dyn_cast<LoadInst>(v)->getPointerOperand() == si->getPointerOperand());
         }
         resCache[si] = res;
+        return res;
+    }
+
+    //Same-Origin store: the src value and dst mem location in the store share a same originating object.
+    //E.g.
+    //%0 <-- load src.f0 
+    //store %0 --> src.f1 // Both the src and dst of the store originate from the "src". 
+    bool InstructionUtils::isSameOriginStore(StoreInst *si) {
+        static std::map<StoreInst*,bool> resCache;
+        if (!si) {
+            return false;
+        }
+        if (resCache.find(si) != resCache.end()) {
+            return resCache[si];
+        }
+        bool res = false;
+        //TODO
         return res;
     }
 
@@ -2335,5 +2357,28 @@ out:
             ++no;
         }
         return nullptr;
+    }
+
+    bool InstructionUtils::isSimilarLoadTag(std::vector<TypeField*> *t0, std::vector<TypeField*> *t1) {
+        if (t0 == t1) {
+            return true;
+        }
+        if (!t0 || !t1) {
+            return false;
+        }
+        if (t0->size() != t1->size()) {
+            return false;
+        }
+        for (int i = 0; i < t0->size(); ++i) {
+            TypeField *lt0 = (*t0)[i];
+            TypeField *lt1 = (*t1)[i];
+            if (!lt0 || !lt1) {
+                return false;
+            }
+            if (!lt0->isSimilarLoadTag(lt1)) {
+                return false;
+            }
+        }
+        return true;
     }
 }

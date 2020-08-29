@@ -1482,39 +1482,41 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
         // Get all objects pointed by all the objects in the srcPointsTo
 
         // this set stores the <fieldid, targetobject> of all the objects to which the srcPointer points to.
-        std::set<std::pair<long, AliasObject*>> targetObjects;
-        for(PointerPointsTo *currPointsToObj:*srcPointsTo) {
+        std::set<std::pair<long, AliasObject*>> targetObjects, finalObjects;
+        std::set<PointerPointsTo*> *newPointsToInfo = new std::set<PointerPointsTo*>();
+        InstLoc *propInst = new InstLoc(&I,this->currFuncCallSites);
+        long id = 0;
+        for(PointerPointsTo *currPointsToObj : *srcPointsTo) {
             long target_field = currPointsToObj->dstfieldId;
             AliasObject* dstObj = currPointsToObj->targetObject;
             auto to_check = std::make_pair(target_field, dstObj);
-            if(std::find(targetObjects.begin(), targetObjects.end(), to_check) == targetObjects.end()) {
-                targetObjects.insert(targetObjects.end(), to_check);
+            //De-duplication for the target memory locations..
+            if (std::find(targetObjects.begin(), targetObjects.end(), to_check) != targetObjects.end()) {
+                continue;
+            }
+            targetObjects.insert(targetObjects.end(), to_check);
+            //Fetch objects that could be pointed by the pointer in the target mem location.
+            std::set<std::pair<long,AliasObject*>> pointees;
+            dstObj->fetchPointsToObjects(target_field, pointees, propInst);
+            for (auto &e : pointees) {
+                //De-duplication for the pointees of the pointers in those memory locations..
+                if (std::find(finalObjects.begin(), finalObjects.end(), e) != finalObjects.end()) {
+                    continue;
+                }
+                finalObjects.insert(e);
+                //Create the pto for the fetched pointee.
+                PointerPointsTo *pto = new PointerPointsTo(&I, dstObj, target_field, e.second, e.first, 
+                                                           new InstLoc(&I,this->currFuncCallSites), false);
+                //Set up the load tag to handle the potential N*N update problem.
+                pto->loadTag = currPointsToObj->loadTag;
+                pto->loadTag.push_back(new TypeField(srcPointer,id++,(void*)dstObj));
+                newPointsToInfo->insert(newPointsToInfo->end(), pto);
             }
         }
 #ifdef DEBUG_LOAD_INSTR
-        dbgs() << "AliasAnalysisVisitor::visitLoadInst(): #targetObjects: " << targetObjects.size() << "\n";
+        dbgs() << "AliasAnalysisVisitor::visitLoadInst(): #targetObjects: " << targetObjects.size() << " #finalObjects: " 
+        << finalObjects.size() << "\n";
 #endif
-        // Now get the list of objects to which the fieldid of the corresponding object points to.
-        std::set<std::pair<long,AliasObject*>> finalObjects;
-        finalObjects.clear();
-        std::set<PointerPointsTo*> *newPointsToInfo = new std::set<PointerPointsTo*>();
-        InstLoc *propInst = new InstLoc(&I,this->currFuncCallSites);
-        for (const std::pair<long, AliasObject*> &currObjPair : targetObjects) {
-            // fetch objects that could be pointed by the field.
-            std::set<std::pair<long,AliasObject*>> pointees;
-            currObjPair.second->fetchPointsToObjects(currObjPair.first, pointees, propInst);
-            //De-duplication based on pointee.
-            for (auto &e : pointees) {
-                if(std::find(finalObjects.begin(), finalObjects.end(), e) == finalObjects.end()) {
-                    finalObjects.insert(e);
-                    //Create the pto for the fetched pointee.
-                    //NOTE that we also record the src obj|field here in the pto, to help handle the potential N * N update problem.
-                    PointerPointsTo *pto = new PointerPointsTo(&I, currObjPair.second, currObjPair.first, e.second, e.first, 
-                                                               new InstLoc(&I,this->currFuncCallSites), false);
-                    newPointsToInfo->insert(newPointsToInfo->end(), pto);
-                }
-            }
-        }
         if (newPointsToInfo->size() > 0) {
 #ifdef FAST_HEURISTIC
             //A hard limit on #pto, we need to try best to avoid this.
@@ -1542,6 +1544,76 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
         dbgs() << "[TIMING] AliasAnalysisVisitor::visitLoadInst(): ";
         InstructionUtils::getTimeDuration(t0,&dbgs());
 #endif
+    }
+
+    void inferSrcDstMap(StoreInst &I, std::set<PointerPointsTo*> *srcPointsTo, std::set<PointerPointsTo*> *dstPointsTo,
+                        std::map<PointerPointsTo*,std::set<PointerPointsTo*>> &sdMap) {
+        if (!srcPointsTo || !dstPointsTo) {
+            return;
+        }
+#ifdef DEBUG_STORE_INSTR
+        dbgs() << "inferSrcDstMap(): #srcPointsTo: " << srcPointsTo->size() << " #dstPointsTo: " << dstPointsTo->size() << "\n";
+#endif
+        if (dstPointsTo->size() <= 1 || srcPointsTo->empty()) {
+            //No mapping if we only have one dst mem location.
+            return;
+        }
+        //Locate the most recent load tag in common for the src and dst.
+        //First ensure that every dst pto's load tag is similar in hierarchy (i.e. same layer load and same load src).
+        std::vector<TypeField*> *dtag = &((*(dstPointsTo->begin()))->loadTag);
+        for (PointerPointsTo *pto : *dstPointsTo) {
+            if (!InstructionUtils::isSimilarLoadTag(dtag,&(pto->loadTag))) {
+#ifdef DEBUG_STORE_INSTR
+                dbgs() << "inferSrcDstMap(): The load tags are not uniformed between dsts.\n";
+#endif
+                return;
+            }
+        }
+        //Ok, all dst mem locs have similar load tags, now it's the turn of "srcPointsTo".
+        std::vector<TypeField*> *stag = &((*(srcPointsTo->begin()))->loadTag);
+        for (PointerPointsTo *pto : *srcPointsTo) {
+            if (!InstructionUtils::isSimilarLoadTag(stag,&(pto->loadTag))) {
+#ifdef DEBUG_STORE_INSTR
+                dbgs() << "inferSrcDstMap(): The load tags are not uniformed between srcs.\n";
+#endif
+                return;
+            }
+        }
+        //Now decide whether the src and dst load tags have any common links, and if so, find the most recent link.
+        int si,di;
+        for (si = stag->size() - 1; si >=0; --si) {
+            for (di = dtag->size() - 1; di >=0; --di) {
+                if (((*stag)[si])->isSimilarLoadTag((*dtag)[di])) {
+                    break;
+                }
+            }
+        }
+        if (si < 0) {
+            //This means there are no common links between the load tags of the src and dst.. So no N*N update issue here.
+            return;
+        }
+#ifdef DEBUG_STORE_INSTR
+        dbgs() << "inferSrcDstMap(): si: " << si << " di: " << di << " v: " << InstructionUtils::getValueStr(((*stag)[si])->v) << "\n";
+#endif
+        //Ok, now create the mapping between the src and dst, according to the load tags.
+        std::set<PointerPointsTo*> mappedSrc,mappedDst;
+        for (PointerPointsTo *dpto : *dstPointsTo) {
+            TypeField *dt = (dpto->loadTag)[di];
+            for (PointerPointsTo *spto : *srcPointsTo) {
+                TypeField *st = (spto->loadTag)[si];
+                if (dt->isSameLoadTag(st)) {
+                    sdMap[dpto].insert(spto);
+                    mappedSrc.insert(spto);
+                    mappedDst.insert(dpto);
+                }
+            }
+        }
+#ifdef DEBUG_STORE_INSTR
+        dbgs() << "inferSrcDstMap(): #mappedSrc: " << mappedSrc.size() << " #mappedDst " << mappedDst.size() << "\n";
+#endif
+        //TODO: what if not all src or dst are included in the mapping? Should we fall back to the N*N update? 
+        //Or just discard the unmapped ones?
+        return;
     }
 
     void AliasAnalysisVisitor::visitStoreInst(StoreInst &I) {
@@ -1634,14 +1706,23 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
             //TODO: can we ignore the timing info since this is an early return?
             return;
         }
+        //Handle the N*N update case (i.e. there are multiple src pointers and dst mem locations, but instead of letting
+        //every location hold every src pointer, we may need to consider the relationship between src and dst and do the
+        //precise update). One example is as below:
+        //%0 <-- load src.f0 //imagine src now points to N mem locations, so %0 may also have N pointees loaded.
+        //store %0 --> src.f1 //since src has N potential mem locations, so does src.f1, but here it's not precise to do the N*N update
+        //the correct way is to do the 1*1 update for N different src locations - the underlying truth is "src" can only point to
+        //*one* location in the actual run.
+        std::map<PointerPointsTo*,std::set<PointerPointsTo*>> sdMap;
+        inferSrcDstMap(I,srcPointsTo,dstPointsTo,sdMap);
         //NOTE: when processing the store inst we do *not* need to update the pto info for the "targetPointer" - it will
         //always point to the same location(s). What we really need to update is the pto info of the memory location(s) pointed
         //to by the "targetPointer" (i.e. "targetPointer" is a 2nd order pointer).
         int is_weak = dstPointsTo->size() > 1 ? 1 : 0;
         InstLoc *propInst = new InstLoc(&I,this->currFuncCallSites);
-        for (PointerPointsTo *currPointsTo: *dstPointsTo) {
+        for (PointerPointsTo *currPointsTo : *dstPointsTo) {
             //Basic Sanity
-            if(!(currPointsTo->targetPointer == targetPointer || currPointsTo->targetPointer == targetPointer->stripPointerCasts())) {
+            if (!(currPointsTo->targetPointer == targetPointer || currPointsTo->targetPointer == targetPointer->stripPointerCasts())) {
                 dbgs() << "We're going to crash in AliasAnalysisVisitor::visitStoreInst() :( ...\n";
                 dbgs() << "Inst: " << InstructionUtils::getValueStr(&I) << "\n";
                 dbgs() << "currPointsTo->targetPointer: " << InstructionUtils::getValueStr(currPointsTo->targetPointer) << "\n";
@@ -1653,7 +1734,8 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
                 assert(false);
             }
             // perform update
-            currPointsTo->targetObject->updateFieldPointsTo(currPointsTo->dstfieldId, srcPointsTo, propInst, is_weak);
+            std::set<PointerPointsTo*> *ptos = ((sdMap.find(currPointsTo) != sdMap.end()) ? &(sdMap[currPointsTo]) : srcPointsTo);
+            currPointsTo->targetObject->updateFieldPointsTo(currPointsTo->dstfieldId, ptos, propInst, is_weak);
         }
 #ifdef TIMING
         dbgs() << "[TIMING] AliasAnalysisVisitor::visitStoreInst(): ";

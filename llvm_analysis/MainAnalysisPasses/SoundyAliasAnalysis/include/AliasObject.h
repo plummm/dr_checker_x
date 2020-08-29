@@ -162,6 +162,20 @@ namespace DRCHECKER {
         const static long TYPE_CONST=2;
         // The src pointer that points to
         Value *targetPointer;
+        // The load tag is designed to hold the memory access path for a pto record of a top-level llvm var,
+        // this can help us solve the N*N update problem.
+        // e.g.
+        // %0 <-- load src   (say src points to 6 mem locs, each of which holds a pointer that has 2 pointees, so %0 will have 12 ptos)
+        // %1 = GEP %0, off0 (#pto will remain the same between %0 and %1 (or less due to some filtering logics) for non-load IRs)
+        // %2 = GEP %0, off1
+        // %3 <-- load %1    (in theory %1 has 12 #ptos now, assume each also holds a pointer who has 2 pointees, so %3 has 24 #pto)
+        // store %3 --> %2   (will we do a 24*12 update? No, the correct way is a 12*2*1 update...) 
+        // Imagine we now have the load tag for every pointee of %3 (who has 2-layer loads from "src"):
+        // src_pointee[0-11] --> %1_pointee[0-23]
+        // and that for %2 (1 layer load from src):
+        // src_pointee[0-11]
+        // By inspecting the load tags of %3 and %2, we can naturally have 12*2*1 pto pairs by "src_pointee[0-11]".
+        std::vector<TypeField*> loadTag;
 
         PointerPointsTo(PointerPointsTo *srcPointsTo): ObjectPointsTo(srcPointsTo) {
             this->targetPointer = srcPointsTo->targetPointer;
@@ -200,6 +214,7 @@ namespace DRCHECKER {
             PointerPointsTo *pto = new PointerPointsTo(targetPointer,targetObject,dstfieldId,propagatingInst,is_Weak);
             pto->fieldId = this->fieldId;
             pto->srcObject = this->srcObject;
+            pto->loadTag = this->loadTag;
             return pto;
         }
 
@@ -560,6 +575,15 @@ namespace DRCHECKER {
             this->embObjs[fieldId] = dstObject;
             dstObject->parent = this;
             dstObject->parent_field = fieldId;
+        }
+
+        //get the outermost parent object.
+        AliasObject *getTopParent() {
+            AliasObject *obj = this;
+            while (obj->parent) {
+                obj = obj->parent;
+            }
+            return obj;
         }
 
         bool getPossibleMemberFunctions_dbg(Instruction *inst, FunctionType *targetFunctionType, Type *host_ty, 

@@ -77,38 +77,56 @@ namespace DRCHECKER {
         }
     };
 
+    //This is a multi-purpose class to provide some infos.
     class TypeField {
         public:
-        TypeField() {
-            this->ty = nullptr;
-            this->fid = 0;
-            this->priv = nullptr;
-            this->tf = nullptr;
-        }
-
-        TypeField(Type *ty, long fid, void *priv = nullptr, void *tf = nullptr) {
+        TypeField(Type *ty, long fid, void *priv = nullptr, void *tf = nullptr, Value *v = nullptr) {
             this->ty = ty;
             this->fid = fid;
             this->priv = priv;
             this->tf = tf;
+            this->v = v;
         }
-        
+
         TypeField(TypeField *other) {
             if (other) {
                 this->ty = other->ty;
                 this->fid = other->fid;
                 this->priv = other->priv;
                 this->tf = other->tf;
+                this->v = other->v;
             }
         }
 
+        //Constructor wrapper 0: null.
+        TypeField(): TypeField(nullptr,0,nullptr,nullptr,nullptr) {}
+
+        //Constructor wrapper 1: mainly used to hold a load tag (i.e. load src pointer, object and field).
+        TypeField(Value *v, long fid, void *obj): TypeField(nullptr,fid,obj,nullptr,v) {}
+        
         bool is_same_ty(TypeField *tf);
 
+        //As long as two load tags have the same "v" (i.e. load src pointer), we say they are similar.
+        bool isSimilarLoadTag(TypeField *tf) {
+            if (!tf) {
+                return false;
+            }
+            return (this->v == tf->v);
+        }
+
+        bool isSameLoadTag(TypeField *tf) {
+            if (!tf) {
+                return false;
+            }
+            return (this->v == tf->v && this->fid == tf->fid);
+        }
+ 
         Type *ty = nullptr;
         long fid = 0;
         void *priv = nullptr;
         //Used to hold a TaintFlag* in some cases.
         void *tf = nullptr;
+        Value *v = nullptr;
     };
 
     class InstructionUtils {
@@ -202,6 +220,8 @@ namespace DRCHECKER {
         static Value *stripAllSoleTrans(Value *v);
 
         static bool isSelfStore(StoreInst *si);
+
+        static bool isSameOriginStore(StoreInst *si);
 
         static void stripFuncNameSuffix(std::string *fn);
 
@@ -307,6 +327,8 @@ namespace DRCHECKER {
         static BasicBlock *getSinglePredecessor(BasicBlock *bb);
         
         static Argument *getArg(Function *func, unsigned n);
+        
+        static bool isSimilarLoadTag(std::vector<TypeField*> *t0, std::vector<TypeField*> *t1);
     };
 
 }
