@@ -2359,26 +2359,25 @@ out:
         return nullptr;
     }
 
-    bool InstructionUtils::isSimilarLoadTag(std::vector<TypeField*> *t0, std::vector<TypeField*> *t1) {
-        if (t0 == t1) {
-            return true;
-        }
+    int InstructionUtils::isSimilarLoadTag(std::vector<TypeField*> *t0, std::vector<TypeField*> *t1) {
         if (!t0 || !t1) {
-            return false;
+            return 0;
         }
-        if (t0->size() != t1->size()) {
-            return false;
+        if (t0 == t1) {
+            return t0->size();
         }
-        for (int i = 0; i < t0->size(); ++i) {
-            TypeField *lt0 = (*t0)[i];
-            TypeField *lt1 = (*t1)[i];
+        int n = 1;
+        while (t0->size() >= n && t1->size() >= n) {
+            TypeField *lt0 = (*t0)[t0->size() - n];
+            TypeField *lt1 = (*t1)[t1->size() - n];
             if (!lt0 || !lt1) {
-                return false;
+                return n-1;
             }
             if (!lt0->isSimilarLoadTag(lt1)) {
-                return false;
+                return n-1;
             }
+            ++n;
         }
-        return true;
+        return n-1;
     }
 }

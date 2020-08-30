@@ -352,7 +352,10 @@ namespace DRCHECKER {
                 if (currPointsTo->propagatingInst) {
                     propInst = dyn_cast<Instruction>(currPointsTo->propagatingInst->inst);
                 }
-                if (InstructionUtils::isPrimitivePtr(srcPointer->getType(),8) || matchPtoTy(srcPointer,currPointsTo,propInst) > 0) {
+                if (InstructionUtils::isPrimitivePtr(srcPointer->getType()) ||
+                    InstructionUtils::isPrimitiveTy(srcPointer->getType()) ||
+                    matchPtoTy(srcPointer,currPointsTo,propInst) > 0) 
+                {
                     matchedPtos.insert(currPointsTo);
                 }else {
                     unmatchedPtos.insert(currPointsTo);
@@ -861,8 +864,15 @@ void AliasAnalysisVisitor::visitPHINode(PHINode &I) {
     */
 #endif
 
-    std::set<PointerPointsTo*>* finalPointsToInfo = mergePointsTo(allVals, &I);
-    if(finalPointsToInfo != nullptr) {
+    std::set<PointerPointsTo*> *finalPointsToInfo = mergePointsTo(allVals, &I);
+    if (finalPointsToInfo != nullptr) {
+        // Attach the load tag of this phi merge.
+        if (finalPointsToInfo->size() > 1) {
+            int id = 0;
+            for (PointerPointsTo *pto : *finalPointsToInfo) {
+                pto->loadTag.push_back(new TypeField(&I,id++,nullptr));
+            }
+        }
         // Update the points to object of the current instruction.
         this->updatePointsToObjects(&I, finalPointsToInfo);
 #ifdef DEBUG_PHI_INSTR
@@ -1561,8 +1571,14 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
         //Locate the most recent load tag in common for the src and dst.
         //First ensure that every dst pto's load tag is similar in hierarchy (i.e. same layer load and same load src).
         std::vector<TypeField*> *dtag = &((*(dstPointsTo->begin()))->loadTag);
+        std::vector<TypeField*> *stag = &((*(srcPointsTo->begin()))->loadTag);
+        if (dtag->empty() || stag->empty()) {
+            return;
+        }
+        int dl = dtag->size(), sl = stag->size(); 
         for (PointerPointsTo *pto : *dstPointsTo) {
-            if (!InstructionUtils::isSimilarLoadTag(dtag,&(pto->loadTag))) {
+            dl = std::min(dl,InstructionUtils::isSimilarLoadTag(dtag,&(pto->loadTag)));
+            if (dl <= 0) {
 #ifdef DEBUG_STORE_INSTR
                 dbgs() << "inferSrcDstMap(): The load tags are not uniformed between dsts.\n";
 #endif
@@ -1570,9 +1586,9 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
             }
         }
         //Ok, all dst mem locs have similar load tags, now it's the turn of "srcPointsTo".
-        std::vector<TypeField*> *stag = &((*(srcPointsTo->begin()))->loadTag);
         for (PointerPointsTo *pto : *srcPointsTo) {
-            if (!InstructionUtils::isSimilarLoadTag(stag,&(pto->loadTag))) {
+            sl = std::min(sl,InstructionUtils::isSimilarLoadTag(stag,&(pto->loadTag)));
+            if (sl <= 0) {
 #ifdef DEBUG_STORE_INSTR
                 dbgs() << "inferSrcDstMap(): The load tags are not uniformed between srcs.\n";
 #endif
@@ -1581,26 +1597,30 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
         }
         //Now decide whether the src and dst load tags have any common links, and if so, find the most recent link.
         int si,di;
-        for (si = stag->size() - 1; si >=0; --si) {
-            for (di = dtag->size() - 1; di >=0; --di) {
-                if (((*stag)[si])->isSimilarLoadTag((*dtag)[di])) {
+        for (si = 1; si <= sl; ++si) {
+            for (di = 1; di <= dl; ++di) {
+                if (((*stag)[stag->size()-si])->isSimilarLoadTag((*dtag)[dtag->size()-di])) {
                     break;
                 }
             }
         }
-        if (si < 0) {
+        if (si > sl) {
             //This means there are no common links between the load tags of the src and dst.. So no N*N update issue here.
+#ifdef DEBUG_STORE_INSTR
+            dbgs() << "inferSrcDstMap(): No common tags between src and dst.\n";
+#endif
             return;
         }
 #ifdef DEBUG_STORE_INSTR
-        dbgs() << "inferSrcDstMap(): si: " << si << " di: " << di << " v: " << InstructionUtils::getValueStr(((*stag)[si])->v) << "\n";
+        dbgs() << "inferSrcDstMap(): sl/si: " << sl << "/" << si << " dl/di: " << dl << "/" << di 
+        << " v: " << InstructionUtils::getValueStr(((*stag)[si])->v) << "\n";
 #endif
         //Ok, now create the mapping between the src and dst, according to the load tags.
         std::set<PointerPointsTo*> mappedSrc,mappedDst;
         for (PointerPointsTo *dpto : *dstPointsTo) {
-            TypeField *dt = (dpto->loadTag)[di];
+            TypeField *dt = (dpto->loadTag)[dpto->loadTag.size()-di];
             for (PointerPointsTo *spto : *srcPointsTo) {
-                TypeField *st = (spto->loadTag)[si];
+                TypeField *st = (spto->loadTag)[spto->loadTag.size()-si];
                 if (dt->isSameLoadTag(st)) {
                     sdMap[dpto].insert(spto);
                     mappedSrc.insert(spto);
@@ -1612,7 +1632,30 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
         dbgs() << "inferSrcDstMap(): #mappedSrc: " << mappedSrc.size() << " #mappedDst " << mappedDst.size() << "\n";
 #endif
         //TODO: what if not all src or dst are included in the mapping? Should we fall back to the N*N update? 
-        //Or just discard the unmapped ones?
+        //Or just discard the unmapped ones? Currently we do the later.
+        //Print out the missing src/dst.
+        if (mappedSrc.size() < srcPointsTo->size()) {
+            for (PointerPointsTo *pto : *srcPointsTo) {
+                if (mappedSrc.find(pto) == mappedSrc.end()) {
+#ifdef DEBUG_STORE_INSTR
+                    dbgs() << "[MISSING SRC]: ";
+                    pto->print(dbgs());
+#endif
+                }
+            }
+        }
+        if (mappedDst.size() < dstPointsTo->size()) {
+            for (PointerPointsTo *pto : *dstPointsTo) {
+                if (mappedDst.find(pto) == mappedDst.end()) {
+#ifdef DEBUG_STORE_INSTR
+                    dbgs() << "[MISSING DST]: ";
+                    pto->print(dbgs());
+#endif
+                    //This forces the pto update process to skip the dst mem loc..
+                    sdMap[pto].clear();
+                }
+            }
+        }
         return;
     }
 

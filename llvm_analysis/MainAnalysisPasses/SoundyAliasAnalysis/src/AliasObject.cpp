@@ -383,10 +383,10 @@ namespace DRCHECKER {
             host->getEqvArrayElm(srcfieldId,eqs);
             if (eqs.size() > 1) {
 #ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-                dbgs() << "AliasObject::fetchPointsToObjects: equivalent obj|field identified!!\n";
+                dbgs() << "AliasObject::fetchPointsToObjects: equivalent obj|field identified, cnt: " << eqs.size() << "\n";
 #endif
                 for (TypeField *e : eqs) {
-                    if (e->fid != srcfieldId && e->priv != host) {
+                    if (e->fid != srcfieldId || e->priv != host) {
                         //This is an equivelant (but not identical) obj|field combo to the current pointee,
                         //we simply retrieve their pointee (but not create dummy pointee) and we will not
                         //recursively invoke "getEqvArrayElm" when doing so (which will trap into an
@@ -1725,6 +1725,11 @@ namespace DRCHECKER {
                 OS << "FUNC " << dyn_cast<Function>(tv)->getName().str();
             }else {
                 OS << InstructionUtils::getValueStr(tv);
+            }
+            //print the load tags.
+            OS << ", loadTag: ";
+            for (TypeField *tf : this->loadTag) {
+                OS << InstructionUtils::getValueStr(tf->v) << " [" << tf->fid << "] -> ";
             }
             OS << "\n";
         }else {
