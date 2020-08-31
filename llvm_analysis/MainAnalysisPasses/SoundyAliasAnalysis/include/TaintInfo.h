@@ -279,6 +279,7 @@ namespace DRCHECKER {
             this->tag = copyTaint->tag;
             this->is_weak = copyTaint->is_weak;
             this->is_active = copyTaint->is_active;
+            this->loadTag = copyTaint->loadTag;
         }
 
         //hz: A copy w/ a different tag.
@@ -291,6 +292,7 @@ namespace DRCHECKER {
             this->tag = tag;
             this->is_weak = copyTaint->is_weak;
             this->is_active = copyTaint->is_active;
+            this->loadTag = copyTaint->loadTag;
         }
 
         //Destructors
@@ -447,6 +449,9 @@ namespace DRCHECKER {
         // flag to indicate the taint flag.
         //NOTE that if this is "false", we treat it as a taint kill (sanitizer)..
         bool is_tainted;
+
+        // The same loadTag as in PointerPointsTo (someday we need to unify the point-to and taint analysis...).
+        std::vector<TypeField*> loadTag;
     private:
 
     };

@@ -1216,6 +1216,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
                 }
             } //For loop
         } else {
+            delete(resPointsTo);
             return srcPointsTo;
         }
         delete(srcPointsTo);
@@ -1603,7 +1604,13 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
                     break;
                 }
             }
+            if (di <= dl) {
+                break;
+            }
         }
+#ifdef DEBUG_STORE_INSTR
+        dbgs() << "inferSrcDstMap(): sl/si: " << sl << "/" << si << ", dl/di: " << dl << "/" << di << "\n";
+#endif
         if (si > sl) {
             //This means there are no common links between the load tags of the src and dst.. So no N*N update issue here.
 #ifdef DEBUG_STORE_INSTR
@@ -1612,8 +1619,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
             return;
         }
 #ifdef DEBUG_STORE_INSTR
-        dbgs() << "inferSrcDstMap(): sl/si: " << sl << "/" << si << " dl/di: " << dl << "/" << di 
-        << " v: " << InstructionUtils::getValueStr(((*stag)[si])->v) << "\n";
+        dbgs() << "inferSrcDstMap(): v: " << InstructionUtils::getValueStr(((*stag)[stag->size()-si])->v) << "\n";
 #endif
         //Ok, now create the mapping between the src and dst, according to the load tags.
         std::set<PointerPointsTo*> mappedSrc,mappedDst;

@@ -158,8 +158,8 @@ namespace DRCHECKER {
 
     }
 
-    void TaintAnalysisVisitor::addNewTaintFlag(std::set<TaintFlag*> *newTaintInfo, TaintFlag *newTaintFlag) {
-        TaintUtils::addNewTaintFlag(newTaintInfo, newTaintFlag);
+    int TaintAnalysisVisitor::addNewTaintFlag(std::set<TaintFlag*> *newTaintInfo, TaintFlag *newTaintFlag) {
+        return TaintUtils::addNewTaintFlag(newTaintInfo, newTaintFlag);
     }
 
     void TaintAnalysisVisitor::visitAllocaInst(AllocaInst &I) {
@@ -262,8 +262,6 @@ namespace DRCHECKER {
     }
 
     void TaintAnalysisVisitor::visitLoadInst(LoadInst &I) {
-
-
 #ifdef DEBUG_LOAD_INSTR
         dbgs() << "TaintAnalysisVisitor::visitLoadInst(): " << InstructionUtils::getValueStr(&I) << "\n";
 #endif
@@ -313,41 +311,34 @@ namespace DRCHECKER {
         if(srcPointsTo != nullptr) {
             // this set stores the <fieldid, targetobject> of all the objects to which the srcPointer points to.
             std::set<std::pair<long, AliasObject *>> targetObjects;
-            for (PointerPointsTo *currPointsToObj:*srcPointsTo) {
+            for (PointerPointsTo *currPointsToObj : *srcPointsTo) {
                 long target_field = currPointsToObj->dstfieldId;
                 AliasObject *dstObj = currPointsToObj->targetObject;
                 auto to_check = std::make_pair(target_field, dstObj);
                 if (std::find(targetObjects.begin(), targetObjects.end(), to_check) == targetObjects.end()) {
                     targetObjects.insert(targetObjects.end(), to_check);
+                    //Ok, now fetch the taint flags from the object field..
+                    std::set<TaintFlag*> fieldTaintInfo, nTaintInfo;
+                    dstObj->getFieldTaintInfo(target_field,fieldTaintInfo,this->makeInstLoc(&I));
+                    if (fieldTaintInfo.empty()) {
+#ifdef DEBUG_LOAD_INSTR
+                        dbgs() << "No taint information available for: " << (const void*)dstObj << "|" << target_field << "\n";
+#endif
+                        continue;
+                    }
+                    this->makeTaintInfoCopy(&I, &fieldTaintInfo, &nTaintInfo);
+                    //Now set up the load tag for the new TFs and insert them into the final "newTaintInfo".
+                    for (TaintFlag *tf : nTaintInfo) {
+                        if (TaintAnalysisVisitor::addNewTaintFlag(newTaintInfo,tf)) {
+                            //TF inserted, set up the load tag.
+                            tf->loadTag = currPointsToObj->loadTag;
+                        }
+                    }
                 }
             }
-
-            // make sure we have some objects.
-            assert(targetObjects.size() > 0);
-
 #ifdef DEBUG_LOAD_INSTR
-            dbgs() << "Got point-to objs for srcPointer, #: " << targetObjects.size() << "\n";
+            dbgs() << "Got pointee objs of srcPointer, #: " << targetObjects.size() << "\n";
 #endif
-            // add the taint from the corresponding fields of the objects.
-            for (auto fieldObject: targetObjects) {
-                long currFieldID = fieldObject.first;
-                AliasObject *currObject = fieldObject.second;
-                // get the taint info of the field.
-                std::set<TaintFlag*> fieldTaintInfo;
-                currObject->getFieldTaintInfo(currFieldID,fieldTaintInfo,this->makeInstLoc(&I));
-#ifdef DEBUG_LOAD_INSTR
-                dbgs() << "Trying to get taint from object: " << (const void*)currObject << " fieldID:" << currFieldID << "\n";
-#endif
-                // if the field is tainted, add the taint from the field
-                // to the result of this instruction.
-                if (fieldTaintInfo.size()) {
-                    this->makeTaintInfoCopy(&I, &fieldTaintInfo, newTaintInfo);
-                } else {
-#ifdef DEBUG_LOAD_INSTR
-                    dbgs() << "No taint information available!\n";
-#endif
-                }
-            }
         } else {
 #ifdef DEBUG_LOAD_INSTR
             dbgs() << "TaintAnalysis: Src Pointer does not point to any object.\n";
@@ -410,7 +401,6 @@ namespace DRCHECKER {
             return;
         }
         bool multi_pto = (targetObjects.size() > 1); 
-
         //There are 2 situations here:
         //1. the src value is tainted, then we need to propagate the taint flags;
         //2. it's not tainted, then this is actually a taint kill if (1) there is only one target 

@@ -141,7 +141,7 @@ namespace DRCHECKER {
          * @param newTaintInfo set of taint flag to which the new taint flag should be added.
          * @param newTaintFlag new taint flag that needs to be added.
          */
-        static void addNewTaintFlag(std::set<TaintFlag*> *newTaintInfo, TaintFlag *newTaintFlag);
+        static int addNewTaintFlag(std::set<TaintFlag*> *newTaintInfo, TaintFlag *newTaintFlag);
 
         /***
          * Propogate taint to the provided arguments according to their index.

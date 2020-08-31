@@ -179,6 +179,7 @@ namespace DRCHECKER {
 
         PointerPointsTo(PointerPointsTo *srcPointsTo): ObjectPointsTo(srcPointsTo) {
             this->targetPointer = srcPointsTo->targetPointer;
+            this->loadTag = srcPointsTo->loadTag;
         }
 
         PointerPointsTo(Value *targetPointer, AliasObject *srcObject, long fieldId, AliasObject *targetObject, long dstfieldId, 
