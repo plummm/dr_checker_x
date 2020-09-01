@@ -309,7 +309,7 @@ namespace DRCHECKER {
         std::set<PointerPointsTo*>* srcPointsTo = PointsToUtils::getPointsToObjects(currState,
                                                                                     this->currFuncCallSites,
                                                                                     srcPointer);
-        if(srcPointsTo != nullptr) {
+        if (srcPointsTo != nullptr) {
             // this set stores the <fieldid, targetobject> of all the objects to which the srcPointer points to.
             std::set<std::pair<long, AliasObject *>> targetObjects;
             for (PointerPointsTo *currPointsToObj : *srcPointsTo) {
@@ -345,7 +345,6 @@ namespace DRCHECKER {
             dbgs() << "TaintAnalysis: Src Pointer does not point to any object.\n";
 #endif
         }
-
         if(newTaintInfo->size()) {
             // okay. Now add the newTaintInfo
 #ifdef DEBUG_LOAD_INSTR

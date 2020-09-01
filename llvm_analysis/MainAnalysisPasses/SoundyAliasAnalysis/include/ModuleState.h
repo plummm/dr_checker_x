@@ -1001,6 +1001,26 @@ namespace DRCHECKER {
             return false;
         }
 
+        //NOTE: in this function we use quite some heuristics.
+        static bool valid_history(std::vector<std::pair<long, AliasObject*>>& history) {
+            if (history.size() < 16) {
+                return true;
+            }
+            //Ok it's a long history, if it also contains some same typed object types, let's say it's invalid.
+            std::set<Type*> tys;
+            for (auto &e : history) {
+                AliasObject *obj = e.second;
+                if (!obj) {
+                    return false;
+                }
+                if (tys.find(obj->targetType) != tys.end()) {
+                    return false;
+                }
+                tys.insert(obj->targetType);
+            }
+            return true;
+        }
+
         typedef int (*traverseHierarchyCallback)(std::vector<std::pair<long, AliasObject*>>& chain, bool recur);
 
         //Visit every object hierarchy chain ending w/ field "fid" of "obj", for each chain, invoke the passed-in callback
@@ -1011,6 +1031,17 @@ namespace DRCHECKER {
             dbgs() << layer << " traverseHierarchy(): " << (obj ? InstructionUtils::getTypeStr(obj->targetType) : "") 
             << " | " << field << " ID: " << (const void*)obj << "\n";
 #endif
+            if (!valid_history(history)) {
+                //The history is too long or contains some duplicated elements (maybe due to the FP in static analysis),
+                //so we decide to stop here...
+#ifdef DEBUG_HIERARCHY
+                dbgs() << layer << " traverseHierarchy(): Too long a history, unlikely to be real, stop..\n";
+#endif
+                if (cb) {
+                    (*cb)(history,false);
+                }
+                return 1;
+            }
             if (!obj) {
 #ifdef DEBUG_HIERARCHY
                 dbgs() << layer << " traverseHierarchy(): null obj.\n";
