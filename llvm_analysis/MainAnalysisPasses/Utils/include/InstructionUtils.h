@@ -329,6 +329,8 @@ namespace DRCHECKER {
         static Argument *getArg(Function *func, unsigned n);
         
         static int isSimilarLoadTag(std::vector<TypeField*> *t0, std::vector<TypeField*> *t1);
+
+        static int matchLoadTags(std::vector<TypeField*> *t0, std::vector<TypeField*> *t1, int l0 = 0, int l1 = 0);
     };
 
 }

@@ -2380,4 +2380,35 @@ out:
         }
         return n-1;
     }
+
+    //Return 1 if two load tags are consistent, -1 if not, 0 if we are not sure (e.g. cannot compare since there are no common
+    //values in the load tags).
+    int InstructionUtils::matchLoadTags(std::vector<TypeField*> *t0, std::vector<TypeField*> *t1, int l0, int l1) {
+        if (!t0 || !t1) {
+            return 0;
+        }
+        if (t0->empty() || t1->empty()) {
+            return 0;
+        }
+        if (t0 == t1) {
+            return 1;
+        }
+        if (l0 <= 0 || l0 > t0->size()) {
+            l0 = t0->size();
+        }
+        if (l1 <= 0 || l1 > t1->size()) {
+            l1 = t1->size();
+        }
+        int i,j;
+        for (i = 1; i <= l0; ++i) {
+            TypeField *tf0 = (*t0)[t0->size()-i];
+            for (j = 1; j <= l1; ++j) {
+                TypeField *tf1 = (*t1)[t1->size()-j];
+                if (tf0->v == tf1->v) {
+                    return (tf0->fid == tf1->fid ? 1 : -1);
+                }
+            }
+        }
+        return 0;
+    }
 }

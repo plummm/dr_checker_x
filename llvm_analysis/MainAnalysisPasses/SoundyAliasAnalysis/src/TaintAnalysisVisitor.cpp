@@ -17,6 +17,7 @@ namespace DRCHECKER {
 //#define DEBUG_BIN_INSTR
 #define ENFORCE_TAINT_PATH
 //#define DEBUG_ENFORCE_TAINT_PATH
+#define DEBUG_STORE_INSTR_MAPPING
 
     InstLoc *TaintAnalysisVisitor::makeInstLoc(Value *v) {
         return new InstLoc(v,this->currFuncCallSites);
@@ -357,6 +358,62 @@ namespace DRCHECKER {
 
     }
 
+    void inferTaintMap(StoreInst &I, std::set<TaintFlag*> *srcTFs, std::set<PointerPointsTo*> *dstPtos, 
+                       std::map<PointerPointsTo*,std::set<TaintFlag*>> &taintMap) {
+        if (!srcTFs || !dstPtos) {
+            return;
+        }
+#ifdef DEBUG_STORE_INSTR_MAPPING
+        dbgs() << "inferTaintMap(): #srcTFs: " << srcTFs->size() << " #dstPtos: " << dstPtos->size() << "\n";
+#endif
+        if (srcTFs->empty() || dstPtos->size() <= 1) {
+            return;
+        }
+        //Verify that the dst pointees share a unified loadTag.
+        std::vector<TypeField*> *dtag = &((*(dstPtos->begin()))->loadTag);
+        int dl = dtag->size(); 
+        for (PointerPointsTo *pto : *dstPtos) {
+            dl = std::min(dl,InstructionUtils::isSimilarLoadTag(dtag,&(pto->loadTag)));
+            if (dl <= 0) {
+#ifdef DEBUG_STORE_INSTR_MAPPING
+                dbgs() << "inferTaintMap(): The load tags are not uniformed between dsts.\n";
+#endif
+                return;
+            }
+        }
+        //Set up the mapping, note that here we skip the unification verification step for the src as in point-to analysis,
+        //since unlike the pto records, the taint flags have multiple different sources (e.g. in a load IR they can be from both
+        //the src pointer itself and the pointee mem locations..). So what we do here is more aggressive: to try best to match 
+        //those TFs that can be addressed to a certain dst mem location, and only for the remaining, propagate them to all dsts.
+        std::set<TaintFlag*> addedTFs;
+        for (PointerPointsTo *pto : *dstPtos) {
+            std::vector<TypeField*> *dt = &(pto->loadTag);
+            taintMap[pto].clear();
+            for (TaintFlag *tf : *srcTFs) {
+                std::vector<TypeField*> *st = &(tf->loadTag);
+                if (InstructionUtils::matchLoadTags(dt,st,dl,0) >= 0) {
+                    taintMap[pto].insert(tf);
+                    addedTFs.insert(tf);
+                }else {
+#ifdef DEBUG_STORE_INSTR_MAPPING
+                    dbgs() << "inferTaintMap(): Skip the TF: ";
+                    tf->dumpInfo_light(dbgs(),false);
+                    dbgs() << " for " << pto->targetObject << "|" << pto->dstfieldId << "\n";
+#endif
+                }
+            }
+        }
+        //TODO: What to do w/ the unmapped TFs..
+        /*
+        if (addedTFs.size() < srcTFs->size()) {
+            for (TaintFlag *tf : *srcTFs) {
+                if (addedTFs.find(tf) == addedTFs.end()) {
+                }
+            }
+        }
+        */
+    }
+
     void TaintAnalysisVisitor::visitStoreInst(StoreInst &I) {
 #ifdef DEBUG_STORE_INSTR
         dbgs() << "TaintAnalysisVisitor::visitStoreInst(): " << InstructionUtils::getValueStr(&I) << "\n";
@@ -380,36 +437,42 @@ namespace DRCHECKER {
                 dstPointer = dstPointer->stripPointerCasts();
             }
         }
-        std::set<PointerPointsTo*>* dstPointsTo = PointsToUtils::getPointsToObjects(currState, this->currFuncCallSites, dstPointer);
-        // this set stores the <fieldid, targetobject> of all the objects to which the dstPointer points to.
-        std::set<std::pair<long, AliasObject *>> targetObjects;
+        std::set<PointerPointsTo*> *dstPointsTo = PointsToUtils::getPointsToObjects(currState, this->currFuncCallSites, dstPointer);
+        std::set<PointerPointsTo*> uniqueDstPto;
         if(dstPointsTo != nullptr) {
             for (PointerPointsTo *currPointsToObj : *dstPointsTo) {
-                long target_field = currPointsToObj->dstfieldId;
-                AliasObject *dstObj = currPointsToObj->targetObject;
-                auto to_check = std::make_pair(target_field, dstObj);
-                if (std::find(targetObjects.begin(), targetObjects.end(), to_check) == targetObjects.end()) {
-                    targetObjects.insert(targetObjects.end(), to_check);
+                if (std::find_if(uniqueDstPto.begin(),uniqueDstPto.end(),[currPointsToObj](const PointerPointsTo *pto){
+                    return currPointsToObj->pointsToSameObject(pto);
+                }) == uniqueDstPto.end())
+                {
+                    uniqueDstPto.insert(currPointsToObj);
                 }
             }
         }
 #ifdef DEBUG_STORE_INSTR
-        dbgs() << "TaintAnalysisVisitor::visitStoreInst: #targetMemLoc: " << targetObjects.size() << "\n";
+        dbgs() << "TaintAnalysisVisitor::visitStoreInst: #targetMemLoc: " << uniqueDstPto.size() << "\n";
 #endif
-        if (targetObjects.empty()) {
+        if (uniqueDstPto.empty()) {
             //Nowhere to taint..
             return;
         }
-        bool multi_pto = (targetObjects.size() > 1); 
-        //There are 2 situations here:
-        //1. the src value is tainted, then we need to propagate the taint flags;
-        //2. it's not tainted, then this is actually a taint kill if (1) there is only one target 
-        //mem location (otherwise this is a weak taint kill that we will not honor to be conservative). 
-        //and (2) the target mem location is tainted now (otherwise no need to kill). If so then we also need to propagate the taint kill flag.
+        bool multi_pto = (uniqueDstPto.size() > 1); 
+        //Prepare either the taint flags or the taint kill, and their mapping to the taint dst.
         std::set<TaintFlag*> newTaintInfo;
+        //The mapping between the taint dst and the TFs to propagate.
+        std::map<PointerPointsTo*,std::set<TaintFlag*>> taintMap;
         if (srcTaintInfo && !srcTaintInfo->empty()) {
+            //The src value is tainted, then we need to propagate the taint flags;
             TaintAnalysisVisitor::makeTaintInfoCopy(&I,srcTaintInfo,&newTaintInfo);
+            //Try to set up the mapping between the taint flags and the taint dst if there are more than one dst.
+            if (multi_pto) {
+                inferTaintMap(I,&newTaintInfo,&uniqueDstPto,taintMap);
+            }
         }else {
+            //It's not tainted, then this is actually a taint kill if (1) there is only one target 
+            //mem location (otherwise this is a weak taint kill that we will not honor to be conservative). 
+            //and (2) the target mem location is tainted now (otherwise no need to kill). 
+            //If so then we also need to propagate the taint kill flag.
             if (!multi_pto) {
                 //Create a taint kill flag.
                 TaintFlag *tf = new TaintFlag(this->makeInstLoc(&I),false,nullptr,false);
@@ -417,27 +480,29 @@ namespace DRCHECKER {
             }
         }
 #ifdef DEBUG_STORE_INSTR
-        dbgs() << "TaintAnalysisVisitor::visitStoreInst: #srcTaintInfo: " << newTaintInfo.size() << "\n";
+        dbgs() << "TaintAnalysisVisitor::visitStoreInst: #newTaintInfo: " << newTaintInfo.size() << "\n";
 #endif
         if (newTaintInfo.empty()) {
             return;
         }
-        //Ok now propagate the taint flags.
-        bool is_added;
-        // Now try to store the newTaintInfo into all of these objects.
-        for (auto newTaintFlag : newTaintInfo) {
-            //First of all, set the "is_weak" flag in the TF indicating whether it's a strong or weak taint.
-            newTaintFlag->is_weak = multi_pto;
-            is_added = false;
-            for (auto fieldObject : targetObjects) {
-                if (fieldObject.second->addFieldTaintFlag(fieldObject.first, newTaintFlag)) {
-                    is_added = true;
+        //Ok now propagate the taint flags to the target mem locs, according to the mapping set up previously.
+        std::set<TaintFlag*> addedTFs;
+        for (PointerPointsTo *pto : uniqueDstPto) {
+            std::set<TaintFlag*> *toAdd = (taintMap.find(pto) == taintMap.end() ? &newTaintInfo : &(taintMap[pto]));
+            for (TaintFlag *tf : *toAdd) {
+                //Don't forget the "is_weak" flag in the TF indicating whether it's a strong or weak taint.
+                tf->is_weak = multi_pto;
+                if (pto->targetObject->addFieldTaintFlag(pto->dstfieldId,tf)) {
+                    addedTFs.insert(tf);
                 }
             }
-            // if the current taint is not added to any object.
-            // delete the newTaint object.
-            if (!is_added) {
-                delete(newTaintFlag);
+        }
+        //Free the memory occupied by the unuseful TFs (e.g. duplicated in the dst mem loc).
+        if (addedTFs.size() < newTaintInfo.size()) {
+            for (TaintFlag *tf : newTaintInfo) {
+                if (addedTFs.find(tf) == addedTFs.end()) {
+                    delete(tf);
+                }
             }
         }
     }
