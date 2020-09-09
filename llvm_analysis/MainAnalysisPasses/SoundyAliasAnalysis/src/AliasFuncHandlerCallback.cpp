@@ -28,8 +28,7 @@ namespace DRCHECKER {
 
     void* AliasFuncHandlerCallback::createNewHeapObject(CallInst &callInst, Function *targetFunction,
                                                        void *private_data) {
-
-        std::vector<Instruction *> *callSitesContext = (std::vector<Instruction *> *)private_data;
+        std::vector<Instruction *> *callSitesContext = (std::vector<Instruction*>*)private_data;
         Value *targetSize = nullptr;
         // if the call is to kmalloc, get the size argument.
         if(this->targetChecker->is_kmalloc_function(targetFunction)) {
@@ -41,12 +40,12 @@ namespace DRCHECKER {
         }
         AliasObject *targetObj = new HeapLocation(callInst, objTy, callSitesContext, targetSize,
                                                   this->targetChecker->is_kmalloc_function(targetFunction));
-        // OK, this is kmalloc function, now check if this is kzmalloc?
         if(this->targetChecker->is_kmalloc_function(targetFunction)) {
+            // OK, this is kmalloc function, now check if this is kzmalloc?
             Value *kmalloc_flag = callInst.getArgOperand(1);
             RangeAnalysis::Range flag_range = this->currState->getRange(kmalloc_flag);
             if(flag_range.isBounded()) {
-                uint64_t lb =flag_range.getLower().getZExtValue();
+                uint64_t lb = flag_range.getLower().getZExtValue();
                 uint64_t ub = flag_range.getUpper().getZExtValue();
                 // These are the flag values given when kzalloc is called.
                 if((lb & 0x8000) || (ub & 0x8000)) {
@@ -67,6 +66,5 @@ namespace DRCHECKER {
         std::set<PointerPointsTo*> *newPointsToInfo = new std::set<PointerPointsTo*>();
         newPointsToInfo->insert(newPointsToInfo->end(), newPointsTo);
         return newPointsToInfo;
-
     }
 }

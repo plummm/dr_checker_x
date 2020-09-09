@@ -252,6 +252,8 @@ namespace DRCHECKER {
 
         static FieldDesc *getHeadFieldDesc(Type *ty);
 
+        static void getHeadTys(Type *ty, std::set<Type*> &rs);
+
         static std::vector<FieldDesc*> *getCompTyDesc(DataLayout *dl, CompositeType *ty);
 
         static bool isTyUsedByFunc(Type *ty, Function *func);

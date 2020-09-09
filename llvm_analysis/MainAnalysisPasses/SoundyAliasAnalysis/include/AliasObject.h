@@ -219,6 +219,11 @@ namespace DRCHECKER {
             return pto;
         }
 
+        //A wrapper for convenience.
+        PointerPointsTo *makeCopyP(Value *targetPointer, InstLoc *propagatingInst = nullptr, bool is_Weak = false) {
+            return this->makeCopyP(targetPointer,this->targetObject,this->dstfieldId,propagatingInst,is_Weak);
+        }
+
         long getTargetType() const {
             // Simple polymorphism.
             return PointerPointsTo::TYPE_CONST;
@@ -358,6 +363,22 @@ namespace DRCHECKER {
             }
         }
 
+        //Imagine that we invoke a memcpy() to make a copy of "this" object, in this case, we need to reserve
+        //the original pto and taint info, recursively copy the embedded objs, but give up records like "pointsFrom"...
+        AliasObject *makeCopy() {
+            AliasObject *obj = new AliasObject();
+            obj->targetType = this->targetType;
+            obj->pointsTo = this->pointsTo;
+            //TODO: update the pointee objs' "pointsFrom"
+            obj->lastPtoReset = this->lastPtoReset;
+            obj->is_initialized = this->is_initialized;
+            obj->initializingInstructions = this->initializingInstructions;
+            obj->is_const = this->is_const;
+            obj->is_taint_src = this->is_taint_src;
+            //TODO: recursively copy the embedded objs, if any.
+            //TODO: copy all the taint flags for each field.
+        }
+
         //If "act" is negative, return # of all pto on file, otherwise, only return active/inactive pto records.
         unsigned long countObjectPointsTo(long srcfieldId, int act = -1) {
             /***
@@ -478,14 +499,7 @@ namespace DRCHECKER {
         //Sometimes the field itself can be another embedded struct, this function intends to return all types at a specific field.
         void getNestedFieldTy(long fid, std::set<Type*> &retSet) {
             Type *ety = (fid ? this->getFieldTy(fid) : this->targetType);
-            if (ety) {
-                FieldDesc *fd = InstructionUtils::getHeadFieldDesc(ety);
-                if (fd) {
-                    for (Type *t : fd->tys) {
-                        retSet.insert(t);
-                    }
-                }
-            }
+            InstructionUtils::getHeadTys(ety,retSet);
             return;
         }
 
@@ -802,13 +816,10 @@ namespace DRCHECKER {
                 std::set<TypeField*> eqs;
                 this->getEqvArrayElm(fid,eqs);
                 if (eqs.size() > 1) {
-#ifdef DEBUG_UPDATE_FIELD_TAINT
-                    //dbgs() << "getFieldTaintInfo(): found eqv obj|fid to current combination, processing...\n";
-#endif
                     for (TypeField *e : eqs) {
-                        if (e->fid != fid && e->priv != this) {
-#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-                            //dbgs() << "AliasObject::getFieldTaintInfo(): ~~>[EQV OBJ] " << (const void*)(e->priv) << "|" << e->fid << "\n";
+                        if (e->fid != fid || e->priv != this) {
+#ifdef DEBUG_FETCH_FIELD_TAINT
+                            dbgs() << "AliasObject::getFieldTaintInfo(): ~~>[EQV OBJ] " << (const void*)(e->priv) << "|" << e->fid << "\n";
 #endif
                             ((AliasObject*)e->priv)->getFieldTaintInfo(e->fid,r,loc,false);
                         }
@@ -831,13 +842,10 @@ namespace DRCHECKER {
                 std::set<TypeField*> eqs;
                 this->getEqvArrayElm(fid,eqs);
                 if (eqs.size() > 1) {
-#ifdef DEBUG_UPDATE_FIELD_TAINT
-                    //dbgs() << "getWinnerTfs(): found eqv obj|fid to current combination, processing...\n";
-#endif
                     for (TypeField *e : eqs) {
-                        if (e->fid != fid && e->priv != this) {
-#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-                            //dbgs() << "AliasObject::getWinnerTfs(): ~~>[EQV OBJ] " << (const void*)(e->priv) << "|" << e->fid << "\n";
+                        if (e->fid != fid || e->priv != this) {
+#ifdef DEBUG_FETCH_FIELD_TAINT
+                            dbgs() << "AliasObject::getWinnerTfs(): ~~>[EQV OBJ] " << (const void*)(e->priv) << "|" << e->fid << "\n";
 #endif
                             ((AliasObject*)e->priv)->getWinnerTfs(e->fid,r,false);
                         }
@@ -967,6 +975,9 @@ namespace DRCHECKER {
         //Set this object as a (global) taint source, i.e., attach an inherent taint tag and flag for each field.
         //The "loc" should usually be the creation site of "this" object.
         bool setAsTaintSrc(InstLoc *loc, bool is_global = true) {
+#ifdef DEBUG_UPDATE_FIELD_TAINT
+            dbgs() << "AliasObject::setAsTaintSrc(): set as taint src, obj: " << (const void*)this << "\n";
+#endif
             Value *v = this->getValue();
             if (v == nullptr && this->targetType == nullptr) {
 #ifdef DEBUG_UPDATE_FIELD_TAINT
@@ -976,9 +987,9 @@ namespace DRCHECKER {
             }
             TaintTag *atag = nullptr;
             if (v) {
-                atag = new TaintTag(0,v,is_global,(void*)this);
+                atag = new TaintTag(-1,is_global,(void*)this);
             }else {
-                atag = new TaintTag(0,this->targetType,is_global,(void*)this);
+                atag = new TaintTag(-1,this->targetType,is_global,(void*)this);
             }
             //NOTE: inehrent TF is born w/ the object who might be accessed in different entry functions, so the "targetInstr" of its
             //inherent TF should be set to "nullptr" to indicate that it's effective globally from the very beginning, so that it can
@@ -1044,6 +1055,8 @@ namespace DRCHECKER {
                 }
             }
             //Sync the "all_contents_taint_flags" w/ the newly available individual fields.
+            //TODO: if "all_contents_taint_flags" is inherent, then we need to create different tags for each new field and set
+            //individual inherent tag.
             if (addFields.size() && !this->all_contents_taint_flags.empty()) {
                 std::set<TaintFlag*> all_tfs;
                 this->all_contents_taint_flags.getTf(loc,all_tfs);

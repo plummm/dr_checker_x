@@ -524,7 +524,7 @@ namespace DRCHECKER {
 #ifdef DEBUG_CALL_INSTR
         dbgs() << "Propagating Taint To Arguments.\n";
 #endif
-        for(auto currArgNo : taintedArgs) {
+        for (auto currArgNo : taintedArgs) {
             Value *currArg = I.getArgOperand(currArgNo);
 #ifdef DEBUG_CALL_INSTR
             dbgs() << "Current argument: " << InstructionUtils::getValueStr(currArg) << "\n";
@@ -538,9 +538,9 @@ namespace DRCHECKER {
                                                                 this->currFuncCallSites,
                                                                 currArg);
             }
-            if(dstPointsTo != nullptr) {
+            if (dstPointsTo != nullptr) {
                 std::set<std::pair<long, AliasObject *>> targetObjects;
-                for (PointerPointsTo *currPointsToObj:*dstPointsTo) {
+                for (PointerPointsTo *currPointsToObj : *dstPointsTo) {
                     long target_field = currPointsToObj->dstfieldId;
                     AliasObject *dstObj = currPointsToObj->targetObject;
                     if (!dstObj) {
@@ -560,7 +560,8 @@ namespace DRCHECKER {
 
                 for(auto fieldObject : targetObjects) {
                     //Taint Tag represents the taint source, here it's the user provided data passed by functions like copy_from_user()...
-                    //But we actually don't have value/type/AliasObject for this user input, so just create a dummy Tag to stand for a certain user input.
+                    //But we actually don't have value/type/AliasObject for this user input, so just create a dummy 
+                    //Tag to stand for a certain user input.
                     TaintTag *tag = new TaintTag(0,(Type*)nullptr,false,nullptr);
                     //NOTE: "is_weak" is decided by whether there are multiple pointees.
                     TaintFlag *tf = new TaintFlag(currInst,true,tag,multi_pto);
@@ -576,7 +577,7 @@ namespace DRCHECKER {
                         dbgs() << "Adding Taint To All fields:"<< fieldObject.first << " of:" << fieldObject.second << ":Success\n";
 #endif
                         is_added = true;
-                    }else {
+                    } else {
 #ifdef DEBUG_CALL_INSTR
                         dbgs() << "Adding Arg Taint Failed.\n";
 #endif
@@ -678,21 +679,20 @@ namespace DRCHECKER {
 
     void TaintAnalysisVisitor::handleKernelInternalFunction(CallInst &I, Function *currFunc) {
         // see if this is a taint initiator function.
-        if(TaintAnalysisVisitor::functionChecker->is_taint_initiator(currFunc)) {
+        if (TaintAnalysisVisitor::functionChecker->is_taint_initiator(currFunc)) {
 #ifdef DEBUG_CALL_INSTR
             dbgs() << "This function is a taint initiator function:" << currFunc->getName() << "\n";
 #endif
             // handling __copy_from_user and its friends.
             std::set<long> taintedArgs = TaintAnalysisVisitor::functionChecker->get_tainted_arguments(currFunc);
             this->propagateTaintToArguments(taintedArgs, I);
-
-        } else if(TaintAnalysisVisitor::functionChecker->is_memcpy_function(currFunc)) {
+        } else if (TaintAnalysisVisitor::functionChecker->is_memcpy_function(currFunc)) {
             // Handle memcpy function..
             // get memcpy argument numbers
             std::vector<long> memcpyArgs = TaintAnalysisVisitor::functionChecker->get_memcpy_arguments(currFunc);
             //propagate taint from src to dst.
             this->propagateTaintToMemcpyArguments(memcpyArgs, I);
-        } else if(TaintAnalysisVisitor::functionChecker->is_atoi_function(currFunc)) {
+        } else if (TaintAnalysisVisitor::functionChecker->is_atoi_function(currFunc)) {
           // This is an atoi like function?
            // if yes? get the taint of the object pointed by the first argument.
             // propagate that to the return value.
@@ -750,8 +750,7 @@ namespace DRCHECKER {
 
         } else {
             // TODO (below):
-            // untaint all the arguments, depending on whether we are
-            // indeed calling kernel internal functions.
+            // untaint all the arguments, depending on whether we are indeed calling kernel internal functions.
         }
     }
 

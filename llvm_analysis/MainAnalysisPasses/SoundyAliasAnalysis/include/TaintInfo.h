@@ -17,6 +17,7 @@
 #include <vector>
 
 #define DEBUG_UPDATE_FIELD_TAINT
+#define DEBUG_FETCH_FIELD_TAINT
 
 using namespace llvm;
 namespace DRCHECKER {
@@ -664,7 +665,7 @@ namespace DRCHECKER {
         //Get the TFs that are valid at the "loc" (e.g. some TFs may be overridden by the others).
         //The logic is similar to "fetchFieldPointsTo" in the Alias Analysis.
         bool getTf(InstLoc *loc, std::set<TaintFlag*> &r) {
-#ifdef DEBUG_UPDATE_FIELD_TAINT
+#ifdef DEBUG_FETCH_FIELD_TAINT
             dbgs() << "FieldTaint::getTf(): fetch taint for field: " << this->fieldId << ", FieldTaint: " 
             << (const void*)this << ", Host: " << this->priv << "\n";
 #endif
@@ -757,19 +758,19 @@ namespace DRCHECKER {
                     }
                     //For logging..
                     if (!tf->is_inherent && !tf->targetInstr) {
-#ifdef DEBUG_UPDATE_FIELD_TAINT
+#ifdef DEBUG_FETCH_FIELD_TAINT
                         dbgs() << "!!! FieldTaint::getTf(): TF (non-inherent) w/o targetInstr: ";
                         tf->dumpInfo_light(dbgs());
 #endif
                     }
                 }
             }else {
-#ifdef DEBUG_UPDATE_FIELD_TAINT
+#ifdef DEBUG_FETCH_FIELD_TAINT
                 dbgs() << "FieldTaint::getTf(): null target loc! Return all active TFs: " << actTf.size() << "\n";
 #endif
                 r.insert(actTf.begin(),actTf.end());
             }
-#ifdef DEBUG_UPDATE_FIELD_TAINT
+#ifdef DEBUG_FETCH_FIELD_TAINT
             dbgs() << "FieldTaint::getTf(): final stats: total/act_tan/ret: " << this->targetTaint.size() << "/" 
             << actTf.size() << "/" << r.size() << "\n";
 #endif

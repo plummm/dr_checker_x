@@ -1220,6 +1220,19 @@ namespace DRCHECKER {
         return fd;
     }
 
+    void InstructionUtils::getHeadTys(Type *ty, std::set<Type*> &rs) {
+        if (!ty) {
+            return;
+        }
+        FieldDesc *fd = InstructionUtils::getHeadFieldDesc(ty);
+        if (fd) {
+            for (Type *t : fd->tys) {
+                rs.insert(t);
+            }
+        }
+        return;
+    }
+
     //We want to analyze a struct type, figuring out all possible fields types at each available offset in bits,
     //this includes the internal fields in (nested) embedded structs which is not supported by original llvm API.
     std::vector<FieldDesc*> *InstructionUtils::getCompTyDesc(DataLayout *dl, CompositeType *ty) {

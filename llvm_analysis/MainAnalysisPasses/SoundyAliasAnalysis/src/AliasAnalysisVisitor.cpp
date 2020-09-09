@@ -12,7 +12,7 @@ namespace DRCHECKER {
 //#define DEBUG_PHI_INSTR
 #define DEBUG_LOAD_INSTR
 #define DEBUG_STORE_INSTR
-//#define DEBUG_CALL_INSTR
+#define DEBUG_CALL_INSTR
 //#define STRICT_CAST
 //#define DEBUG_RET_INSTR
 //#define FAST_HEURISTIC
@@ -1557,7 +1557,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
 #endif
     }
 
-    void inferSrcDstMap(StoreInst &I, std::set<PointerPointsTo*> *srcPointsTo, std::set<PointerPointsTo*> *dstPointsTo,
+    void inferSrcDstMap(std::set<PointerPointsTo*> *srcPointsTo, std::set<PointerPointsTo*> *dstPointsTo,
                         std::map<PointerPointsTo*,std::set<PointerPointsTo*>> &sdMap) {
         if (!srcPointsTo || !dstPointsTo) {
             return;
@@ -1763,7 +1763,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
         //the correct way is to do the 1*1 update for N different src locations - the underlying truth is "src" can only point to
         //*one* location in the actual run.
         std::map<PointerPointsTo*,std::set<PointerPointsTo*>> sdMap;
-        inferSrcDstMap(I,srcPointsTo,dstPointsTo,sdMap);
+        inferSrcDstMap(srcPointsTo,dstPointsTo,sdMap);
         //NOTE: when processing the store inst we do *not* need to update the pto info for the "targetPointer" - it will
         //always point to the same location(s). What we really need to update is the pto info of the memory location(s) pointed
         //to by the "targetPointer" (i.e. "targetPointer" is a 2nd order pointer).
@@ -1852,10 +1852,85 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
     }
 
 
+    //Precondition: I is a call inst to a memcpy style function.
+    Type *getMemcpySrcTy(CallInst &I) {
+        //Get the copy size if any.
+        Function *func = I.getCalledFunction();
+        unsigned sz = 0;
+        if (func && func->hasName()) {
+            std::string name = func->getName().str();
+            if (name.find("memcpy") != std::string::npos) {
+                Value *sa = I.getArgOperand(2);
+                if (dyn_cast<ConstantInt>(sa)) {
+                    sz = dyn_cast<ConstantInt>(sa)->getZExtValue();
+                }
+            }
+        }
+#ifdef DEBUG_CALL_INSTR
+        dbgs() << "AliasAnalysisVisitor::getMemcpySrcTy(): memcpy size: " << sz << "\n";
+#endif
+        //Get the types inferred from the function argument and the context instructions.
+        std::set<Type*> candTys;
+        Type *ty = InstructionUtils::inferPointeeTy(I.getArgOperand(0));
+        if (ty) {
+            candTys.insert(ty);
+        }
+        ty = InstructionUtils::inferPointeeTy(I.getArgOperand(1));
+        if (ty) {
+            candTys.insert(ty);
+        }
+        DataLayout *dl = this->currState.targetDataLayout;
+        if (!dl) {
+            dbgs() << "!!! AliasAnalysisVisitor::getMemcpySrcTy(): No datalayout...\n";
+            if (candTys.size() == 1) {
+                return *(candTys.begin());
+            }
+            return nullptr;
+        }
+        int min = -1;
+        Type *rty = nullptr;
+        if (sz == 0) {
+            //This means we either have a variable memcpy size, or the function is not memcpy..
+            //In this case, to be conservative, return the minimal type we have.
+#ifdef DEBUG_CALL_INSTR
+            dbgs() << "AliasAnalysisVisitor::getMemcpySrcTy(): we have no memcpy size info, so try to return the min ty between src and dst.\n";
+#endif
+            for (Type *ty : candTys) {
+                int tysz = dl->getTypeStoreSize(ty);
+                if (min < 0 || tysz < min) {
+                    min = tysz;
+                    rty = ty;
+                }
+            }
+#ifdef DEBUG_CALL_INSTR
+            dbgs() << "AliasAnalysisVisitor::getMemcpySrcTy(): minTy: " << InstructionUtils::getTypeStr(rty) << "\n";
+#endif
+            return rty;
+        }
+#ifdef DEBUG_CALL_INSTR
+        dbgs() << "AliasAnalysisVisitor::getMemcpySrcTy(): try to find the type nearest to the memcpy size.\n";
+#endif
+        for (Type *ct : candTys) {
+            std::set<Type*> htys;
+            InstructionUtils::getHeadTys(ct,htys);
+            for (Type *ht : htys) {
+                int delta = (int)(dl->getTypeStoreSize(ht)) - (int)sz;
+                if (delta < 0) {
+                    delta = 0 - delta;
+                }
+                if (min < 0 || delta < min) {
+                    min = delta;
+                    rty = ht;
+                }
+            }
+        }
+        return rty;
+    }
+
     void AliasAnalysisVisitor::handleMemcpyFunction(std::vector<long> &memcpyArgs, CallInst &I) {
         // handle memcpy instruction.
 #ifdef DEBUG_CALL_INSTR
-        dbgs() << "Processing memcpy function\n";
+        dbgs() << "AliasAnalysisVisitor::handleMemcpyFunction(): Processing memcpy function.\n";
 #endif
         // get src operand
         Value *srcOperand = I.getArgOperand((unsigned int) memcpyArgs[0]);
@@ -1868,16 +1943,75 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
         if(!hasPointsToObjects(dstOperand)) {
             dstOperand = dstOperand->stripPointerCasts();
         }
-
         // get points to information.
-        std::set<PointerPointsTo*>* srcPointsTo = getPointsToObjects(srcOperand);
-        std::set<PointerPointsTo*>* dstPointsTo = getPointsToObjects(dstOperand);
-
+        std::set<PointerPointsTo*> *srcPointsTo = getPointsToObjects(srcOperand);
+        if (!srcPointsTo || srcPointsTo->empty()) {
+#ifdef DEBUG_CALL_INSTR
+            dbgs() << "AliasAnalysisVisitor::handleMemcpyFunction(): no src pto info!\n";
+#endif
+            return;
+        }
+        //Ok, now decide the src type to copy.
+        Type *ty = getMemcpySrcTy(I);
+        std::set<PointerPointsTo*> *dstPointsTo = getPointsToObjects(dstOperand);
+        std::set<PointerPointsTo*> newPtos;
+        InstLoc *loc = new InstLoc(&I,this->currFuncCallSites);
+        if (!dstPointsTo || dstPointsTo->empty()) {
+            //Simply make a copy of the src AliasObject for the dst pointer.
+            for (PointerPointsTo *pto : *srcPointsTo) {
+                if (!pto || !pto->targetObject) {
+                    continue;
+                }
+                PointerPointsTo *np = pto->makeCopyP(&I,loc);
+                if (ty && dyn_cast<CompositeType>(ty)) {
+                    //Try to extract only the required sub-obj from the src pointee to copy..
+                    int r = this->matchPtoTy(ty,np,&I,true);
+                    if (r == 0) {
+                        //src pointee cannot match the expected type, skip.
+                        continue;
+                    }
+                    AliasObject *eobj = nullptr;
+                    if (r == 1 || r == 3) {
+                        eobj = this->createEmbObj(np->targetObject,np->dstfieldId,nullptr,&I);
+                    }else {
+                        eobj = np->targetObject;
+                    }
+                    if (eobj) {
+                        AliasObject *nobj = eobj->makeCopy();
+                        np->targetObject = nobj;
+                        np->dstfieldId = 0;
+                        newPtos.insert(np);
+                    }else {
+                        delete(np);
+                    }
+                }else {
+                    //This means the inferred memcpy type is non-composite, which is less likely (possibly because no
+                    //type info in the context), in this situation, we faithfully copy the src pointee.
+                    AliasObject *nobj = np->targetObject->makeCopy();
+                    if (nobj) {
+                        np->targetObject = nobj;
+                        newPtos.insert(np);
+                    }else {
+                        delete(np);
+                    }
+                }
+            }
+        }else {
+            std::map<PointerPointsTo*,std::set<PointerPointsTo*>> sdMap;
+            if (dstPointsTo->size() > 1) {
+                //Try to infer the src dst mapping since this may be a N*N copy, similar as the case in visitStoreInst().
+                inferSrcDstMap(srcPointsTo,dstPointsTo,sdMap);
+            }
+        }
+        //
+        //
+        //
+        //
         if(srcPointsTo != nullptr && srcPointsTo->size() && dstPointsTo != nullptr && dstPointsTo->size()) {
             // get all src objects.
 
             std::set<std::pair<long, AliasObject*>> srcAliasObjects;
-            for(PointerPointsTo *currPointsTo:(*srcPointsTo)) {
+            for (PointerPointsTo *currPointsTo : *srcPointsTo) {
                 auto a = std::make_pair(currPointsTo->dstfieldId, currPointsTo->targetObject);
                 if(srcAliasObjects.find(a) == srcAliasObjects.end()) {
                     srcAliasObjects.insert(a);
@@ -1886,12 +2020,12 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
 
             std::set<std::pair<long, AliasObject*>> srcDrefObjects;
             InstLoc *propInst = new InstLoc(&I,this->currFuncCallSites);
-            for(auto a:srcAliasObjects) {
+            for (auto a : srcAliasObjects) {
                 a.second->fetchPointsToObjects(a.first, srcDrefObjects, propInst);
             }
 
             std::set<PointerPointsTo*> targetElements;
-            for(auto a:srcDrefObjects) {
+            for (auto a : srcDrefObjects) {
                 PointerPointsTo *newRel = new PointerPointsTo(nullptr, a.second, a.first, new InstLoc(&I,this->currFuncCallSites), false);
                 targetElements.insert(newRel);
             }
@@ -1899,7 +2033,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
 #ifdef DEBUG_CALL_INSTR
             dbgs() << "Got:" << targetElements.size() << " to add\n";
 #endif
-            for(auto a:(*dstPointsTo)) {
+            for(auto a : *dstPointsTo) {
 #ifdef DEBUG_CALL_INSTR
                 dbgs() << "Adding:" << targetElements.size() << "elements to the fieldid:" << a->dstfieldId << "\n";
 #endif
@@ -1907,11 +2041,9 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
                 a->targetObject->updateFieldPointsTo(a->dstfieldId, &targetElements, propInst, dstPointsTo->size() > 1 ? 1 : 0);
             }
 
-            for(auto a:targetElements) {
+            for (auto a:targetElements) {
                 delete(a);
             }
-
-
         } else {
 #ifdef DEBUG_CALL_INSTR
             dbgs() << "Either src or dst doesn't have any points to information, "
@@ -1991,21 +2123,27 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
         // if we do not have function definition
         // that means, it is a kernel internal function.
         // call kernel intra-function handler.
-        if(currFunc->isDeclaration()) {
+        if (currFunc->isDeclaration()) {
             FunctionChecker *targetChecker = (AliasAnalysisVisitor::functionHandler)->targetChecker;
-            if(targetChecker->is_memcpy_function(currFunc)) {
+            if (targetChecker->is_memcpy_function(currFunc)) {
+#ifdef DEBUG_CALL_INSTR
+                dbgs() << "AliasAnalysisVisitor::visitCallInst(): This is a memcpy function w/o definition.\n";
+#endif
                 // handle memcpy function.
                 std::vector<long> memcpyArgs = targetChecker->get_memcpy_arguments(currFunc);
                 this->handleMemcpyFunction(memcpyArgs, I);
-            }else if (targetChecker->is_fd_creation_function(currFunc)) {
+            } else if (targetChecker->is_fd_creation_function(currFunc)) {
+#ifdef DEBUG_CALL_INSTR
+                dbgs() << "AliasAnalysisVisitor::visitCallInst(): This is a fd creation function w/o definition.\n";
+#endif
                 // handle fd creation function
                 std::map<long,long> fdFieldMap = targetChecker->get_fd_field_arg_map(currFunc);
                 this->handleFdCreationFunction(fdFieldMap,currFunc,I);
-            }else {
+            } else {
                 //std::set<PointerPointsTo*>* newPointsToInfo = KernelFunctionHandler::handleKernelFunction(I, currFunc, this->currFuncCallSites);
                 bool is_handled;
                 is_handled = false;
-                std::set<PointerPointsTo *> *newPointsToInfo = (std::set<PointerPointsTo *> *) (
+                std::set<PointerPointsTo*> *newPointsToInfo = (std::set<PointerPointsTo *> *) (
                             (AliasAnalysisVisitor::functionHandler)->handleFunction(
                             I, currFunc,
                             (void *) (this->currFuncCallSites),

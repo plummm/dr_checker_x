@@ -14,6 +14,7 @@ rl = [
     ('SoundyAliasAnalysis/include/AliasObject.h','#define DEBUG_CHANGE_HEAPLOCATIONTYPE','//#define DEBUG_CHANGE_HEAPLOCATIONTYPE'),
     ('SoundyAliasAnalysis/include/AliasObject.h','#define DEBUG_UPDATE_FIELD_POINT','//#define DEBUG_UPDATE_FIELD_POINT'),
     ('SoundyAliasAnalysis/include/TaintInfo.h','#define DEBUG_UPDATE_FIELD_TAINT','//#define DEBUG_UPDATE_FIELD_TAINT'),
+    ('SoundyAliasAnalysis/include/TaintInfo.h','#define DEBUG_FETCH_FIELD_TAINT','//#define DEBUG_FETCH_FIELD_TAINT'),
     ('SoundyAliasAnalysis/include/AliasObject.h','#define DEBUG_CREATE_EMB_OBJ','//#define DEBUG_CREATE_EMB_OBJ'),
     ('SoundyAliasAnalysis/include/AliasObject.h','#define DEBUG_CREATE_EMB_OBJ_CHAIN','//#define DEBUG_CREATE_EMB_OBJ_CHAIN'),
     ('SoundyAliasAnalysis/include/AliasObject.h','#define DEBUG_CREATE_HOST_OBJ','//#define DEBUG_CREATE_HOST_OBJ'),

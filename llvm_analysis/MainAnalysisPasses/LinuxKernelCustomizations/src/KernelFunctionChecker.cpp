@@ -23,7 +23,7 @@ namespace DRCHECKER {
     // init functions
     const std::set<std::string> KernelFunctionChecker::init_section_names{".init.text"};
     // memcpy functions: for points to and taint propagation.
-    const std::set<std::string> KernelFunctionChecker::memcpy_function_names{"llvm.memcpy", "strcpy", "strncpy",
+    const std::set<std::string> KernelFunctionChecker::memcpy_function_names{"memcpy", "strcpy", "strncpy",
                                                                              "strcat", "strncat", "strlcpy",
                                                                              "strlcat"};
 
@@ -93,7 +93,7 @@ namespace DRCHECKER {
     bool KernelFunctionChecker::is_function_allocator(const Function *targetFunction) {
         if(targetFunction->isDeclaration() && targetFunction->hasName()) {
             std::string func_name = targetFunction->getName().str();
-            for (const std::string &curr_func:KernelFunctionChecker::known_allocators) {
+            for (const std::string &curr_func : KernelFunctionChecker::known_allocators) {
                 if (func_name.find(curr_func.c_str()) != std::string::npos) {
                     return true;
                 }
@@ -110,7 +110,7 @@ namespace DRCHECKER {
     bool KernelFunctionChecker::is_memcpy_function(const Function *targetFunction) {
         if(targetFunction->isDeclaration() && targetFunction->hasName()) {
             std::string func_name = targetFunction->getName().str();
-            for (const std::string &curr_func:KernelFunctionChecker::memcpy_function_names) {
+            for (const std::string &curr_func : KernelFunctionChecker::memcpy_function_names) {
                 if (func_name.find(curr_func.c_str()) != std::string::npos) {
                     return true;
                 }
