@@ -257,43 +257,40 @@ namespace DRCHECKER {
 
     public:
         //Constructors
-        TaintFlag(InstLoc *targetInstr, bool is_tainted = true, TaintTag *tag = nullptr, bool is_weak = false) {
+        TaintFlag(InstLoc *targetInstr, bool is_tainted = true, TaintTag *tag = nullptr, bool is_weak = false, bool is_active = true) {
             //Inherent TF may have a null targetInstr indicating that the taint is from the very beginning.
             //assert(targetInstr != nullptr && "Target Instruction cannot be NULL");
             this->targetInstr = targetInstr;
-            this->instructionTrace.push_back(targetInstr);
+            if (targetInstr) {
+                this->instructionTrace.push_back(targetInstr);
+            }
             this->is_tainted = is_tainted;
             this->tag = tag;
             this->is_weak = is_weak;
-            this->is_active = true;
+            this->is_active = is_active;
         }
 
-        TaintFlag(TaintFlag *copyTaint, InstLoc *targetInstr) {
-            this->targetInstr = targetInstr;
-            this->is_tainted = copyTaint->isTainted();
+        TaintFlag(TaintFlag *copyTaint):
+        TaintFlag(nullptr,copyTaint->isTainted(),copyTaint->tag,copyTaint->is_weak,copyTaint->is_active) {
+            this->targetInstr = copyTaint->targetInstr;
             // copy the instruction trace from the source taint guy
             this->instructionTrace.insert(instructionTrace.begin(),
                                           copyTaint->instructionTrace.begin(), copyTaint->instructionTrace.end());
+            this->loadTag = copyTaint->loadTag;
+        }
+
+        //A copy w/ a different target instruction, this is a wrapper for convenience.
+        TaintFlag(TaintFlag *copyTaint, InstLoc *targetInstr):
+        TaintFlag(copyTaint) {
+            this->targetInstr = targetInstr;
             // add target inst to the trace.
             this->addInstructionToTrace(targetInstr);
-            //hz: tag propagation.
-            this->tag = copyTaint->tag;
-            this->is_weak = copyTaint->is_weak;
-            this->is_active = copyTaint->is_active;
-            this->loadTag = copyTaint->loadTag;
         }
 
-        //hz: A copy w/ a different tag.
-        TaintFlag(TaintFlag *copyTaint, TaintTag *tag) {
-            this->targetInstr = copyTaint->targetInstr;
-            this->is_tainted = copyTaint->isTainted();
-            // copy the instruction trace from the source taint guy
-            this->instructionTrace.insert(instructionTrace.begin(),
-                                          copyTaint->instructionTrace.begin(), copyTaint->instructionTrace.end());
+        //A copy w/ a different tag, this is a wrapper for convenience.
+        TaintFlag(TaintFlag *copyTaint, TaintTag *tag):
+        TaintFlag(copyTaint) {
             this->tag = tag;
-            this->is_weak = copyTaint->is_weak;
-            this->is_active = copyTaint->is_active;
-            this->loadTag = copyTaint->loadTag;
         }
 
         //Destructors
@@ -467,6 +464,14 @@ namespace DRCHECKER {
         //This should be the host AliasObject*
         void *priv = nullptr;
 
+        //This is the first inst of the entry function for which we have already swicthed to and done the TF reset.
+        Instruction *lastReset = nullptr;
+
+        //"winner" means that a non-inherent field taint TF can last until the top-level entry function returns, 
+        //w/o being killed or masked by other TFs, we count on these "winner" TFs to construct reliable single-thread user-taint chain.
+        //NOTE that if we want to detect the concurrency bugs, we can extend our scope to those killed/masked TFs on the half way.
+        std::map<Instruction*,std::set<TaintFlag*>> winnerTfs;
+
         FieldTaint(long srcField, void *priv = nullptr) {
             this->fieldId = srcField;
             this->priv = priv;
@@ -482,6 +487,39 @@ namespace DRCHECKER {
             /*for(auto currT:targetTaint) {
                 delete(currT);
             }*/
+        }
+
+        FieldTaint *makeCopy() {
+            FieldTaint *ft = new FieldTaint(this->fieldId,this->priv);
+            //Copy the taintFlags and related info like WinnerTfs.
+            std::map<TaintFlag*,TaintFlag*> oldMap;
+            for (TaintFlag *tf : this->targetTaint) {
+                TaintFlag *ntf = new TaintFlag(tf);
+                oldMap[tf] = ntf;
+                ft->targetTaint.insert(ntf);
+            }
+            for (auto &e : this->winnerTfs) {
+                for (TaintFlag *tf : e.second) {
+                    if (oldMap.find(tf) == oldMap.end()) {
+                        dbgs() << "!!! FieldTaint::makeCopy(): Winner TF doesn't present in oldMap: ";
+                        tf->dumpInfo_light(dbgs(),true);
+                        continue;
+                    }
+                    (ft->winnerTfs)[e.first].insert(oldMap[tf]);
+                }
+            }
+            ft->lastReset = this->lastReset;
+        }
+
+        void reset(FieldTaint *ft) {
+            if (!ft) {
+                return;
+            }
+            this->fieldId = ft->fieldId;
+            this->targetTaint = ft->targetTaint;
+            this->priv = ft->priv;
+            this->lastReset = ft->lastReset;
+            this->winnerTfs = ft->winnerTfs;
         }
 
         bool empty() {
@@ -724,13 +762,6 @@ namespace DRCHECKER {
          }
 
         private:
-        //This is the first inst of the entry function for which we have already swicthed to and done the TF reset.
-        Instruction *lastReset = nullptr;
-
-        //"winner" means that a non-inherent field taint TF can last until the top-level entry function returns, 
-        //w/o being killed or masked by other TFs, we count on these "winner" TFs to construct reliable single-thread user-taint chain.
-        //NOTE that if we want to detect the concurrency bugs, we can extend our scope to those killed/masked TFs on the half way.
-        std::map<Instruction*,std::set<TaintFlag*>> winnerTfs;
 
         bool doGetTf(InstLoc *loc, std::set<TaintFlag*> &r) {
             //First get all active non-kill TFs and blockers.

@@ -38,6 +38,7 @@ using namespace llvm;
 #define DEBUG_SPECIAL_FIELD_POINTTO
 #define DEBUG_SHARED_OBJ_CACHE
 #define DEBUG_OBJ_RESET
+#define DEBUG_OBJ_COPY
 
 namespace DRCHECKER {
 //#define DEBUG_FUNCTION_ARG_OBJ_CREATION
@@ -310,7 +311,7 @@ namespace DRCHECKER {
         std::map<long,AliasObject*> embObjs;
 
         //hz: it's possible that this obj is embedded in another obj.
-        AliasObject *parent;
+        AliasObject *parent = nullptr;
         long parent_field;
 
         unsigned long getID() const{
@@ -366,17 +367,59 @@ namespace DRCHECKER {
         //Imagine that we invoke a memcpy() to make a copy of "this" object, in this case, we need to reserve
         //the original pto and taint info, recursively copy the embedded objs, but give up records like "pointsFrom"...
         AliasObject *makeCopy() {
+#ifdef DEBUG_OBJ_COPY
+            dbgs() << "AliasObject::makeCopy(): try to make a copy of obj: " << (const void*)this << "\n";
+#endif
             AliasObject *obj = new AliasObject();
             obj->targetType = this->targetType;
-            obj->pointsTo = this->pointsTo;
-            //TODO: update the pointee objs' "pointsFrom"
+            //Copy the "pointTo" records, note that we cannot simply copy the ObjectPointsTo*, instead we need to make a copy of each
+            //ObjectPointsTo, besides, we also need to update the "pointsFrom" record of each field pointee obj (to add the newly created
+            //"obj" as a new src object).
+            for (auto &e : this->pointsTo) {
+                for (ObjectPointsTo *pto : e.second) {
+                    if (pto && pto->targetObject) {
+                        ObjectPointsTo *npto = new ObjectPointsTo(pto);
+                        npto->srcObject = obj;
+                        (obj->pointsTo)[e.first].insert(npto);
+                        npto->targetObject->addPointsFrom(obj,npto);
+                    }
+                }
+            }
             obj->lastPtoReset = this->lastPtoReset;
             obj->is_initialized = this->is_initialized;
             obj->initializingInstructions = this->initializingInstructions;
             obj->is_const = this->is_const;
+            obj->auto_generated = this->auto_generated;
             obj->is_taint_src = this->is_taint_src;
-            //TODO: recursively copy the embedded objs, if any.
-            //TODO: copy all the taint flags for each field.
+            //Copy all the taint flags for each field.
+            for (FieldTaint *ft : this->taintedFields) {
+                if (!ft) {
+                    continue;
+                }
+                FieldTaint *nft = ft->makeCopy();
+                nft->priv = obj;
+                obj->taintedFields.push_back(nft);
+            }
+            //Copy all_contents_taint_flags
+            obj->all_contents_taint_flags.reset(this->all_contents_taint_flags.makeCopy());
+            obj->all_contents_taint_flags.priv = obj;
+            //Recursively copy the embedded objs, if any.
+            for (auto &e : this->embObjs) {
+                AliasObject *eo = e.second;
+                if (eo) {
+                    AliasObject *no = eo->makeCopy();
+                    if (no) {
+                        (obj->embObjs)[e.first] = no;
+                    }else {
+                        //Is this possible...
+                        dbgs() << "!!! AliasObject::makeCopy(): failed to make a copy of the emb object: " << (const void*)eo << "\n";
+                    }
+                }
+            }
+#ifdef DEBUG_OBJ_COPY
+            dbgs() << "AliasObject::makeCopy(): copy created: " << (const void*)obj << "\n";
+#endif
+            return obj;
         }
 
         //If "act" is negative, return # of all pto on file, otherwise, only return active/inactive pto records.

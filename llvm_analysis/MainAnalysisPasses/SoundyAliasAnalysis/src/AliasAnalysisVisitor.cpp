@@ -1927,6 +1927,22 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
         return rty;
     }
 
+    //Given a pto and a *CompositeType*, return the matched sub- or super- obj of the pointee obj.
+    AliasObject *getObj4Copy(PointerPointsTo *pto, CompositeType *ty, Instruction &I) {
+        if (!pto || !ty) {
+            return nullptr;
+        }
+        int r = this->matchPtoTy(ty,pto,&I,true);
+        if (r == 0) {
+            return nullptr;
+        }
+        AliasObject *obj = pto->targetObject;
+        if (r == 1 || r == 3) {
+            obj = this->createEmbObj(pto->targetObject,pto->dstfieldId,nullptr,&I);
+        }
+        return obj;
+    }
+
     void AliasAnalysisVisitor::handleMemcpyFunction(std::vector<long> &memcpyArgs, CallInst &I) {
         // handle memcpy instruction.
 #ifdef DEBUG_CALL_INSTR
@@ -1953,54 +1969,89 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
         }
         //Ok, now decide the src type to copy.
         Type *ty = getMemcpySrcTy(I);
+#ifdef DEBUG_CALL_INSTR
+        dbgs() << "AliasAnalysisVisitor::handleMemcpyFunction(): inferred memcpy ty: " << InstructionUtils::getTypeStr(ty) << "\n";
+#endif
         std::set<PointerPointsTo*> *dstPointsTo = getPointsToObjects(dstOperand);
-        std::set<PointerPointsTo*> newPtos;
         InstLoc *loc = new InstLoc(&I,this->currFuncCallSites);
         if (!dstPointsTo || dstPointsTo->empty()) {
+#ifdef DEBUG_CALL_INSTR
+            dbgs() << "AliasAnalysisVisitor::handleMemcpyFunction(): no dst pto info!\n";
+#endif
             //Simply make a copy of the src AliasObject for the dst pointer.
+            std::set<PointerPointsTo*> newPtos;
             for (PointerPointsTo *pto : *srcPointsTo) {
                 if (!pto || !pto->targetObject) {
                     continue;
                 }
+#ifdef DEBUG_CALL_INSTR
+                dbgs() << "[SRC_PTO] ";
+                pto->print(dbgs());
+#endif
                 PointerPointsTo *np = pto->makeCopyP(&I,loc);
+                AliasObject *nobj = nullptr;
                 if (ty && dyn_cast<CompositeType>(ty)) {
-                    //Try to extract only the required sub-obj from the src pointee to copy..
-                    int r = this->matchPtoTy(ty,np,&I,true);
-                    if (r == 0) {
-                        //src pointee cannot match the expected type, skip.
-                        continue;
-                    }
-                    AliasObject *eobj = nullptr;
-                    if (r == 1 || r == 3) {
-                        eobj = this->createEmbObj(np->targetObject,np->dstfieldId,nullptr,&I);
-                    }else {
-                        eobj = np->targetObject;
-                    }
+                    AliasObject *eobj = getObj4Copy(np,ty,I);
                     if (eobj) {
-                        AliasObject *nobj = eobj->makeCopy();
-                        np->targetObject = nobj;
+                        nobj = eobj->makeCopy();
                         np->dstfieldId = 0;
-                        newPtos.insert(np);
                     }else {
-                        delete(np);
+#ifdef DEBUG_CALL_INSTR
+                        dbgs() << "AliasAnalysisVisitor::handleMemcpyFunction(): cannot match the src object to copy.\n";
+#endif
                     }
                 }else {
+#ifdef DEBUG_CALL_INSTR
+                    dbgs() << "Straight copy due to non-comp cpy type.\n";
+#endif
                     //This means the inferred memcpy type is non-composite, which is less likely (possibly because no
                     //type info in the context), in this situation, we faithfully copy the src pointee.
-                    AliasObject *nobj = np->targetObject->makeCopy();
-                    if (nobj) {
-                        np->targetObject = nobj;
-                        newPtos.insert(np);
-                    }else {
-                        delete(np);
-                    }
+                    nobj = np->targetObject->makeCopy();
                 }
+                if (nobj) {
+                    np->targetObject = nobj;
+                    newPtos.insert(np);
+                }else {
+#ifdef DEBUG_CALL_INSTR
+                    dbgs() << "AliasAnalysisVisitor::handleMemcpyFunction(): null nobj.\n";
+#endif
+                    delete(np);
+                }
+            }
+            if (!newPtos.empty()) {
+                this->updatePointsToObjects(dstOperand,&newPtos,false);
             }
         }else {
             std::map<PointerPointsTo*,std::set<PointerPointsTo*>> sdMap;
             if (dstPointsTo->size() > 1) {
                 //Try to infer the src dst mapping since this may be a N*N copy, similar as the case in visitStoreInst().
                 inferSrcDstMap(srcPointsTo,dstPointsTo,sdMap);
+            }
+            for (PointerPointsTo *dpto : *dstPointsTo) {
+                if (!dpto) {
+                    continue;
+                }
+#ifdef DEBUG_CALL_INSTR
+                dbgs() << "[DST PTO] ";
+                dpto->print(dbgs());
+#endif
+                //First make sure the dst pointee object is capable of receving the copy type..
+                AliasObject *dobj = nullptr;
+                if (ty && dyn_cast<CompositeType>(ty)) {
+                    dobj = getObj4Copy(dpto,ty,I);
+                    if (!dobj) {
+#ifdef DEBUG_CALL_INSTR
+                        dbgs() << "AliasAnalysisVisitor::handleMemcpyFunction(): cannot get the dst obj to copy to!\n";
+#endif
+                        continue;
+                    }
+                }
+                std::set<PointerPointsTo*> *srcs = ((sdMap.find(dpto) != sdMap.end()) ? &(sdMap[dpto]) : srcPointsTo);
+                for (PointerPointsTo *spto : *srcs) {
+                    if (!spto) {
+                        continue;
+                    }
+                }
             }
         }
         //
