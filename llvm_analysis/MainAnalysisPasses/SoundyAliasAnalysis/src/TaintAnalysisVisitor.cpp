@@ -490,7 +490,9 @@ namespace DRCHECKER {
             std::set<TaintFlag*> *toAdd = (taintMap.find(pto) == taintMap.end() ? &newTaintInfo : &(taintMap[pto]));
             for (TaintFlag *tf : *toAdd) {
                 //Don't forget the "is_weak" flag in the TF indicating whether it's a strong or weak taint.
-                tf->is_weak = multi_pto;
+                //If the "tf" is already a weak taint, then even there is only one pointee, it's still weak;
+                //If the "tf" is strong but there are multiple pointees, then again weak;
+                tf->is_weak |= multi_pto;
                 if (pto->targetObject->addFieldTaintFlag(pto->dstfieldId,tf)) {
                     addedTFs.insert(tf);
                 }
@@ -727,7 +729,7 @@ namespace DRCHECKER {
                         bool multi_pto = (currPtsTo->size() > 1);
                         for(auto currT : *newTaintSet) {
                             if (currT) {
-                                currT->is_weak = multi_pto;
+                                currT->is_weak |= multi_pto;
                             }
                         }
                         for(auto currP : *currPtsTo) {

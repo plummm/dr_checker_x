@@ -38,32 +38,31 @@ namespace DRCHECKER {
         //The AliasObject that is related to this tag.
         void *priv = nullptr;
 
-        TaintTag(long fieldId, Value *v, bool is_global = true, void *p = nullptr) {
+        TaintTag(long fieldId, Value *v, Type *ty, bool is_global = true, void *p = nullptr) {
             this -> fieldId = fieldId;
             this -> v = v;
-            this -> type = this->getTy();
-            this -> is_global = is_global;
-            this -> priv = p;
-        }
-
-        //In case we don't have an actual llvm "Value" pointing to the object, we can just provide the obj type.
-        TaintTag(long fieldId, Type *ty, bool is_global = true, void *p = nullptr) {
-            this -> fieldId = fieldId;
-            this -> v = nullptr;
             this -> type = ty;
             this -> is_global = is_global;
             this -> priv = p;
         }
 
-        TaintTag(TaintTag *srcTag) {
-            this -> fieldId = srcTag -> fieldId;
-            this -> v = srcTag -> v;
-            this -> type = srcTag -> type;
+        //A wrapper for tag w/ a value pointer.
+        TaintTag(long fieldId, Value *v, bool is_global = true, void *p = nullptr):
+        TaintTag(fieldId,v,nullptr,is_global,p) {
+            this -> type = this->getTy();
+        }
+
+        //A wrapper for the type based tag.
+        //In case we don't have an actual llvm "Value" pointing to the object, we can just provide the obj type.
+        TaintTag(long fieldId, Type *ty, bool is_global = true, void *p = nullptr):
+        TaintTag(fieldId,nullptr,ty,is_global,p) {
+        }
+
+        TaintTag(TaintTag *srcTag):
+        TaintTag(srcTag->fieldId,srcTag->v,srcTag->type,srcTag->is_global,srcTag->priv) {
             //This is content copy.
             this -> mod_insts = srcTag -> mod_insts;
             this -> cmp_constants = srcTag -> cmp_constants;
-            this -> is_global = srcTag -> is_global;
-            this -> priv = srcTag -> priv;
         }
 
         void addCmpConstants(Instruction *inst, int64_t n) {
@@ -489,26 +488,42 @@ namespace DRCHECKER {
             }*/
         }
 
-        FieldTaint *makeCopy() {
-            FieldTaint *ft = new FieldTaint(this->fieldId,this->priv);
-            //Copy the taintFlags and related info like WinnerTfs.
-            std::map<TaintFlag*,TaintFlag*> oldMap;
-            for (TaintFlag *tf : this->targetTaint) {
-                TaintFlag *ntf = new TaintFlag(tf);
-                oldMap[tf] = ntf;
-                ft->targetTaint.insert(ntf);
-            }
-            for (auto &e : this->winnerTfs) {
-                for (TaintFlag *tf : e.second) {
-                    if (oldMap.find(tf) == oldMap.end()) {
-                        dbgs() << "!!! FieldTaint::makeCopy(): Winner TF doesn't present in oldMap: ";
-                        tf->dumpInfo_light(dbgs(),true);
-                        continue;
+        //If "loc" is specified, only copy those TFs that are valid at the "loc", and we will not keep the winnerTFs since
+        //this is a fresh copy (e.g. memcpy at loc) w/o history; otherwise, we simply copy everything.
+        //"priv" should be the new AliasObject* this FieldTaint is copied for.
+        FieldTaint *makeCopy(void *priv, InstLoc *loc = nullptr) {
+            FieldTaint *ft = new FieldTaint(this->fieldId,priv);
+            ft->lastReset = this->lastReset;
+            if (loc) {
+                std::set<TaintFlag*> tfs;
+                this->getTf(loc,tfs);
+                for (TaintFlag *tf : tfs) {
+                    TaintFlag *ntf = new TaintFlag(tf,loc);
+                    ft->targetTaint.insert(ntf);
+                }
+            }else {
+                //Copy the taintFlags and related info like WinnerTfs.
+                std::map<TaintFlag*,TaintFlag*> oldMap;
+                for (TaintFlag *tf : this->targetTaint) {
+                    TaintFlag *ntf = new TaintFlag(tf);
+                    if (tf->is_inherent) {
+                        ntf->is_inherent = true;
+                        //TODO: Whether or not to replace the inherent tag w/ new obj...
                     }
-                    (ft->winnerTfs)[e.first].insert(oldMap[tf]);
+                    oldMap[tf] = ntf;
+                    ft->targetTaint.insert(ntf);
+                }
+                for (auto &e : this->winnerTfs) {
+                    for (TaintFlag *tf : e.second) {
+                        if (oldMap.find(tf) == oldMap.end()) {
+                            dbgs() << "!!! FieldTaint::makeCopy(): Winner TF doesn't present in oldMap: ";
+                            tf->dumpInfo_light(dbgs(),true);
+                            continue;
+                        }
+                        (ft->winnerTfs)[e.first].insert(oldMap[tf]);
+                    }
                 }
             }
-            ft->lastReset = this->lastReset;
         }
 
         void reset(FieldTaint *ft) {

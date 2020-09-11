@@ -1853,7 +1853,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
 
 
     //Precondition: I is a call inst to a memcpy style function.
-    Type *getMemcpySrcTy(CallInst &I) {
+    Type *AliasAnalysisVisitor::getMemcpySrcTy(CallInst &I) {
         //Get the copy size if any.
         Function *func = I.getCalledFunction();
         unsigned sz = 0;
@@ -1928,7 +1928,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
     }
 
     //Given a pto and a *CompositeType*, return the matched sub- or super- obj of the pointee obj.
-    AliasObject *getObj4Copy(PointerPointsTo *pto, CompositeType *ty, Instruction &I) {
+    AliasObject *AliasAnalysisVisitor::getObj4Copy(PointerPointsTo *pto, CompositeType *ty, Instruction &I) {
         if (!pto || !ty) {
             return nullptr;
         }
@@ -1968,7 +1968,8 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
             return;
         }
         //Ok, now decide the src type to copy.
-        Type *ty = getMemcpySrcTy(I);
+        Type *ty = this->getMemcpySrcTy(I);
+        CompositeType *cty = ty ? dyn_cast<CompositeType>(ty) : nullptr;
 #ifdef DEBUG_CALL_INSTR
         dbgs() << "AliasAnalysisVisitor::handleMemcpyFunction(): inferred memcpy ty: " << InstructionUtils::getTypeStr(ty) << "\n";
 #endif
@@ -1990,10 +1991,10 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
 #endif
                 PointerPointsTo *np = pto->makeCopyP(&I,loc);
                 AliasObject *nobj = nullptr;
-                if (ty && dyn_cast<CompositeType>(ty)) {
-                    AliasObject *eobj = getObj4Copy(np,ty,I);
+                if (cty) {
+                    AliasObject *eobj = this->getObj4Copy(np,cty,I);
                     if (eobj) {
-                        nobj = eobj->makeCopy();
+                        nobj = eobj->makeCopy(loc);
                         np->dstfieldId = 0;
                     }else {
 #ifdef DEBUG_CALL_INSTR
@@ -2006,7 +2007,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
 #endif
                     //This means the inferred memcpy type is non-composite, which is less likely (possibly because no
                     //type info in the context), in this situation, we faithfully copy the src pointee.
-                    nobj = np->targetObject->makeCopy();
+                    nobj = np->targetObject->makeCopy(loc);
                 }
                 if (nobj) {
                     np->targetObject = nobj;
@@ -2023,12 +2024,14 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
             }
         }else {
             std::map<PointerPointsTo*,std::set<PointerPointsTo*>> sdMap;
+            bool multi_pto = false;
             if (dstPointsTo->size() > 1) {
                 //Try to infer the src dst mapping since this may be a N*N copy, similar as the case in visitStoreInst().
                 inferSrcDstMap(srcPointsTo,dstPointsTo,sdMap);
+                multi_pto = true;
             }
             for (PointerPointsTo *dpto : *dstPointsTo) {
-                if (!dpto) {
+                if (!dpto || !dpto->targetObject) {
                     continue;
                 }
 #ifdef DEBUG_CALL_INSTR
@@ -2037,8 +2040,8 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
 #endif
                 //First make sure the dst pointee object is capable of receving the copy type..
                 AliasObject *dobj = nullptr;
-                if (ty && dyn_cast<CompositeType>(ty)) {
-                    dobj = getObj4Copy(dpto,ty,I);
+                if (cty) {
+                    dobj = this->getObj4Copy(dpto,cty,I);
                     if (!dobj) {
 #ifdef DEBUG_CALL_INSTR
                         dbgs() << "AliasAnalysisVisitor::handleMemcpyFunction(): cannot get the dst obj to copy to!\n";
@@ -2048,58 +2051,29 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
                 }
                 std::set<PointerPointsTo*> *srcs = ((sdMap.find(dpto) != sdMap.end()) ? &(sdMap[dpto]) : srcPointsTo);
                 for (PointerPointsTo *spto : *srcs) {
-                    if (!spto) {
+                    if (!spto || !spto->targetObject) {
                         continue;
+                    }
+                    AliasObject *sobj = nullptr;
+                    if (cty) {
+                        sobj = this->getObj4Copy(spto,cty,I);
+                        if (!sobj) {
+#ifdef DEBUG_CALL_INSTR
+                            dbgs() << "AliasAnalysisVisitor::handleMemcpyFunction(): cannot get the src obj to copy to: ";
+                            spto->print(dbgs());
+#endif
+                            continue;
+                        }
+                    }
+                    if (sobj && dobj) {
+                        //Merge the src object to the dst object..
+                        dobj->mergeObj(sobj,loc,multi_pto);
+                    }else {
+                        //Fallback: try to merge the single field if possible..
+                        dpto->targetObject->mergeField(dpto->dstfieldId,spto->targetObject,spto->dstfieldId,loc,multi_pto);
                     }
                 }
             }
-        }
-        //
-        //
-        //
-        //
-        if(srcPointsTo != nullptr && srcPointsTo->size() && dstPointsTo != nullptr && dstPointsTo->size()) {
-            // get all src objects.
-
-            std::set<std::pair<long, AliasObject*>> srcAliasObjects;
-            for (PointerPointsTo *currPointsTo : *srcPointsTo) {
-                auto a = std::make_pair(currPointsTo->dstfieldId, currPointsTo->targetObject);
-                if(srcAliasObjects.find(a) == srcAliasObjects.end()) {
-                    srcAliasObjects.insert(a);
-                }
-            }
-
-            std::set<std::pair<long, AliasObject*>> srcDrefObjects;
-            InstLoc *propInst = new InstLoc(&I,this->currFuncCallSites);
-            for (auto a : srcAliasObjects) {
-                a.second->fetchPointsToObjects(a.first, srcDrefObjects, propInst);
-            }
-
-            std::set<PointerPointsTo*> targetElements;
-            for (auto a : srcDrefObjects) {
-                PointerPointsTo *newRel = new PointerPointsTo(nullptr, a.second, a.first, new InstLoc(&I,this->currFuncCallSites), false);
-                targetElements.insert(newRel);
-            }
-
-#ifdef DEBUG_CALL_INSTR
-            dbgs() << "Got:" << targetElements.size() << " to add\n";
-#endif
-            for(auto a : *dstPointsTo) {
-#ifdef DEBUG_CALL_INSTR
-                dbgs() << "Adding:" << targetElements.size() << "elements to the fieldid:" << a->dstfieldId << "\n";
-#endif
-                //If there are multiple destinations we should perform a weak update, otherwise strong.
-                a->targetObject->updateFieldPointsTo(a->dstfieldId, &targetElements, propInst, dstPointsTo->size() > 1 ? 1 : 0);
-            }
-
-            for (auto a:targetElements) {
-                delete(a);
-            }
-        } else {
-#ifdef DEBUG_CALL_INSTR
-            dbgs() << "Either src or dst doesn't have any points to information, "
-                "ignoring memory copy function in propagating points to information\n";
-#endif
         }
     }
 

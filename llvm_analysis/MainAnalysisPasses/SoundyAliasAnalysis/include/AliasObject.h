@@ -81,17 +81,6 @@ namespace DRCHECKER {
         ~ObjectPointsTo() {
         }
 
-        ObjectPointsTo(ObjectPointsTo *srcObjPointsTo) {
-            this->fieldId = srcObjPointsTo->fieldId;
-            this->srcObject = srcObjPointsTo->srcObject;
-            this->dstfieldId = srcObjPointsTo->dstfieldId;
-            this->targetObject = srcObjPointsTo->targetObject;
-            this->propagatingInst = srcObjPointsTo->propagatingInst;
-            this->is_weak = srcObjPointsTo->is_weak;
-            this->flag = 0;
-            this->is_active = srcObjPointsTo->is_active;
-        }
-
         ObjectPointsTo(AliasObject *srcObject, long fieldId, AliasObject *targetObject, long dstfieldId, 
                        InstLoc *propagatingInst = nullptr, bool is_Weak = false) 
         {
@@ -105,11 +94,14 @@ namespace DRCHECKER {
             this->is_active = true;
         }
 
+        ObjectPointsTo(ObjectPointsTo *pto):
+        ObjectPointsTo(pto->srcObject,pto->fieldId,pto->targetObject,pto->dstfieldId,pto->propagatingInst,pto->is_weak) {
+            this->is_active = pto->is_active;
+        }
+
         //A wrapper for convenience.
         ObjectPointsTo(AliasObject *targetObject, long dstfieldId, InstLoc *propagatingInst = nullptr, bool is_Weak = false):
-        ObjectPointsTo(nullptr,0,targetObject,dstfieldId,propagatingInst,is_Weak)
-        {
-            //
+        ObjectPointsTo(nullptr,0,targetObject,dstfieldId,propagatingInst,is_Weak) {
         }
 
         virtual ObjectPointsTo* makeCopy() {
@@ -366,7 +358,8 @@ namespace DRCHECKER {
 
         //Imagine that we invoke a memcpy() to make a copy of "this" object, in this case, we need to reserve
         //the original pto and taint info, recursively copy the embedded objs, but give up records like "pointsFrom"...
-        AliasObject *makeCopy() {
+        //NOTE: if "loc" is specified, we should copy only the pto and taint facts that are valid at "loc".
+        AliasObject *makeCopy(InstLoc *loc) {
 #ifdef DEBUG_OBJ_COPY
             dbgs() << "AliasObject::makeCopy(): try to make a copy of obj: " << (const void*)this << "\n";
 #endif
@@ -376,7 +369,12 @@ namespace DRCHECKER {
             //ObjectPointsTo, besides, we also need to update the "pointsFrom" record of each field pointee obj (to add the newly created
             //"obj" as a new src object).
             for (auto &e : this->pointsTo) {
-                for (ObjectPointsTo *pto : e.second) {
+                std::set<ObjectPointsTo*> ptos, *ps = &(e.second);
+                if (loc) {
+                    this->getLivePtos(e.first,loc,&ptos);
+                    ps = &ptos;
+                }
+                for (ObjectPointsTo *pto : *ps) {
                     if (pto && pto->targetObject) {
                         ObjectPointsTo *npto = new ObjectPointsTo(pto);
                         npto->srcObject = obj;
@@ -396,18 +394,17 @@ namespace DRCHECKER {
                 if (!ft) {
                     continue;
                 }
-                FieldTaint *nft = ft->makeCopy();
-                nft->priv = obj;
+                FieldTaint *nft = ft->makeCopy(obj,loc);
                 obj->taintedFields.push_back(nft);
             }
             //Copy all_contents_taint_flags
-            obj->all_contents_taint_flags.reset(this->all_contents_taint_flags.makeCopy());
+            obj->all_contents_taint_flags.reset(this->all_contents_taint_flags.makeCopy(loc));
             obj->all_contents_taint_flags.priv = obj;
             //Recursively copy the embedded objs, if any.
             for (auto &e : this->embObjs) {
                 AliasObject *eo = e.second;
                 if (eo) {
-                    AliasObject *no = eo->makeCopy();
+                    AliasObject *no = eo->makeCopy(loc);
                     if (no) {
                         (obj->embObjs)[e.first] = no;
                     }else {
@@ -420,6 +417,103 @@ namespace DRCHECKER {
             dbgs() << "AliasObject::makeCopy(): copy created: " << (const void*)obj << "\n";
 #endif
             return obj;
+        }
+
+        //Merge the field pto and TFs from another object w/ the same type, at the "loc".
+        void mergeObj(AliasObject *obj, InstLoc *loc, bool is_weak) {
+#ifdef DEBUG_OBJ_COPY
+            dbgs() << "AliasObject::mergeObj(): try to merge obj: " << (const void*)obj << " -> " << (const void*)this << "\n";
+#endif
+            if (!obj || !InstructionUtils::same_types(obj->targetType,this->targetType) || !loc) {
+#ifdef DEBUG_OBJ_COPY
+                dbgs() << "AliasObject::mergeObj(): sanity check failed, return.\n";
+#endif
+                return;
+            }
+            //Merge the pto records of each field.
+            int wflag = (is_weak ? 1 : 0);
+            for (auto &e : obj->pointsTo) {
+                std::set<ObjectPointsTo*> ptos;
+                obj->getLivePtos(e.first,loc,&ptos);
+                if (!ptos.empty()) {
+                    this->updateFieldPointsTo(e.first,&ptos,loc,wflag);
+                }
+            }
+            //Merge the "all_contents_taint_flags".
+            std::set<TaintFlag*> tfs;
+            obj->all_contents_taint_flags.getTf(loc,tfs);
+            for (TaintFlag *tf : tfs) {
+                //The reachability from this "tf" to "loc" has already been ensured by "getTf()",
+                //so it's safe to directly copy the "tf" w/ the new target instruction "loc".
+                TaintFlag *ntf = new TaintFlag(tf,loc);
+                ntf->is_weak |= is_weak;
+                this->taintAllFields(ntf);
+            }
+            //Merge the TFs from each field.
+            for (FieldTaint *ft : obj->taintedFields) {
+                if (ft) {
+                    //First get live all taints for the field.
+                    tfs.clear();
+                    ft->getTf(loc,tfs);
+                    for (TaintFlag *tf : tfs) {
+                        TaintFlag *ntf = new TaintFlag(tf,loc);
+                        ntf->is_weak |= is_weak;
+                        this->addFieldTaintFlag(ft->fieldId,ntf);
+                    }
+                }
+            }
+            //Recursively merge each embedded object.
+            for (auto &e : obj->embObjs) {
+                AliasObject *sobj = e.second;
+                AliasObject *dobj = nullptr;
+                if (this->embObjs.find(e.first) == this->embObjs.end()) {
+                    //This means we need to create the required embedded object to receive the data from "obj".
+                    dobj = this->createEmbObj(e.first,nullptr,loc);
+                }else {
+                    dobj = (this->embObjs)[e.first];
+                }
+                if (sobj && dobj) {
+                    dobj->mergeObj(sobj,loc,is_weak);
+                }
+            }
+#ifdef DEBUG_OBJ_COPY
+            dbgs() << "AliasObject::mergeObj(): done: " << (const void*)obj << " -> " << (const void*)this << "\n";
+#endif
+        }
+
+        //Merge a specified field in another object to "fid" of "this", including its pto and TFs.
+        void mergeField(long fid, AliasObject *mobj, long mfid, InstLoc *loc, bool is_weak) {
+#ifdef DEBUG_OBJ_COPY
+            dbgs() << "AliasObject::mergeField(): " << (const void*)mobj << "|" << mfid << " -> " << (const void*)this 
+            << "|" << fid << "\n";
+#endif
+            //First need to make sure the src and dst field have the same type.
+            if (!mobj || !loc) {
+                return;
+            }
+            Type *dty = this->getNonCompFieldTy(fid);
+            Type *sty = mobj->getNonCompFieldTy(mfid);
+            if (!InstructionUtils::same_types(sty,dty,true)) {
+#ifdef DEBUG_OBJ_COPY
+                dbgs() << "AliasObject::mergeField(): type mismatch.\n";
+#endif
+                return;
+            }
+            //Propagate the pto record.
+            std::set<std::pair<long, AliasObject*>> dstObjs;
+            //NOTE: here we will not try to create dummy pointee objects (i.e. just propagate the pto as is).
+            mobj->fetchPointsToObjects(mfid,dstObjs,loc,true,false);
+            for (auto &e : dstObjs) {
+                this->addObjectToFieldPointsTo(fid,e.second,loc,is_weak,e.first);
+            }
+            //Propagate the taint.
+            std::set<TaintFlag*> tfs;
+            mobj->getFieldTaintInfo(mfid,tfs,loc);
+            for (TaintFlag *tf : tfs) {
+                TaintFlag *ntf = new TaintFlag(tf,loc);
+                ntf->is_weak |= is_weak;
+                this->addFieldTaintFlag(fid,ntf);
+            }
         }
 
         //If "act" is negative, return # of all pto on file, otherwise, only return active/inactive pto records.
@@ -546,6 +640,15 @@ namespace DRCHECKER {
             return;
         }
 
+        //At the field there may be en embedded struct, in this function we just return the non-composite type (should be only 1) at "fid".
+        Type *getNonCompFieldTy(long fid) {
+            Type *ety = (fid ? this->getFieldTy(fid) : this->targetType);
+            if (!ety || !dyn_cast<CompositeType>(ety)) {
+                return ety;
+            }
+            return InstructionUtils::getHeadTy(ety);
+        }
+
         //We want to get all possible pointee types of a certain field, so we need to 
         //inspect the detailed type desc (i.e. embed/parent object hierarchy).
         void getFieldPointeeTy(long fid, std::set<Type*> &retSet) {
@@ -584,16 +687,17 @@ namespace DRCHECKER {
         }
 
         //This is a wrapper of "updateFieldPointsTo" for convenience, it assumes that we only have one pto record for the "fieldId" to update,
-        //and this pto points to field 0 of "dstObject".
+        //and this pto points to field 0 (can be customized via "dfid") of "dstObject".
         //TODO: consider to replace more "updateFieldPointsTo" invocation to this when applicable, to simplify the codebase.
-        void addObjectToFieldPointsTo(long fieldId, AliasObject *dstObject, InstLoc *propagatingInstr = nullptr, bool is_weak = false) {
+        void addObjectToFieldPointsTo(long fieldId, AliasObject *dstObject, InstLoc *propagatingInstr = nullptr, 
+                                      bool is_weak = false, long dfid = 0) {
 #ifdef DEBUG_UPDATE_FIELD_POINT
             dbgs() << "addObjectToFieldPointsTo() for: " << InstructionUtils::getTypeStr(this->targetType) << " | " << fieldId;
             dbgs() << " Host Obj ID: " << (const void*)this << "\n";
 #endif
             if(dstObject != nullptr) {
-                std::set<PointerPointsTo*> dstPointsTo;
-                PointerPointsTo *newPointsTo = new PointerPointsTo(nullptr,this,fieldId,dstObject,0,propagatingInstr,is_weak);
+                std::set<ObjectPointsTo*> dstPointsTo;
+                ObjectPointsTo *newPointsTo = new ObjectPointsTo(this,fieldId,dstObject,dfid,propagatingInstr,is_weak);
                 dstPointsTo.insert(newPointsTo);
                 this->updateFieldPointsTo(fieldId,&dstPointsTo,propagatingInstr);
                 //We can now delete the allocated objects since "updateFieldPointsTo" has made a copy.
@@ -1030,7 +1134,7 @@ namespace DRCHECKER {
             }
             TaintTag *atag = nullptr;
             if (v) {
-                atag = new TaintTag(-1,is_global,(void*)this);
+                atag = new TaintTag(-1,v,is_global,(void*)this);
             }else {
                 atag = new TaintTag(-1,this->targetType,is_global,(void*)this);
             }
@@ -1114,7 +1218,6 @@ namespace DRCHECKER {
 #ifdef DEBUG_UPDATE_FIELD_TAINT
                         dbgs() << "AliasObject::reset(): Adding taint to: " << (const void*)this << " | " << fieldId << "\n";
 #endif
-                        //TODO: enforce taint path check.
                         //NOTE: we just inherite the "is_weak" of the previousn TF here.
                         TaintFlag *ntf = new TaintFlag(tf, loc);
                         this->addFieldTaintFlag(fieldId, ntf);
@@ -1299,7 +1402,20 @@ namespace DRCHECKER {
         //to override the "is_weak" field in "dstPointsTo".
         //NOTE: this function will make a copy of "dstPointsTo" and will not do any modifications 
         //to "dstPointsTo", the caller is responsible to free "dstPointsTo" if necessary.
-        void updateFieldPointsTo(long srcfieldId, std::set<PointerPointsTo*>* dstPointsTo, InstLoc *propagatingInstr, int is_weak = -1);
+        void updateFieldPointsTo(long srcfieldId, std::set<ObjectPointsTo*> *dstPointsTo, InstLoc *propagatingInstr, int is_weak = -1);
+
+        //A wrapper for compatiability...
+        //TODO: this ugly, need to refactor later.
+        void updateFieldPointsTo(long srcfieldId, std::set<PointerPointsTo*> *dstPointsTo, InstLoc *propagatingInstr, int is_weak = -1) {
+            if (!dstPointsTo || dstPointsTo->empty()) {
+                return;
+            }
+            std::set<ObjectPointsTo*> ptos;
+            for (PointerPointsTo *p : *dstPointsTo) {
+                ptos.insert(p);
+            }
+            this->updateFieldPointsTo(srcfieldId,&ptos,propagatingInstr,is_weak);
+        }
 
         FieldTaint* getFieldTaint(long srcfieldId) {
             for(auto currFieldTaint : taintedFields) {
@@ -1313,7 +1429,7 @@ namespace DRCHECKER {
     private:
 
         //NOTE: the arg "is_weak" has the same usage as updateFieldPointsTo().
-        void updateFieldPointsTo_do(long srcfieldId, std::set<PointerPointsTo*>* dstPointsTo, InstLoc *propagatingInstr, int is_weak = -1);
+        void updateFieldPointsTo_do(long srcfieldId, std::set<ObjectPointsTo*> *dstPointsTo, InstLoc *propagatingInstr, int is_weak = -1);
 
         //This records the first inst of an entry function we have just swicthed to and reset the field (key is the field ID) pto.
         std::map<long,Instruction*> lastPtoReset;
@@ -1579,12 +1695,14 @@ namespace DRCHECKER {
     //"loc" is the creation site.
     extern OutsideObject* createOutsideObj(Value *p, InstLoc *loc = nullptr);
 
-    extern int matchFieldsInDesc(Module *mod, Type *ty0, std::string& n0, Type *ty1, std::string& n1, int bitoff, std::vector<FieldDesc*> *fds, std::vector<unsigned> *res);
+    extern int matchFieldsInDesc(Module *mod, Type *ty0, std::string& n0, Type *ty1, std::string& n1, 
+                                 int bitoff, std::vector<FieldDesc*> *fds, std::vector<unsigned> *res);
 
     extern void sortCandStruct(std::vector<CandStructInf*> *cands, std::set<Instruction*> *insts);
 
     //Given 2 field types and their distance (in bits), return a list of candidate struct types.
-    extern std::vector<CandStructInf*> *getStructFrom2Fields(DataLayout *dl, Type *ty0, std::string& n0, Type *ty1, std::string& n1, long bitoff, Module *mod);
+    extern std::vector<CandStructInf*> *getStructFrom2Fields(DataLayout *dl, Type *ty0, std::string& n0, 
+                                                             Type *ty1, std::string& n1, long bitoff, Module *mod);
 
     //This function assumes that "v" is a i8* srcPointer of a single-index GEP and it points to the "bitoff" inside an object of "ty",
     //our goal is to find out the possible container objects of the target object of "ty" (the single-index GEP aims to locate a field
@@ -1594,9 +1712,12 @@ namespace DRCHECKER {
     extern CandStructInf *inferContainerTy(Module *m,Value *v,Type *ty,long bitoff);
 
     //hz: when analyzing multiple entry functions, they may share some objects:
-    //(0) explicit global objects, we don't need to take special care of these objects since they are pre-created before all analysis and will naturally shared.
-    //(1) the outside objects created by us on the fly (e.g. the file->private in the driver), multiple entry functions in driver (e.g. .ioctl and .read/.write)
-    //can shared the same outside objects, so we design this obj cache to record all the top-level outside objects created when analyzing each entry function,
+    //(0) explicit global objects, we don't need to take special care of these objects 
+    //since they are pre-created before all analysis and will naturally shared.
+    //(1) the outside objects created by us on the fly (e.g. the file->private in the driver), 
+    //multiple entry functions in driver (e.g. .ioctl and .read/.write)
+    //can shared the same outside objects, so we design this obj cache to record all 
+    //the top-level outside objects created when analyzing each entry function,
     //when we need to create a same type outside object later in a different entry function, we will then directly retrieve it from this cache.
     //TODO: what about the kmalloc'ed objects whose types are later changed to a struct...
     extern std::map<Type*,std::map<Function*,std::set<OutsideObject*>>> sharedObjCache;
@@ -1607,7 +1728,8 @@ namespace DRCHECKER {
 
     extern OutsideObject *getSharedObjFromCache(Value *v,Type *ty);
 
-    //"fd" is a bit offset desc of "pto->targetObject", it can reside in nested composite fields, this function creates all nested composite fields
+    //"fd" is a bit offset desc of "pto->targetObject", it can reside in nested composite fields, 
+    //this function creates all nested composite fields
     //in order to access the bit offset of "fd", while "limit" is the lowest index we try to create an emb obj in fd->host_tys[].
     extern int createEmbObjChain(FieldDesc *fd, PointerPointsTo *pto, int limit, InstLoc *loc = nullptr);
 

@@ -614,7 +614,7 @@ namespace DRCHECKER {
         return nullptr;
     }
 
-    void AliasObject::updateFieldPointsTo(long srcfieldId, std::set<PointerPointsTo*>* dstPointsTo, InstLoc *propagatingInstr, int is_weak) {
+    void AliasObject::updateFieldPointsTo(long srcfieldId, std::set<ObjectPointsTo*> *dstPointsTo, InstLoc *propagatingInstr, int is_weak) {
         /***
          * Add all objects in the provided pointsTo set to be pointed by the provided srcFieldID
          */
@@ -660,13 +660,13 @@ namespace DRCHECKER {
     }
 
     //Do the real job of field pto update.
-    void AliasObject::updateFieldPointsTo_do(long srcfieldId, std::set<PointerPointsTo*> *dstPointsTo, InstLoc *propagatingInstr, int is_weak) {
+    void AliasObject::updateFieldPointsTo_do(long srcfieldId, std::set<ObjectPointsTo*> *dstPointsTo, InstLoc *propagatingInstr, int is_weak) {
         if (!dstPointsTo || !dstPointsTo->size()) {
             return;
         }
         //preprocessing: deduplication and unify "fieldId" and "propInst".
         std::set<ObjectPointsTo*> unique_pto;
-        for (PointerPointsTo *pto : *dstPointsTo) {
+        for (ObjectPointsTo *pto : *dstPointsTo) {
             if (!pto) {
                 continue;
             }
@@ -691,6 +691,7 @@ namespace DRCHECKER {
                 ObjectPointsTo *npto = pto->makeCopy();
                 //Before inserting the pto to the unique set, force set its "fieldId" and "propInst" to be correct.
                 npto->fieldId = srcfieldId;
+                npto->srcObject = this;
                 npto->propagatingInst = propagatingInstr;
                 //Insert
                 unique_pto.insert(npto);
