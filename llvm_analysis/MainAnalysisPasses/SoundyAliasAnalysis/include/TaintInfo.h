@@ -537,6 +537,27 @@ namespace DRCHECKER {
             this->winnerTfs = ft->winnerTfs;
         }
 
+        void removeInhTFs() {
+            for (auto it = this->targetTaint.begin(); it != this->targetTaint.end();) {
+                TaintFlag *tf = *it;
+                if (tf && tf->is_inherent) {
+                    it = this->targetTaint.erase(it);
+                }else {
+                    ++it;
+                }
+            }
+            for (auto &e : this->winnerTfs) {
+                for (auto it = e.second.begin(); it != e.second.end();) {
+                    TaintFlag *tf = *it;
+                    if (tf && tf->is_inherent) {
+                        it = e.second.erase(it);
+                    }else {
+                        ++it;
+                    }
+                }
+            }
+        }
+
         bool empty() {
             return (this->targetTaint.size() == 0);
         }

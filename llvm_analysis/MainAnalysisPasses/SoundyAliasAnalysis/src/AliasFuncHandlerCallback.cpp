@@ -8,6 +8,9 @@
 using namespace llvm;
 
 namespace DRCHECKER {
+
+#define DEBUG_CREATE_HEAP_OBJ
+
     void* AliasFuncHandlerCallback::handleAllocationFunction(CallInst &callInst, Function *targetFunction,
                                                             void *private_data) {
         // Just create a new object
@@ -28,16 +31,35 @@ namespace DRCHECKER {
 
     void* AliasFuncHandlerCallback::createNewHeapObject(CallInst &callInst, Function *targetFunction,
                                                        void *private_data) {
-        std::vector<Instruction *> *callSitesContext = (std::vector<Instruction*>*)private_data;
+        if (!targetFunction) {
+#ifdef DEBUG_CREATE_HEAP_OBJ
+            dbgs() << "AliasFuncHandlerCallback::createNewHeapObject(): null targetFunction!!\n";
+#endif
+            return nullptr;
+        }
+        std::vector<Instruction*> *callSitesContext = (std::vector<Instruction*>*)private_data;
         Value *targetSize = nullptr;
         // if the call is to kmalloc, get the size argument.
-        if(this->targetChecker->is_kmalloc_function(targetFunction)) {
+        if (this->targetChecker->is_kmalloc_function(targetFunction)) {
             targetSize = callInst.getArgOperand(0);
         }
-        Type *objTy = targetFunction->getReturnType();
-        if (objTy && objTy->isPointerTy()) {
-            objTy = objTy->getPointerElementType();
+        //HZ: allocation functions usually only return an i8* pointer, we'd better try best to infer the real
+        //allocation type here from the context.
+        //TODO: verify the inferred type w/ the "size" arg if available. 
+        Type *objTy = InstructionUtils::inferPointeeTy(&callInst);
+        if (!objTy) {
+            //This is very unlikely...
+#ifdef DEBUG_CREATE_HEAP_OBJ
+            dbgs() << "AliasFuncHandlerCallback::createNewHeapObject(): failed to infer the return type!\n";
+#endif
+            objTy = targetFunction->getReturnType();
+            if (objTy && objTy->isPointerTy()) {
+                objTy = objTy->getPointerElementType();
+            }
         }
+#ifdef DEBUG_CREATE_HEAP_OBJ
+        dbgs() << "AliasFuncHandlerCallback::createNewHeapObject(): heap obj type to create: " << InstructionUtils::getTypeStr(objTy) << "\n";
+#endif
         AliasObject *targetObj = new HeapLocation(callInst, objTy, callSitesContext, targetSize,
                                                   this->targetChecker->is_kmalloc_function(targetFunction));
         if(this->targetChecker->is_kmalloc_function(targetFunction)) {

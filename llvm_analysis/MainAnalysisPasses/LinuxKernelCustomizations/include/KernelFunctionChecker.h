@@ -23,6 +23,7 @@ namespace DRCHECKER {
         static const std::set<std::string> copy_out_function_names;
         static const std::set<std::string> atoiLikeFunctions;
         static const std::set<std::string> fd_creation_function_names;
+        static const std::set<std::string> memdup_function_names;
 
         virtual bool is_function_allocator(const Function *targetFunction);
 
@@ -50,6 +51,8 @@ namespace DRCHECKER {
         virtual bool is_sscanf_function(const Function *targetFunction);
 
         virtual bool is_fd_creation_function(const Function *targetFunction);
+
+        virtual bool is_memdup_function(const Function *targetFunction);
 
         virtual std::map<long,long> get_fd_field_arg_map(const Function *targetFunction);
     };

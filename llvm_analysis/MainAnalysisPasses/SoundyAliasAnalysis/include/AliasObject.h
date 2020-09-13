@@ -1119,7 +1119,7 @@ namespace DRCHECKER {
         //Return: negative: impossible, positive: the larger, the more likely.
         virtual int maybeAPointee(Value *p);
 
-        //Set this object as a (global) taint source, i.e., attach an inherent taint tag and flag for each field.
+        //Set this object as a taint source, i.e., attach an inherent taint tag and flag for each field.
         //The "loc" should usually be the creation site of "this" object.
         bool setAsTaintSrc(InstLoc *loc, bool is_global = true) {
 #ifdef DEBUG_UPDATE_FIELD_TAINT
@@ -1169,6 +1169,16 @@ namespace DRCHECKER {
                 return true;
             }
             return false;
+        }
+
+        //Clear all inherent TFs.
+        void clearAllInhTFs() {
+            this->all_contents_taint_flags.removeInhTFs();
+            for (FieldTaint *ft : this->taintedFields) {
+                if (ft) {
+                    ft->removeInhTFs();
+                }
+            }
         }
 
         //In some situations we need to reset this AliasObject, e.g. the obj is originally 
@@ -1592,6 +1602,7 @@ namespace DRCHECKER {
             this->is_initialized = false;
             this->initializingInstructions.clear();
         }
+
         HeapLocation(HeapLocation *srcHeapLocation): AliasObject(srcHeapLocation) {
             this->targetAllocInstruction = srcHeapLocation->targetAllocInstruction;
             this->targetFunction = srcHeapLocation->targetFunction;
@@ -1600,9 +1611,11 @@ namespace DRCHECKER {
             this->targetAllocSize = srcHeapLocation->targetAllocSize;
             this->is_malloced = srcHeapLocation->is_malloced;
         }
+
         AliasObject* makeCopy() {
             return new HeapLocation(this);
         }
+
         Value* getObjectPtr() {
             return this->targetAllocInstruction;
         }

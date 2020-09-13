@@ -129,6 +129,10 @@ namespace DRCHECKER {
            return false;
         }
 
+        virtual bool is_memdup_function(const Function *targetFunction) {
+            return false;
+        }
+
         virtual std::map<long,long> get_fd_field_arg_map(const Function *targetFunction) {
             std::map<long,long> defaultFieldArgMap;
             // make sure that the function is a fd creation.

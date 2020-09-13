@@ -29,14 +29,12 @@ namespace DRCHECKER {
 
     //"I" is the inst site where need the ptr taint info. 
     void TaintAnalysisVisitor::getPtrTaintInfo(Value *targetVal, std::set<TaintFlag*> &retTaintFlag, Instruction *I) {
-        std::set<PointerPointsTo*> currValPointsTo;
         std::set<PointerPointsTo*> *currPtsTo = PointsToUtils::getPointsToObjects(this->currState, this->currFuncCallSites, targetVal);
-        if(currPtsTo != nullptr) {
-            currValPointsTo.insert(currPtsTo->begin(), currPtsTo->end());
+        if(currPtsTo == nullptr) {
+            return;
         }
-
         InstLoc *loc = this->makeInstLoc(I);
-        for(PointerPointsTo *currPtTo : currValPointsTo) {
+        for (PointerPointsTo *currPtTo : *currPtsTo) {
             std::set<TaintFlag*> currTaintSet;
             currPtTo->targetObject->getFieldTaintInfo(currPtTo->dstfieldId,currTaintSet,loc);
             if (currTaintSet.size()) {
@@ -520,87 +518,6 @@ namespace DRCHECKER {
         assert(false);
     }
 
-    //hz: this function tries to init the taint from user arg for functions like copy_from_user().
-    void TaintAnalysisVisitor::propagateTaintToArguments(std::set<long> &taintedArgs, CallInst &I) {
-        assert(taintedArgs.size() > 0);
-#ifdef DEBUG_CALL_INSTR
-        dbgs() << "Propagating Taint To Arguments.\n";
-#endif
-        for (auto currArgNo : taintedArgs) {
-            Value *currArg = I.getArgOperand(currArgNo);
-#ifdef DEBUG_CALL_INSTR
-            dbgs() << "Current argument: " << InstructionUtils::getValueStr(currArg) << "\n";
-#endif
-            std::set<PointerPointsTo*>* dstPointsTo = PointsToUtils::getPointsToObjects(currState,
-                                                                                        this->currFuncCallSites,
-                                                                                        currArg);
-            if(dstPointsTo == nullptr) {
-                currArg = currArg->stripPointerCasts();
-                dstPointsTo = PointsToUtils::getPointsToObjects(currState,
-                                                                this->currFuncCallSites,
-                                                                currArg);
-            }
-            if (dstPointsTo != nullptr) {
-                std::set<std::pair<long, AliasObject *>> targetObjects;
-                for (PointerPointsTo *currPointsToObj : *dstPointsTo) {
-                    long target_field = currPointsToObj->dstfieldId;
-                    AliasObject *dstObj = currPointsToObj->targetObject;
-                    if (!dstObj) {
-                        continue;
-                    }
-                    auto to_check = std::make_pair(target_field, dstObj);
-                    if (std::find(targetObjects.begin(), targetObjects.end(), to_check) == targetObjects.end()) {
-                        targetObjects.insert(targetObjects.end(), to_check);
-                    }
-                }
-
-                bool multi_pto = (targetObjects.size() > 1);
-                bool is_added = false;
-
-                assert(targetObjects.size() > 0);
-                InstLoc *currInst = this->makeInstLoc(&I);
-
-                for(auto fieldObject : targetObjects) {
-                    //Taint Tag represents the taint source, here it's the user provided data passed by functions like copy_from_user()...
-                    //But we actually don't have value/type/AliasObject for this user input, so just create a dummy 
-                    //Tag to stand for a certain user input.
-                    TaintTag *tag = new TaintTag(0,(Type*)nullptr,false,nullptr);
-                    //NOTE: "is_weak" is decided by whether there are multiple pointees.
-                    TaintFlag *tf = new TaintFlag(currInst,true,tag,multi_pto);
-                    // if it is pointing to first field, then taint everything
-                    // else taint only corresponding field.
-                    if (fieldObject.first != 0 && fieldObject.second->addFieldTaintFlag(fieldObject.first, tf)) {
-#ifdef DEBUG_CALL_INSTR
-                        dbgs() << "Adding Taint To field ID:"<< fieldObject.first << " of:" << fieldObject.second << ":Success\n";
-#endif
-                        is_added = true;
-                    } else if (fieldObject.first == 0 && fieldObject.second->taintAllFields(tf)) {
-#ifdef DEBUG_CALL_INSTR
-                        dbgs() << "Adding Taint To All fields:"<< fieldObject.first << " of:" << fieldObject.second << ":Success\n";
-#endif
-                        is_added = true;
-                    } else {
-#ifdef DEBUG_CALL_INSTR
-                        dbgs() << "Adding Arg Taint Failed.\n";
-#endif
-                        delete(tag);
-                        delete(tf);
-                    }
-                }
-                // if the current taint is not added to any object, free the memory.
-                // delete the newTaint object.
-                if(!is_added) {
-                    delete(currInst);
-                }
-
-            } else {
-#ifdef DEBUG_CALL_INSTR
-                dbgs() << "TaintAnalysis: Argument does not have points to information: " << InstructionUtils::getValueStr(currArg) << "\n";
-#endif
-            }
-        }
-    }
-
     void TaintAnalysisVisitor::setupCallContext(CallInst &I, Function *currFunction,
                                                 std::vector<Instruction*> *newCallContext) {
 
@@ -659,8 +576,9 @@ namespace DRCHECKER {
 #ifdef DEBUG_CALL_INSTR
         dbgs() << "Processing memcpy function\n";
 #endif
+        //TODO: does it really make sense to propagate taint from the src pointer value (not the pointee) to the dst?
         // we do not need any special taint handling..because alias takes care of propagating
-        // pointer, here we just need to update taint of the arguments.
+        // the pointee memory content, here we just need to update taint of the arguments.
         // get src operand
         Value *srcOperand = I.getArgOperand((unsigned int) memcpyArgs[0]);
         // get dst operand
@@ -676,55 +594,42 @@ namespace DRCHECKER {
 #endif
             this->updateTaintInfo(dstOperand, newTaintInfo);
         }
-
     }
 
     void TaintAnalysisVisitor::handleKernelInternalFunction(CallInst &I, Function *currFunc) {
-        // see if this is a taint initiator function.
-        if (TaintAnalysisVisitor::functionChecker->is_taint_initiator(currFunc)) {
-#ifdef DEBUG_CALL_INSTR
-            dbgs() << "This function is a taint initiator function:" << currFunc->getName() << "\n";
-#endif
-            // handling __copy_from_user and its friends.
-            std::set<long> taintedArgs = TaintAnalysisVisitor::functionChecker->get_tainted_arguments(currFunc);
-            this->propagateTaintToArguments(taintedArgs, I);
-        } else if (TaintAnalysisVisitor::functionChecker->is_memcpy_function(currFunc)) {
+        //NOTE: taint initiator function like copy_from_user has been handled in AliasAnalysis, including the taint propagation.
+        if (TaintAnalysisVisitor::functionChecker->is_memcpy_function(currFunc)) {
             // Handle memcpy function..
             // get memcpy argument numbers
             std::vector<long> memcpyArgs = TaintAnalysisVisitor::functionChecker->get_memcpy_arguments(currFunc);
             //propagate taint from src to dst.
             this->propagateTaintToMemcpyArguments(memcpyArgs, I);
-        } else if (TaintAnalysisVisitor::functionChecker->is_atoi_function(currFunc)) {
-          // This is an atoi like function?
-           // if yes? get the taint of the object pointed by the first argument.
+        }else if (TaintAnalysisVisitor::functionChecker->is_atoi_function(currFunc)) {
+            // This is an atoi like function?
+            // if yes? get the taint of the object pointed by the first argument.
             // propagate that to the return value.
             std::set<TaintFlag*> allPointerTaint;
             allPointerTaint.clear();
             this->getPtrTaintInfo(I.getArgOperand(0), allPointerTaint, &I);
-            if(!allPointerTaint.empty()) {
+            if (!allPointerTaint.empty()) {
                 std::set<TaintFlag*> *newTaintSet = this->makeTaintInfoCopy(&I, &allPointerTaint);
                 this->updateTaintInfo(&I, newTaintSet);
             }
-
-        } else if(TaintAnalysisVisitor::functionChecker->is_sscanf_function(currFunc)) {
+        }else if (TaintAnalysisVisitor::functionChecker->is_sscanf_function(currFunc)) {
             // This is a sscanf function?
             // if yes? get the taint of the object pointed by the first argument.
             std::set<TaintFlag*> allPointerTaint;
             allPointerTaint.clear();
             this->getPtrTaintInfo(I.getArgOperand(0), allPointerTaint, &I);
-            if(!allPointerTaint.empty()) {
+            if (!allPointerTaint.empty()) {
                 std::set<TaintFlag*> *newTaintSet = this->makeTaintInfoCopy(&I, &allPointerTaint);
-
                 std::set<TaintFlag*> addedTaints;
-
                 // now add taint to all objects pointed by the arguments.
                 unsigned int arg_idx;
                 for (arg_idx = 2; arg_idx < I.getNumArgOperands(); arg_idx++) {
                     Value *argVal = I.getArgOperand(arg_idx);
-                    std::set<PointerPointsTo*> *currPtsTo = PointsToUtils::getPointsToObjects(this->currState,
-                                                                                              this->currFuncCallSites,
-                                                                                              argVal);
-                    if(currPtsTo != nullptr) {
+                    std::set<PointerPointsTo*> *currPtsTo = PointsToUtils::getPointsToObjects(this->currState, this->currFuncCallSites, argVal);
+                    if (currPtsTo != nullptr) {
                         //Set "is_weak"
                         bool multi_pto = (currPtsTo->size() > 1);
                         for(auto currT : *newTaintSet) {
@@ -742,15 +647,14 @@ namespace DRCHECKER {
                     }
                 }
                 //Free memory.
-                for(auto currT:*newTaintSet) {
-                    if(addedTaints.find(currT) == addedTaints.end()) {
+                for (auto currT : *newTaintSet) {
+                    if (addedTaints.find(currT) == addedTaints.end()) {
                         delete(currT);
                     }
                 }
                 delete(newTaintSet);
             }
-
-        } else {
+        }else {
             // TODO (below):
             // untaint all the arguments, depending on whether we are indeed calling kernel internal functions.
         }

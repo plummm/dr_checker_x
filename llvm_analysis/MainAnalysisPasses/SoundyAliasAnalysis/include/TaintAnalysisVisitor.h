@@ -144,13 +144,6 @@ namespace DRCHECKER {
         static int addNewTaintFlag(std::set<TaintFlag*> *newTaintInfo, TaintFlag *newTaintFlag);
 
         /***
-         * Propogate taint to the provided arguments according to their index.
-         * @param taintedArgs list containing indexes of tainted arguments.
-         * @param I Call instruction responsible for this operation.
-         */
-        void propagateTaintToArguments(std::set<long> &taintedArgs, CallInst &I);
-
-        /***
          * Propagate taint to the arguments of a memcpy function.
          * @param memcpyArgs indexes of source and destination pointers of the memcpy function.
          * @param I Call instruction responsible for this operation.

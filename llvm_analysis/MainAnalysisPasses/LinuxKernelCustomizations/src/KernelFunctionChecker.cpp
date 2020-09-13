@@ -8,7 +8,7 @@ namespace DRCHECKER {
 
     // These are allocators
     const std::set<std::string> KernelFunctionChecker::known_allocators{"__kmalloc", "kmem_cache_alloc",
-                                                                        "mempool_alloc",
+                                                                        "mempool_alloc", "kmalloc", 
                                                                         "__get_free_pages", "get_free_pages",
                                                                         "__get_free_page", "get_free_page",
                                                                         "__vmalloc", "vmalloc",
@@ -30,6 +30,8 @@ namespace DRCHECKER {
     const std::set<std::string> KernelFunctionChecker::atoiLikeFunctions{"kstrto", "simple_strto"};
     // fd creation function.
     const std::set<std::string> KernelFunctionChecker::fd_creation_function_names{"anon_inode_getfd","anon_inode_getfile"};
+    //memdup function
+    const std::set<std::string> KernelFunctionChecker::memdup_function_names{"memdup"};
 
     bool KernelFunctionChecker::is_debug_function(const Function *targetFunction) {
         if(targetFunction->hasName()) {
@@ -145,7 +147,7 @@ namespace DRCHECKER {
 
     std::set<long> KernelFunctionChecker::get_tainted_arguments(const Function *targetFunction) {
         std::set<long> tainted_args;
-        if(targetFunction->isDeclaration() && targetFunction->hasName()) {
+        if (targetFunction->isDeclaration() && targetFunction->hasName()) {
             std::string func_name = targetFunction->getName().str();
             if(func_name.find("copy_from_user") != std::string::npos ||
                func_name == "simple_write_to_buffer") {
@@ -153,7 +155,6 @@ namespace DRCHECKER {
                 tainted_args.insert(tainted_args.end(), 0);
                 return tainted_args;
             }
-
         }
         // should never reach here..make sure that you call is_taint_initiator function
         // before this.
@@ -183,6 +184,18 @@ namespace DRCHECKER {
 
     }
     
+    bool KernelFunctionChecker::is_memdup_function(const Function *targetFunction) {
+        if(targetFunction->isDeclaration() && targetFunction->hasName()) {
+            std::string func_name = targetFunction->getName().str();
+            for (const std::string &curr_func:KernelFunctionChecker::memdup_function_names) {
+                if (func_name.find(curr_func.c_str()) != std::string::npos) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     bool KernelFunctionChecker::is_fd_creation_function(const Function *targetFunction) {
         if(targetFunction->isDeclaration() && targetFunction->hasName()) {
             std::string func_name = targetFunction->getName().str();

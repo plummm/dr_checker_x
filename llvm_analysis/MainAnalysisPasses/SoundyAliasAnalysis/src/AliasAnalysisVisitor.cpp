@@ -1943,6 +1943,43 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
         return obj;
     }
 
+    PointerPointsTo *AliasAnalysisVisitor::copyObj(Value *dstPointer, PointerPointsTo *srcPto, CompositeType *cty, Instruction &propInst) {
+        if (!srcPto) {
+            return nullptr;
+        }
+        InstLoc *loc = new InstLoc(&propInst,this->currFuncCallSites);
+        PointerPointsTo *np = srcPto->makeCopyP(dstPointer,loc);
+        AliasObject *nobj = nullptr;
+        if (cty) {
+            AliasObject *eobj = this->getObj4Copy(np,cty,propInst);
+            if (eobj) {
+                nobj = eobj->makeCopy(loc);
+                np->dstfieldId = 0;
+            }else {
+#ifdef DEBUG_CALL_INSTR
+                dbgs() << "AliasAnalysisVisitor::copyObj(): cannot match the src object to copy.\n";
+#endif
+            }
+        }else {
+#ifdef DEBUG_CALL_INSTR
+            dbgs() << "AliasAnalysisVisitor::copyObj(): Straight copy due to non-comp cpy type.\n";
+#endif
+            //This means the copy type is non-composite, which is less likely (possibly because no
+            //type info in the context), in this situation, we faithfully copy the src pointee.
+            nobj = np->targetObject->makeCopy(loc);
+        }
+        if (nobj) {
+            np->targetObject = nobj;
+            return np;
+        }else {
+#ifdef DEBUG_CALL_INSTR
+            dbgs() << "AliasAnalysisVisitor::copyObj(): null nobj.\n";
+#endif
+            delete(np);
+        }
+        return nullptr;
+    }
+
     void AliasAnalysisVisitor::handleMemcpyFunction(std::vector<long> &memcpyArgs, CallInst &I) {
         // handle memcpy instruction.
 #ifdef DEBUG_CALL_INSTR
@@ -1989,34 +2026,9 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
                 dbgs() << "[SRC_PTO] ";
                 pto->print(dbgs());
 #endif
-                PointerPointsTo *np = pto->makeCopyP(&I,loc);
-                AliasObject *nobj = nullptr;
-                if (cty) {
-                    AliasObject *eobj = this->getObj4Copy(np,cty,I);
-                    if (eobj) {
-                        nobj = eobj->makeCopy(loc);
-                        np->dstfieldId = 0;
-                    }else {
-#ifdef DEBUG_CALL_INSTR
-                        dbgs() << "AliasAnalysisVisitor::handleMemcpyFunction(): cannot match the src object to copy.\n";
-#endif
-                    }
-                }else {
-#ifdef DEBUG_CALL_INSTR
-                    dbgs() << "Straight copy due to non-comp cpy type.\n";
-#endif
-                    //This means the inferred memcpy type is non-composite, which is less likely (possibly because no
-                    //type info in the context), in this situation, we faithfully copy the src pointee.
-                    nobj = np->targetObject->makeCopy(loc);
-                }
-                if (nobj) {
-                    np->targetObject = nobj;
+                PointerPointsTo *np = this->copyObj(&I, pto, cty, I);
+                if (np) {
                     newPtos.insert(np);
-                }else {
-#ifdef DEBUG_CALL_INSTR
-                    dbgs() << "AliasAnalysisVisitor::handleMemcpyFunction(): null nobj.\n";
-#endif
-                    delete(np);
                 }
             }
             if (!newPtos.empty()) {
@@ -2137,6 +2149,151 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
         }
     }
 
+    void AliasAnalysisVisitor::handleMemdupFunction(CallInst &I) {
+        //res_ptr = memdup(src_ptr,size), note that memdup is responsible to allocate a buf for res_ptr.
+        // get src operand
+        Value *srcOperand = I.getArgOperand(0);
+        Value *sizeArg = I.getArgOperand(1);
+        // the dst operand is the return value (i.e. the callinst itself)
+        Value *dstOperand = &I;
+        //Decide the obj type to create, from the dst pointer.
+        Type *ty = InstructionUtils::inferPointeeTy(dstOperand);
+        if (!ty) {
+            dbgs() << "!!! AliasAnalysisVisitor::handleMemdupFunction(): failed to infer the dst obj type!\n";
+            return;
+        }
+        CompositeType *cty = dyn_cast<CompositeType>(ty);
+#ifdef DEBUG_CALL_INSTR
+        dbgs() << "AliasAnalysisVisitor::handleMemcpyFunction(): inferred memdup obj type: " << InstructionUtils::getTypeStr(ty) << "\n";
+#endif
+        //Is this a memdup from the user space? If so, we need to treat it as a user initiated taint source later.
+        bool from_user = false;
+        Function *func = I.getCalledFunction();
+        if (func && func->hasName()) {
+            std::string n = func->getName().str();
+            if (n.find("user") != std::string::npos) {
+                from_user = true;
+            }
+        }
+        //Get the src pointees.
+        if (!hasPointsToObjects(srcOperand)) {
+            srcOperand = srcOperand->stripPointerCasts();
+        }
+        std::set<PointerPointsTo*> *srcPointsTo = getPointsToObjects(srcOperand);
+        InstLoc *loc = new InstLoc(&I,this->currFuncCallSites);
+        std::set<PointerPointsTo*> newPtos;
+        if (srcPointsTo && !srcPointsTo->empty()) {
+            for (PointerPointsTo *pto : *srcPointsTo) {
+                if (!pto || !pto->targetObject) {
+                    continue;
+                }
+#ifdef DEBUG_CALL_INSTR
+                dbgs() << "[SRC PTO]: ";
+                pto->print(dbgs());
+#endif
+                PointerPointsTo *np = this->copyObj(&I, pto, cty, I);
+                if (np) {
+                    newPtos.insert(np);
+                    //if this is a memdup_user, we may need to force a user taint on the dst obj, in case it's not propagated
+                    //from the src for some reasons. In this case, it's unlikely that newly added inherent TFs will accidentally
+                    //kill the existing TFs since kernel code cannot directly operate on the user space object (so no existing TFs).
+                    if (from_user) {
+                        AliasObject *obj = np->targetObject;
+                        if (np->dstfieldId) {
+                            obj = obj->getEmbObj(np->dstfieldId);
+                        }
+                        if (obj) {
+                            obj->setAsTaintSrc(loc,!from_user);
+                        }
+                    }
+                }else {
+                    dbgs() << "AliasAnalysisVisitor::handleMemcpyFunction(): failed to copy the obj from current src!\n";
+                }
+            }
+        }
+        if (!newPtos.empty()) {
+            this->updatePointsToObjects(&I,&newPtos,false);
+        }else {
+#ifdef DEBUG_CALL_INSTR
+            dbgs() << "AliasAnalysisVisitor::handleMemcpyFunction(): no pto info copied from src, create new dummy pointee obj!\n";
+#endif
+            //No src pointees, in this case we need to create the new dummy obj for the dst pointer..
+            AliasObject *obj = new HeapLocation(I, ty, this->currFuncCallSites, sizeArg, false);
+            //Anyway we need to set the newly created obj as the taint source, user initiated or not.
+            obj->setAsTaintSrc(loc,!from_user);
+            //update the pto for dst pointer.
+            this->updatePointsToObjects(&I,obj,loc);
+        }
+    }
+
+    void AliasAnalysisVisitor::handleCfuFunction(std::set<long> &taintedArgs, CallInst &I) {
+        //handle copy_from_user(to, src, size)
+        //The src object must come from the user space, so we can assume that there are no existing TFs or ptos associated
+        //w/ the src object, on the other hand, the dst pointer is mostly likely related to a newly allocated object (e.g. kmalloc),
+        //so here we only need to take care of the dst pointee object. (i.e. set it as the user taint source).
+        for (auto currArgNo : taintedArgs) {
+            Value *currArg = I.getArgOperand(currArgNo);
+#ifdef DEBUG_CALL_INSTR
+            dbgs() << "Current argument: " << InstructionUtils::getValueStr(currArg) << "\n";
+#endif
+            std::set<PointerPointsTo*> *dstPointsTo = getPointsToObjects(currArg);
+            if (dstPointsTo == nullptr) {
+                currArg = currArg->stripPointerCasts();
+                dstPointsTo = getPointsToObjects(currArg);
+            }
+            Type *ty = InstructionUtils::inferPointeeTy(currArg);
+            if (!ty) {
+                dbgs() << "!!! AliasAnalysisVisitor::handleCfuFunction(): failed to infer the dst obj type!\n";
+                continue;
+            }
+            CompositeType *cty = dyn_cast<CompositeType>(ty);
+            //TODO: the arg may also be an embedded GEP.
+            std::set<PointerPointsTo*> newPtos;
+            bool user_tainted = false;
+            InstLoc *loc = new InstLoc(&I,this->currFuncCallSites);
+            if (dstPointsTo != nullptr && !dstPointsTo->empty()) {
+                for (PointerPointsTo *pto : *dstPointsTo) {
+                    if (!pto || !pto->targetObject) {
+                        continue;
+                    }
+#ifdef DEBUG_CALL_INSTR
+                    dbgs() << "[DST PTO] ";
+                    pto->print(dbgs());
+#endif
+                    AliasObject *obj = nullptr;
+                    if (cty) {
+                        obj = this->getObj4Copy(pto,cty,I);
+                        if (!obj) {
+#ifdef DEBUG_CALL_INSTR
+                            dbgs() << "AliasAnalysisVisitor::handleCfuFunction(): cannot match the inferred obj ty w/ the comp dst pto.\n";
+#endif
+                            continue;
+                        }
+                    }else {
+                        obj = pto->targetObject->getEmbObj(pto->dstfieldId);
+                    }
+                    if (obj) {
+                        obj->clearAllInhTFs();
+                        obj->setAsTaintSrc(loc,false);
+                        user_tainted = true;
+                    }
+                }
+            }
+            if (!user_tainted) {
+#ifdef DEBUG_CALL_INSTR
+                dbgs() << "AliasAnalysisVisitor::handleCfuFunction(): Try to create a new dummy dst obj to init the user taint!\n";
+#endif
+                //Create a dummy dst object as the user taint source.
+                //TODO: the "size" arg.
+                AliasObject *obj = new HeapLocation(I, ty, this->currFuncCallSites, nullptr, false);
+                //Set the newly created obj as the user space taint source.
+                obj->setAsTaintSrc(loc,false);
+                //update the pto for dst pointer.
+                this->updatePointsToObjects(currArg,obj,loc);
+            }
+        }
+    }
+
     VisitorCallback* AliasAnalysisVisitor::visitCallInst(CallInst &I, Function *currFunc,
             std::vector<Instruction *> *oldFuncCallSites,
             std::vector<Instruction *> *callSiteContext) {
@@ -2157,39 +2314,49 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
                 // handle memcpy function.
                 std::vector<long> memcpyArgs = targetChecker->get_memcpy_arguments(currFunc);
                 this->handleMemcpyFunction(memcpyArgs, I);
-            } else if (targetChecker->is_fd_creation_function(currFunc)) {
+            }else if (targetChecker->is_memdup_function(currFunc)) {
+#ifdef DEBUG_CALL_INSTR
+                dbgs() << "AliasAnalysisVisitor::visitCallInst(): This is a memdup function w/o definition.\n";
+#endif
+                //handle the memdup function.
+                this->handleMemdupFunction(I);
+            }else if (targetChecker->is_taint_initiator(currFunc)) {
+#ifdef DEBUG_CALL_INSTR
+                dbgs() << "AliasAnalysisVisitor::visitCallInst(): This is a copy_from_user function.\n";
+#endif
+                //handling __copy_from_user and its friends.
+                std::set<long> taintedArgs = targetChecker->get_tainted_arguments(currFunc);
+                this->handleCfuFunction(taintedArgs, I);
+            }else if (targetChecker->is_fd_creation_function(currFunc)) {
 #ifdef DEBUG_CALL_INSTR
                 dbgs() << "AliasAnalysisVisitor::visitCallInst(): This is a fd creation function w/o definition.\n";
 #endif
                 // handle fd creation function
                 std::map<long,long> fdFieldMap = targetChecker->get_fd_field_arg_map(currFunc);
                 this->handleFdCreationFunction(fdFieldMap,currFunc,I);
-            } else {
-                //std::set<PointerPointsTo*>* newPointsToInfo = KernelFunctionHandler::handleKernelFunction(I, currFunc, this->currFuncCallSites);
-                bool is_handled;
-                is_handled = false;
-                std::set<PointerPointsTo*> *newPointsToInfo = (std::set<PointerPointsTo *> *) (
-                            (AliasAnalysisVisitor::functionHandler)->handleFunction(
-                            I, currFunc,
-                            (void *) (this->currFuncCallSites),
-                            AliasAnalysisVisitor::callback,
-                            is_handled));
-                if (is_handled) {
+            }else {
 #ifdef DEBUG_CALL_INSTR
-                    dbgs() << "Function:" << currFuncName << " handled by the function handler\n";
+                dbgs() << "AliasAnalysisVisitor::visitCallInst(): Handle the Function: " << currFuncName << " in the default way.\n";
 #endif
-                    if (newPointsToInfo != nullptr) {
+                bool is_handled = false;
+                std::set<PointerPointsTo*> *newPointsToInfo = (std::set<PointerPointsTo*>*)
+                                                              this->functionHandler->handleFunction(I, currFunc, this->currFuncCallSites,
+                                                                                                    this->callback, is_handled);
+                if (is_handled) {
+                    if (newPointsToInfo && !newPointsToInfo->empty()) {
 #ifdef DEBUG_CALL_INSTR
-                        dbgs() << "Function handler returned some points to info to add\n";
+                        dbgs() << "Function handler returned some points to info to add.\n";
 #endif
                         this->updatePointsToObjects(&I, newPointsToInfo);
                     }
                 } else {
 #ifdef DEBUG_CALL_INSTR
-                    dbgs() << "Ignoring Kernel Function:" << currFuncName << "\n";
+                    dbgs() << "AliasAnalysisVisitor::visitCallInst(): not handled!\n";
 #endif
                 }
             }
+            //TODO: upon a "memset" we need to somehow kill the existing pto records (but it's less likely that an object that already
+            //has some pto records will be "memset" later..)
             return nullptr;
         }
 

@@ -193,11 +193,18 @@ namespace DRCHECKER {
          */
         void handleMemcpyFunction(std::vector<long> &memcpyArgs, CallInst &I);
 
+        void handleMemdupFunction(CallInst &I);
+
         AliasObject *getObj4Copy(PointerPointsTo *pto, CompositeType *ty, Instruction &I);
+
+        PointerPointsTo *copyObj(Value *dstPointer, PointerPointsTo *srcPto, CompositeType *cty, Instruction &propInst);
 
         Type *getMemcpySrcTy(CallInst &I);
 
         void handleFdCreationFunction(std::map<long,long> &fdFieldMap, Function *currFunc, CallInst &I);
+
+        //cfu: copy_from_user
+        void handleCfuFunction(std::set<long> &taintedArgs, CallInst &I);
 
         void handleInlinePointerOperand(Instruction &currIns, Value **srcPointer);
 
