@@ -54,9 +54,9 @@ namespace DRCHECKER {
         TaintUtils::updateTaintInfo(this->currState, this->currFuncCallSites, targetVal, targetTaintInfo);
     }
 
-    std::set<TaintFlag*>* TaintAnalysisVisitor::makeTaintInfoCopy(Instruction *targetInstruction, std::set<TaintFlag*> *srcTaintInfo, 
+    std::set<TaintFlag*> *TaintAnalysisVisitor::makeTaintInfoCopy(Instruction *targetInstruction, std::set<TaintFlag*> *srcTaintInfo, 
                                                                   std::set<TaintFlag*> *dstTaintInfo) {
-        if(srcTaintInfo != nullptr) {
+        if (srcTaintInfo != nullptr) {
             std::set<TaintFlag*> *newTaintInfo = new std::set<TaintFlag*>();
             InstLoc *loc = this->makeInstLoc(targetInstruction);
             bool add_taint = false;
@@ -77,7 +77,7 @@ namespace DRCHECKER {
                     }
                 }
 #endif
-                if(add_taint) {
+                if (add_taint) {
                     TaintFlag *newTaintFlag = new TaintFlag(currTaint, loc);
                     TaintAnalysisVisitor::addNewTaintFlag(newTaintInfo,newTaintFlag);
                 }else {
@@ -96,13 +96,13 @@ namespace DRCHECKER {
                 }
             }
             // if no taint info is propagated.
-            if(newTaintInfo->empty()) {
+            if (newTaintInfo->empty()) {
                 delete(newTaintInfo);
                 delete(loc);
                 newTaintInfo = nullptr;
             }
             // if dstTaintInfo is not null.
-            if(dstTaintInfo != nullptr && newTaintInfo != nullptr) {
+            if (dstTaintInfo != nullptr && newTaintInfo != nullptr) {
                 // copy all the taint info into dstTaintInfo.
                 if (dstTaintInfo->empty()) {
                     //No need to check for duplication of existing elements in "dstTaintInfo".
@@ -132,18 +132,67 @@ namespace DRCHECKER {
         return TaintAnalysisVisitor::makeTaintInfoCopy(targetInstruction,&srcTaintInfo,dstTaintInfo);
     }
 
-    std::set<TaintFlag*>* TaintAnalysisVisitor::mergeTaintInfo(std::set<Value *> &srcVals, Instruction *targetInstr) {
+    //Get the taint flags of the specified value, strip the cast when necessary.
+    std::set<TaintFlag*> *TaintAnalysisVisitor::getTFs(Value *v) {
+        if (!v) {
+            return nullptr;
+        }
+        std::set<TaintFlag*> *tfs = this->getTaintInfo(v);
+        if (tfs && !tfs->empty()) {
+            return tfs;
+        }
+        //E.g. "v" might be: (1) GEP (cast..) ... (2) cast (GEP ...) ..., in such cases we need to retrieve the taint
+        //from the innermost base pointer.
+        //Try stripping the simple cast if any.
+        Value *v0 = v->stripPointerCasts();
+        //Further strip the GEP transformation.
+        //TODO: not sure whether this is the best choice to strip the GEP transformation, at least one obvious weakness
+        //is it can only strip the GEP w/ all constant indicies.
+        Value *v1 = v->stripInBoundsConstantOffsets();
+        //First try the more closer "v0".
+        if (v0 && v0 != v) {
+            tfs = this->getTaintInfo(v0);
+            if (tfs && !tfs->empty()) {
+                return tfs;
+            }
+        }
+        //Then "v1".
+        if (v1 && v1 != v && v1 != v0) {
+            tfs = this->getTaintInfo(v1);
+            if (tfs && !tfs->empty()) {
+                return tfs;
+            }
+        }
+        //GG
+        return tfs;
+    }
+
+    //This function will try best to get the pto info of a pointer value, if the raw pointer doesn't have pto, 
+    //it will do the necessary cast strip.
+    //NOTE: this is a helper function designed for the taint analysis, which also needs to obtain the pto info in some cases,
+    //but different from the same named function in alias analysis, we don't need to parse the embedded GEP since its pto
+    //info has already been set up by the alias analysis, neither the dummy object creation.
+    std::set<PointerPointsTo*> *TaintAnalysisVisitor::getPtos(Value *srcPointer) { 
+        if (!srcPointer) {
+            return nullptr;
+        }
+        if (PointsToUtils::hasPointsToObjects(this->currState, this->currFuncCallSites, srcPointer)) {
+            return PointsToUtils::getPointsToObjects(this->currState, this->currFuncCallSites, srcPointer); 
+        }
+        //Try to strip the pointer cast.
+        Value *v = srcPointer->stripPointerCasts();
+        if (v && v != srcPointer) {
+            return PointsToUtils::getPointsToObjects(this->currState, this->currFuncCallSites, v); 
+        }
+        return nullptr;
+    }
+
+    std::set<TaintFlag*> *TaintAnalysisVisitor::mergeTaintInfo(std::set<Value*> &srcVals, Instruction *targetInstr) {
 
         std::set<TaintFlag*> *newTaintInfo = new std::set<TaintFlag*>();
-
         for(auto currVal : srcVals) {
-            std::set<TaintFlag*> *currValTaintInfo = getTaintInfo(currVal);
-            // we do not have taint info? strip and check
-            if(currValTaintInfo == nullptr) {
-                currVal = currVal->stripPointerCasts();
-                currValTaintInfo = getTaintInfo(currVal);
-            }
-            if(currValTaintInfo != nullptr) {
+            std::set<TaintFlag*> *currValTaintInfo = this->getTFs(currVal);
+            if(currValTaintInfo && !currValTaintInfo->empty()) {
                 this->makeTaintInfoCopy(targetInstr, currValTaintInfo, newTaintInfo);
             }
         }
@@ -154,7 +203,6 @@ namespace DRCHECKER {
             newTaintInfo = nullptr;
         }
         return newTaintInfo;
-
     }
 
     int TaintAnalysisVisitor::addNewTaintFlag(std::set<TaintFlag*> *newTaintInfo, TaintFlag *newTaintFlag) {
@@ -171,27 +219,20 @@ namespace DRCHECKER {
         // if the src operand is tainted then the instruction is tainted.
 
         Value *srcOperand = I.getOperand(0);
-        std::set<TaintFlag*> *srcTaintInfo = getTaintInfo(srcOperand);
-        if(srcTaintInfo == nullptr) {
-            srcOperand = srcOperand->stripPointerCasts();
-            srcTaintInfo = getTaintInfo(srcOperand);
-        }
+        std::set<TaintFlag*> *srcTaintInfo = this->getTFs(srcOperand);
 
         // if there exists some taintflags..propagate them
-        if(srcTaintInfo != nullptr) {
+        if (srcTaintInfo && !srcTaintInfo->empty()) {
             std::set<TaintFlag*> *newTaintInfo = this->makeTaintInfoCopy(&I, srcTaintInfo);
-            if(newTaintInfo != nullptr) {
+            if (newTaintInfo && !newTaintInfo->empty()) {
                 this->updateTaintInfo(&I, newTaintInfo);
-            } else {
+            }else {
 #ifdef DEBUG_CAST_INSTR
-                dbgs() << "Taint Info cannot be propagated because the current instruction is not reachable from";
-                dbgs() << "  tainted source at ";
-                I.print(dbgs());
-                dbgs() << "\n";
+                dbgs() << "Taint Info cannot be propagated because the current instruction is not reachable from"
+                << "  tainted source at " << InstructionUtils::getValueStr(&I) << "\n";
 #endif
             }
         }
-
     }
 
     void TaintAnalysisVisitor::visitBinaryOperator(BinaryOperator &I) {
@@ -265,49 +306,19 @@ namespace DRCHECKER {
         dbgs() << "TaintAnalysisVisitor::visitLoadInst(): " << InstructionUtils::getValueStr(&I) << "\n";
 #endif
         Value *srcPointer = I.getPointerOperand();
-        std::set<TaintFlag*> *srcTaintInfo = getTaintInfo(srcPointer);
-
+        std::set<TaintFlag*> *srcTaintInfo = this->getTFs(srcPointer);
         std::set<TaintFlag*> *newTaintInfo = new std::set<TaintFlag*>();
 
-        bool already_stripped = true;
-        if (srcTaintInfo == nullptr) {
-#ifdef DEBUG_LOAD_INSTR
-            dbgs() << "TaintAnalysisVisitor::visitLoadInst(): No taint info for srcPointer: " << InstructionUtils::getValueStr(srcPointer) << "\n";
-#endif
-            already_stripped = false;
-            if(getTaintInfo(srcPointer->stripPointerCasts())) {
-                srcPointer = srcPointer->stripPointerCasts();
-                srcTaintInfo = getTaintInfo(srcPointer);
-                already_stripped = true;
-#ifdef DEBUG_LOAD_INSTR
-                dbgs() << "TaintAnalysisVisitor::visitLoadInst(): Got taint info after stripping: " 
-                << InstructionUtils::getValueStr(srcPointer) << "\n";
-#endif
-            }
-        }
-
         //Copy the taint from tainted pointer.
-        if (srcTaintInfo != nullptr) {
+        if (srcTaintInfo && !srcTaintInfo->empty()) {
 #ifdef DEBUG_LOAD_INSTR
             dbgs() << "The src pointer itself is tainted.\n";
 #endif
             TaintAnalysisVisitor::makeTaintInfoCopy(&I,srcTaintInfo,newTaintInfo);
         }
-
-        if(!already_stripped) {
-            if(!PointsToUtils::hasPointsToObjects(currState, this->currFuncCallSites, srcPointer)) {
-#ifdef DEBUG_LOAD_INSTR
-                dbgs() << "Strip srcPointer since there is no point-to info.\n";
-#endif
-                srcPointer = srcPointer->stripPointerCasts();
-            }
-        }
-
-        // Get the src points to information.
-        std::set<PointerPointsTo*>* srcPointsTo = PointsToUtils::getPointsToObjects(currState,
-                                                                                    this->currFuncCallSites,
-                                                                                    srcPointer);
-        if (srcPointsTo != nullptr) {
+        //Now get the pto info of the src pointer.
+        std::set<PointerPointsTo*> *srcPointsTo = this->getPtos(srcPointer);
+        if (srcPointsTo && !srcPointsTo->empty()) {
             // this set stores the <fieldid, targetobject> of all the objects to which the srcPointer points to.
             std::set<std::pair<long, AliasObject *>> targetObjects;
             for (PointerPointsTo *currPointsToObj : *srcPointsTo) {
@@ -416,27 +427,13 @@ namespace DRCHECKER {
         dbgs() << "TaintAnalysisVisitor::visitStoreInst(): " << InstructionUtils::getValueStr(&I) << "\n";
 #endif
         Value *srcPointer = I.getValueOperand();
-        std::set<TaintFlag*> *srcTaintInfo = getTaintInfo(srcPointer);
-        if(srcTaintInfo == nullptr) {
-            srcPointer = srcPointer->stripPointerCasts();
-            srcTaintInfo = getTaintInfo(srcPointer);
-        }
-
+        std::set<TaintFlag*> *srcTaintInfo = this->getTFs(srcPointer);
         //Get the mem locations to store.
         Value *dstPointer = I.getPointerOperand();
-        //HZ: besides deciding whether we need to strip the pointer, the "dstTaintInfo" in the original code actually has no usage later...
-        //HZ: so rewrite the original logic as below:
-        //TODO: why do we need to even consider the "dstTaintInfo" when making the strip decision?
-        if (!getTaintInfo(dstPointer)) {
-            if (getTaintInfo(dstPointer->stripPointerCasts()) || 
-                !PointsToUtils::hasPointsToObjects(currState, this->currFuncCallSites, dstPointer))
-            {
-                dstPointer = dstPointer->stripPointerCasts();
-            }
-        }
-        std::set<PointerPointsTo*> *dstPointsTo = PointsToUtils::getPointsToObjects(currState, this->currFuncCallSites, dstPointer);
+        std::set<PointerPointsTo*> *dstPointsTo = this->getPtos(dstPointer);
+        //De-dup
         std::set<PointerPointsTo*> uniqueDstPto;
-        if(dstPointsTo != nullptr) {
+        if(dstPointsTo && !dstPointsTo->empty()) {
             for (PointerPointsTo *currPointsToObj : *dstPointsTo) {
                 if (std::find_if(uniqueDstPto.begin(),uniqueDstPto.end(),[currPointsToObj](const PointerPointsTo *pto){
                     return currPointsToObj->pointsToSameObject(pto);
@@ -522,54 +519,40 @@ namespace DRCHECKER {
                                                 std::vector<Instruction*> *newCallContext) {
 
         std::map<Value*, std::set<TaintFlag*>*> *contextTaintInfo = currState.getTaintInfo(newCallContext);
-
         unsigned int arg_no = 0;
 
-        for(User::op_iterator arg_begin = I.arg_begin(), arg_end = I.arg_end(); arg_begin != arg_end; arg_begin++) {
+        for (User::op_iterator arg_begin = I.arg_begin(), arg_end = I.arg_end(); arg_begin != arg_end; arg_begin++) {
             Value *currArgVal =(*arg_begin).get();
-
-            if(getTaintInfo(currArgVal) || getTaintInfo(currArgVal->stripPointerCasts())) {
-                unsigned int farg_no;
-                farg_no = 0;
-                std::set<Value*> valuesToMerge;
-                // handle pointer casts
-                if(!getTaintInfo(currArgVal)) {
-                    currArgVal = currArgVal->stripPointerCasts();
-                }
+            std::set<TaintFlag*> *currArgTaintInfo = this->getTFs(currArgVal);
+            if (!currArgTaintInfo || currArgTaintInfo->empty()) {
 #ifdef DEBUG_CALL_INSTR
-                dbgs() << "Has Taint Info:" << getTaintInfo(currArgVal)->size() << " taint flags\n";
+                dbgs() << "TaintAnalysisVisitor::setupCallContext(): arg " << arg_no << " does not have taint info.\n";
 #endif
-                valuesToMerge.clear();
-                valuesToMerge.insert(valuesToMerge.end(), currArgVal);
-
-                for(Function::arg_iterator farg_begin = currFunction->arg_begin(), farg_end = currFunction->arg_end();
-                    farg_begin != farg_end; farg_begin++) {
-                    Value *currfArgVal = &(*farg_begin);
-                    if(farg_no == arg_no) {
-                        std::set<TaintFlag*> *currArgTaintInfo = mergeTaintInfo(valuesToMerge, &I);
-                        // ensure that we didn't mess up.
-                        //assert(currArgTaintInfo != nullptr);
-                        if (currArgTaintInfo == nullptr) {
-                            //This is less likely but if it happens, treat this arg as not tainted.
-                            break;
-                        }
+                continue;
+            }
+#ifdef DEBUG_CALL_INSTR
+            dbgs() << "TaintAnalysisVisitor::setupCallContext(): arg " << arg_no << " #TF: " << currArgTaintInfo->size() << "\n";
+#endif
+            unsigned int farg_no = 0;
+            for (Function::arg_iterator farg_begin = currFunction->arg_begin(), farg_end = currFunction->arg_end();
+                 farg_begin != farg_end; farg_begin++) 
+            {
+                Value *currfArgVal = &(*farg_begin);
+                if (farg_no == arg_no) {
+                    std::set<TaintFlag*> *tfs = this->makeTaintInfoCopy(&I, currArgTaintInfo);
+                    if (tfs && !tfs->empty()) {
 #ifdef DEBUG_CALL_INSTR
                         // OK, we need to add taint info.
-                        dbgs() << "Argument:" << (arg_no) << " has taint info\n";
+                        dbgs() << "TaintAnalysisVisitor::setupCallContext(): farg " << arg_no << " has #TF: " << tfs->size() << "\n";
 #endif
-                        (*contextTaintInfo)[currfArgVal] = currArgTaintInfo;
-                        break;
+                        (*contextTaintInfo)[currfArgVal] = tfs;
                     }
-                    farg_no++;
+                    break;
                 }
-            } else {
-#ifdef DEBUG_CALL_INSTR
-                dbgs() << "Argument:" << (arg_no) << " does not have taint info\n";
-#endif
+                ++farg_no;
             }
-            arg_no++;
+            ++arg_no;
         }
-
     }
 
     void TaintAnalysisVisitor::propagateTaintToMemcpyArguments(std::vector<long> &memcpyArgs, CallInst &I) {
@@ -707,26 +690,23 @@ namespace DRCHECKER {
     void TaintAnalysisVisitor::visitReturnInst(ReturnInst &I) {
         // add taint of the return value to the retTaintInfo set.
         Value *targetRetVal = I.getReturnValue();
-        if(targetRetVal != nullptr && (getTaintInfo(targetRetVal) || getTaintInfo(targetRetVal->stripPointerCasts()))) {
-            // check if pointer casts has a role to play?
-            if(!getTaintInfo(targetRetVal)){
-                targetRetVal = targetRetVal->stripPointerCasts();
-            }
-            std::set<TaintFlag*> *currRetTaintInfo = getTaintInfo(targetRetVal);
-
-            for(auto a : *currRetTaintInfo) {
-                if(std::find_if(this->retValTaints.begin(), this->retValTaints.end(), [a](const TaintFlag *n) {
-                    return  n->isTaintEquals(a);
-                }) == this->retValTaints.end()) {
-                    // if not insert the new taint flag into the newTaintInfo.
-                    this->retValTaints.insert(this->retValTaints.end(), a);
-                }
-            }
-
-        } else {
+        if (!targetRetVal) {
+            return;
+        }
+        std::set<TaintFlag*> *currRetTaintInfo = this->getTFs(targetRetVal);
+        if (!currRetTaintInfo || currRetTaintInfo->empty()) {
 #ifdef DEBUG_RET_INSTR
             dbgs() << "Return value: " << InstructionUtils::getValueStr(&I) << ", does not have TaintFlag.\n";
 #endif
+            return;
+        }
+        for(auto a : *currRetTaintInfo) {
+            if(std::find_if(this->retValTaints.begin(), this->retValTaints.end(), [a](const TaintFlag *n) {
+                return  n->isTaintEquals(a);
+            }) == this->retValTaints.end()) {
+                // if not insert the new taint flag into the newTaintInfo.
+                this->retValTaints.insert(this->retValTaints.end(), a);
+            }
         }
     }
 
@@ -755,23 +735,12 @@ namespace DRCHECKER {
         }
         //Get the branch condition Value.
         Value *condition = I.getCondition();
-        std::set<TaintFlag*> *srcTaintInfo = getTaintInfo(condition);
-        if(srcTaintInfo == nullptr) {
-            condition = condition->stripPointerCasts();
-            srcTaintInfo = getTaintInfo(condition);
-        }
+        std::set<TaintFlag*> *srcTaintInfo = this->getTFs(condition);
         // if there exists some taintflags..propagate them
-        if(srcTaintInfo != nullptr) {
+        if (srcTaintInfo && !srcTaintInfo->empty()) {
             std::set<TaintFlag*> *newTaintInfo = this->makeTaintInfoCopy(&I, srcTaintInfo);
-            if(newTaintInfo != nullptr) {
+            if (newTaintInfo != nullptr) {
                 this->updateTaintInfo(&I, newTaintInfo);
-            } else {
-#ifdef DEBUG_BRANCH_INSTR
-                dbgs() << "Taint Info cannot be propagated because the current instruction is not reachable from";
-                dbgs() << "  tainted source at ";
-                I.print(dbgs());
-                dbgs() << "\n";
-#endif
             }
         }
     }
@@ -786,23 +755,12 @@ namespace DRCHECKER {
     void TaintAnalysisVisitor::visitSwitchInst(SwitchInst &I) {
         //Get the switch condition Value.
         Value *condition = I.getCondition();
-        std::set<TaintFlag*>* srcTaintInfo = getTaintInfo(condition);
-        if(srcTaintInfo == nullptr) {
-            condition = condition->stripPointerCasts();
-            srcTaintInfo = getTaintInfo(condition);
-        }
+        std::set<TaintFlag*> *srcTaintInfo = this->getTFs(condition);
         // if there exists some taintflags..propagate them
-        if(srcTaintInfo != nullptr) {
+        if (srcTaintInfo && !srcTaintInfo->empty()) {
             std::set<TaintFlag*> *newTaintInfo = this->makeTaintInfoCopy(&I, srcTaintInfo);
-            if(newTaintInfo != nullptr) {
+            if (newTaintInfo && !newTaintInfo->empty()) {
                 this->updateTaintInfo(&I, newTaintInfo);
-            } else {
-#ifdef DEBUG_BRANCH_INSTR
-                dbgs() << "Taint Info cannot be propagated because the current instruction is not reachable from";
-                dbgs() << "  tainted source at ";
-                I.print(dbgs());
-                dbgs() << "\n";
-#endif
             }
         }
     }

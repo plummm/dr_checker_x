@@ -176,10 +176,16 @@ namespace DRCHECKER {
          * @param dstTaintInfo [optional] set to which the copied taint info needs to be added
          * @return pointer to the newly created or provided via dstTaintInfo set of taint info
          */
-        std::set<TaintFlag*>* makeTaintInfoCopy(Instruction *targetInstruction, std::set<TaintFlag*>* srcTaintInfo, std::set<TaintFlag*> *dstTaintInfo = nullptr);
+        std::set<TaintFlag*> *makeTaintInfoCopy(Instruction *targetInstruction, std::set<TaintFlag*>* srcTaintInfo, 
+                                                std::set<TaintFlag*> *dstTaintInfo = nullptr);
 
-        std::set<TaintFlag*>* makeTaintInfoCopy(Instruction *targetInstruction, TaintFlag *srcTaintFlag, std::set<TaintFlag*> *dstTaintInfo = nullptr);
+        std::set<TaintFlag*> *makeTaintInfoCopy(Instruction *targetInstruction, TaintFlag *srcTaintFlag, 
+                                                std::set<TaintFlag*> *dstTaintInfo = nullptr);
 
+        std::set<TaintFlag*> *getTFs(Value *v);
+
+        std::set<PointerPointsTo*> *getPtos(Value *srcPointer); 
+        
         InstLoc *makeInstLoc(Value *v);
 
     };
