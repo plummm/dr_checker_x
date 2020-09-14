@@ -402,8 +402,7 @@ namespace DRCHECKER {
         /***
          * Check if the srcPointer has any pointto objects at currInstruction
          */
-        std::map<Value *, std::set<PointerPointsTo*>*>* targetPointsToMap = this->currState.getPointsToInfo(this->currFuncCallSites);
-        //Value *strippedPtr = srcPointer->stripPointerCasts();
+        std::map<Value*, std::set<PointerPointsTo*>*> *targetPointsToMap = this->currState.getPointsToInfo(this->currFuncCallSites);
         return targetPointsToMap != nullptr &&
                targetPointsToMap->find(srcPointer) != targetPointsToMap->end() &&
                (*targetPointsToMap)[srcPointer] &&
@@ -633,13 +632,8 @@ std::set<PointerPointsTo*>* AliasAnalysisVisitor::mergePointsTo(std::set<Value*>
     targetObjects.clear();
     std::set<PointerPointsTo*> *toRetPointsTo = new std::set<PointerPointsTo*>();
     for (Value *currVal : valuesToMerge) {
-        // if the value doesn't have points to information.
-        // try to strip pointer casts.
-        if (!hasPointsToObjects(currVal)) {
-            currVal = currVal->stripPointerCasts();
-        }
-        if (hasPointsToObjects(currVal)) {
-            std::set<PointerPointsTo*> *tmpPointsTo = getPointsToObjects(currVal);
+        std::set<PointerPointsTo*> *tmpPointsTo = this->getPtos(targetInstruction,currVal);
+        if (tmpPointsTo && !tmpPointsTo->empty()) {
             for (PointerPointsTo *currPointsTo : *tmpPointsTo) {
                 auto to_check = std::make_pair(currPointsTo->dstfieldId, currPointsTo->targetObject);
                 //de-duplication based on the pointee.
@@ -731,19 +725,10 @@ void AliasAnalysisVisitor::visitCastInst(CastInst &I) {
     dbgs() << "Convert: " << InstructionUtils::getTypeStr(srcType) << " --> " << InstructionUtils::getTypeStr(dstType) << "\n";
     dbgs() << "srcOperand: " << InstructionUtils::getValueStr(srcOperand) << "\n";
 #endif
-    // handle inline casting.
-    if(!hasPointsToObjects(srcOperand)) {
-        srcOperand = srcOperand->stripPointerCasts();
-#ifdef DEBUG_CAST_INSTR
-        dbgs() << "Src operand doesn't point to any objects, after strip, it becomes: " << InstructionUtils::getValueStr(srcOperand) << "\n";
-#endif
-    }
-
-    if(hasPointsToObjects(srcOperand)) {
+    std::set<PointerPointsTo*> *srcPointsToInfo = this->getPtos(&I,srcOperand);
+    if (srcPointsToInfo && !srcPointsToInfo->empty()) {
         //In this situation, our overall logic is to propagate all point-to information from the src operand to the dst operand,
         //however, we may have some special processing about the point-to information (e.g. change the type of the point-to obj).
-        std::set<PointerPointsTo*>* srcPointsToInfo = getPointsToObjects(srcOperand);
-        assert(srcPointsToInfo != nullptr);
         //Create new pointsTo info for the current instruction.
         std::set<PointerPointsTo*>* newPointsToInfo = new std::set<PointerPointsTo*>();
         for(PointerPointsTo *currPointsToObj : *srcPointsToInfo) {
@@ -802,113 +787,128 @@ void AliasAnalysisVisitor::visitCastInst(CastInst &I) {
     }
 }
 
-//TODO: we need to handle the potential pointer arithmetic here...
-void AliasAnalysisVisitor::visitBinaryOperator(BinaryOperator &I) {
-    /***
-     *  Handle binary instruction.
-     *
-     *  get the points to information of both the operands and merge them.
-     */
+    //TODO: we need to handle the potential pointer arithmetic here...
+    void AliasAnalysisVisitor::visitBinaryOperator(BinaryOperator &I) {
+        /***
+        *  Handle binary instruction.
+        *
+        *  get the points to information of both the operands and merge them.
+        */
 
-    // merge points to of all objects.
-    std::set<Value*> allVals;
-    allVals.insert(allVals.end(), I.getOperand(0));
-    allVals.insert(allVals.end(), I.getOperand(1));
-#ifdef CREATE_DUMMY_OBJ_IF_NULL
-    if (!InstructionUtils::isAsanInst(&I)) {
-        for (Value *v : allVals) {
-            if (!InstructionUtils::isScalar(v) && !hasPointsToObjects(v)) {
-                this->createOutsideObj(v,&I,true);
+        // merge points to of all objects.
+        std::set<Value*> allVals;
+        allVals.insert(allVals.end(), I.getOperand(0));
+        allVals.insert(allVals.end(), I.getOperand(1));
+        std::set<PointerPointsTo*> *finalPointsToInfo = mergePointsTo(allVals, &I);
+        if(finalPointsToInfo && !finalPointsToInfo->empty()) {
+            // Update the points to object of the current instruction.
+#ifdef DEBUG_BINARY_INSTR
+            dbgs() << "Updating points to information in the binary instruction: " << InstructionUtils::getValueStr(&I) << "\n";
+#endif
+            this->updatePointsToObjects(&I, finalPointsToInfo);
+        } else {
+#ifdef DEBUG_BINARY_INSTR
+            dbgs() << "No value is a pointer in the binary instruction: " << InstructionUtils::getValueStr(&I) << "\n";
+#endif
+        }
+        // Sanity,
+        // it is really weired if we are trying to do a binary operation on 2-pointers
+        if(hasPointsToObjects(I.getOperand(0)) && hasPointsToObjects(I.getOperand(1))) {
+#ifdef DEBUG_BINARY_INSTR
+            dbgs() << "WARNING: Trying to perform binary operation on 2-pointers: " << InstructionUtils::getValueStr(&I) << "\n";
+#endif
+        }
+    }
+
+    void AliasAnalysisVisitor::visitPHINode(PHINode &I) {
+        /***
+        *  Merge points to of all objects reaching this phi node.
+        */
+        // get all values that need to be merged.
+        std::set<Value*> allVals;
+        for (unsigned i = 0; i < I.getNumIncomingValues(); ++i) {
+            allVals.insert(I.getIncomingValue(i));
+        }
+        std::set<PointerPointsTo*> *finalPointsToInfo = mergePointsTo(allVals, &I);
+        if (finalPointsToInfo && !finalPointsToInfo->empty()) {
+            // Attach the load tag of this phi merge.
+            if (finalPointsToInfo->size() > 1) {
+                int id = 0;
+                for (PointerPointsTo *pto : *finalPointsToInfo) {
+                    pto->loadTag.push_back(new TypeField(&I,id++,nullptr));
+                }
             }
+            // Update the points to object of the current instruction.
+            this->updatePointsToObjects(&I, finalPointsToInfo);
+#ifdef DEBUG_PHI_INSTR
+            dbgs() << "Merging points to information in the PHI instruction: " << InstructionUtils::getValueStr(&I) << "\n";
+#endif
+        } else {
+#ifdef DEBUG_PHI_INSTR
+            dbgs() << "None pto records of the PHI instruction: " << InstructionUtils::getValueStr(&I) << "\n";
+#endif
         }
     }
-#endif
-    std::set<PointerPointsTo*>* finalPointsToInfo = mergePointsTo(allVals, &I);
-    if(finalPointsToInfo != nullptr) {
-        // Update the points to object of the current instruction.
-#ifdef DEBUG_BINARY_INSTR
-        dbgs() << "Updating points to information in the binary instruction: " << InstructionUtils::getValueStr(&I) << "\n";
-#endif
-        this->updatePointsToObjects(&I, finalPointsToInfo);
-    } else {
-#ifdef DEBUG_BINARY_INSTR
-        dbgs() << "No value is a pointer in the binary instruction: " << InstructionUtils::getValueStr(&I) << "\n";
-#endif
-    }
 
-    // Sanity,
-    // it is really weired if we are trying to do a binary operation on 2-pointers
-    if(hasPointsToObjects(I.getOperand(0)) && hasPointsToObjects(I.getOperand(1))) {
-#ifdef DEBUG_BINARY_INSTR
-        dbgs() << "WARNING: Trying to perform binary operation on 2-pointers: " << InstructionUtils::getValueStr(&I) << "\n";
-#endif
-    }
-}
-
-void AliasAnalysisVisitor::visitPHINode(PHINode &I) {
-    /***
-     *  Merge points to of all objects reaching this phi node.
-     */
-    // get all values that need to be merged.
-    std::set<Value*> allVals;
-    for(unsigned i=0;i<I.getNumIncomingValues(); i++) {
-        allVals.insert(allVals.end(), I.getIncomingValue(i));
-    }
-#ifdef CREATE_DUMMY_OBJ_IF_NULL
-    /*
-    for (Value *v : allVals) {
-        if (!InstructionUtils::isScalar(v) && !hasPointsToObjects(v)) {
-            this->createOutsideObj(v,&I,true);
-        }
-    }
-    */
-#endif
-
-    std::set<PointerPointsTo*> *finalPointsToInfo = mergePointsTo(allVals, &I);
-    if (finalPointsToInfo != nullptr) {
-        // Attach the load tag of this phi merge.
-        if (finalPointsToInfo->size() > 1) {
-            int id = 0;
-            for (PointerPointsTo *pto : *finalPointsToInfo) {
-                pto->loadTag.push_back(new TypeField(&I,id++,nullptr));
+    void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
+        /***
+        *  Merge points to of all objects reaching this select instruction.
+        */
+        // get all values that need to be merged.
+        std::set<Value*> allVals;
+        allVals.insert(allVals.end(), I.getTrueValue());
+        allVals.insert(allVals.end(), I.getFalseValue());
+        std::set<PointerPointsTo*> *finalPointsToInfo = mergePointsTo(allVals, &I);
+        if (finalPointsToInfo && !finalPointsToInfo->empty()) {
+            // Attach the load tag of this phi merge.
+            if (finalPointsToInfo->size() > 1) {
+                int id = 0;
+                for (PointerPointsTo *pto : *finalPointsToInfo) {
+                    pto->loadTag.push_back(new TypeField(&I,id++,nullptr));
+                }
             }
-        }
-        // Update the points to object of the current instruction.
-        this->updatePointsToObjects(&I, finalPointsToInfo);
-#ifdef DEBUG_PHI_INSTR
-        dbgs() << "Merging points to information in the PHI instruction: " << InstructionUtils::getValueStr(&I) << "\n";
-#endif
-    } else {
-#ifdef DEBUG_PHI_INSTR
-        dbgs() << "None of the operands are pointers in the PHI instruction: " << InstructionUtils::getValueStr(&I) << "\n";
-#endif
-    }
-
-}
-
-void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
-    /***
-     *  Merge points to of all objects reaching this select instruction.
-     */
-    // get all values that need to be merged.
-    std::set<Value*> allVals;
-    allVals.insert(allVals.end(), I.getTrueValue());
-    allVals.insert(allVals.end(), I.getFalseValue());
-#ifdef CREATE_DUMMY_OBJ_IF_NULL
-    for (Value *v : allVals) {
-        if (!InstructionUtils::isScalar(v) && !hasPointsToObjects(v)) {
-            this->createOutsideObj(v,&I,true);
+            // Update the points to object of the current instruction.
+            this->updatePointsToObjects(&I, finalPointsToInfo);
         }
     }
-#endif
 
-    std::set<PointerPointsTo*>* finalPointsToInfo = mergePointsTo(allVals, &I);
-    if(finalPointsToInfo != nullptr) {
-        // Update the points to object of the current instruction.
-        this->updatePointsToObjects(&I, finalPointsToInfo);
+    //Handle the inlined pointer operatrions, e.g., GEP (GEP ...) ..., phi (GEP (cast...)..., ...).
+    //The goal is to keep processing the inlined instructions (e.g., cast, gep) until we get the
+    //corresponding pto records.
+    Value *AliasAnalysisVisitor::handleInlinePointerOp(Instruction *I, Value *srcPointer) {
+        if (!srcPointer || hasPointsToObjects(srcPointer)) {
+            return srcPointer;
+        }
+        //First try to strip the pointer cast.
+        Value *v = srcPointer->stripPointerCasts();
+        if (hasPointsToObjects(v)) {
+            return v;
+        }
+        //Is it an embedded GEP operator? If so, handle it via "visitGetElementPtrOperator()".
+        if (dyn_cast<GEPOperator>(v) && !dyn_cast<GetElementPtrInst>(v)) {
+            return this->visitGetElementPtrOperator(I,dyn_cast<GEPOperator>(v));
+        }
+        //Well, we've tried our best.
+        return v;
     }
 
-}
+    //Different from "getPointsToObjects()", this function will try best to get the pto info, if the raw
+    //pointer doesn't have pto, it will do the necessary cast and gep stripping.
+    std::set<PointerPointsTo*> *AliasAnalysisVisitor::getPtos(Instruction *I, Value *srcPointer, bool create_dummy, bool taint) { 
+        if (!srcPointer) {
+            return nullptr;
+        }
+        if (hasPointsToObjects(srcPointer)) {
+            return this->getPointsToObjects(srcPointer);
+        }
+        Value *v = this->handleInlinePointerOp(I,srcPointer);
+        if (create_dummy && !hasPointsToObjects(v)) {
+            //Ok, try to create the dummy pointee.
+            //TODO: create the dummy w/ the original "srcPointer" or "v" (possibly stripped)?
+            this->createOutsideObj(v,I,taint);
+        }
+        return this->getPointsToObjects(v);
+    }
 
     //hz: this method aims to deal with the embedded GEP operator (in "I") in a recursive way.
     //It will try to analyze and record the point-to information in the global state for each GEP operator.
@@ -918,26 +918,15 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
         dbgs() << "GEP: " << InstructionUtils::getValueStr(gep) << "\n";
 #endif
         //Null pointer or we have processed it before.
-        if(!gep || hasPointsToObjects(gep)){
+        if (!gep || hasPointsToObjects(gep)) {
             return gep;
         }
-        if(gep->getNumOperands() <= 0 || !gep->getPointerOperand()){
+        if (gep->getNumOperands() == 0 || !gep->getPointerOperand()) {
             //What happens...
             return gep;
         }
-        //Ok, does it contain another GEP operator as its pointer operand?
-        Value* srcPointer = gep->getPointerOperand();
-        GEPOperator *op = dyn_cast<GEPOperator>(srcPointer);
-        if(op && op->getNumOperands() > 0 && op->getPointerOperand() && !dyn_cast<GetElementPtrInst>(srcPointer)){
-            //Do the recursion.
-            srcPointer = visitGetElementPtrOperator(I,op);
-        }else{
-            if(!hasPointsToObjects(srcPointer)) {
-                srcPointer = srcPointer->stripPointerCasts();
-            }
-        }
         //Process the 1st index at first...
-        std::set<PointerPointsTo*> *initialPointsTo = this->processGEPFirstDimension(I, gep, srcPointer);
+        std::set<PointerPointsTo*> *initialPointsTo = this->processGEPFirstDimension(I, gep);
         //Then the remaining indices if any and update the point-to for this GEP.
         this->processMultiDimensionGEP(I, gep, initialPointsTo);
         return gep;
@@ -955,18 +944,8 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
 #ifdef DEBUG_GET_ELEMENT_PTR
         dbgs() << "AliasAnalysisVisitor::visitGetElementPtrInst(): " << InstructionUtils::getValueStr(&I) << "\n";
 #endif
-        Value* srcPointer = I.getPointerOperand();
-        GEPOperator *gep = dyn_cast<GEPOperator>(srcPointer);
-        if(gep && gep->getNumOperands() > 0 && gep->getPointerOperand() && !dyn_cast<GetElementPtrInst>(srcPointer)) {
-            //hz: recursively deal with the GEP operator.
-            srcPointer = visitGetElementPtrOperator(&I,gep);
-        } else {
-            if(!hasPointsToObjects(srcPointer)) {
-                srcPointer = srcPointer->stripPointerCasts();
-            }
-        }
         //Process the 1st index at first...
-        std::set<PointerPointsTo*> *initialPointsTo = this->processGEPFirstDimension(&I, dyn_cast<GEPOperator>(&I), srcPointer);
+        std::set<PointerPointsTo*> *initialPointsTo = this->processGEPFirstDimension(&I, dyn_cast<GEPOperator>(&I));
         //Then the remaining indices if any and update the point-to for this GEP.
         this->processMultiDimensionGEP(&I, dyn_cast<GEPOperator>(&I), initialPointsTo);
 #ifdef TIMING
@@ -1059,28 +1038,21 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
     }
 
     //Analyze the 1st dimension of the GEP (the arg "I") and return a point-to set of the 1st dimension.
-    //NOTE: we assume that "srcPointer" has already been processed regarding inlined GEP operator and strip by the caller.
-    std::set<PointerPointsTo*> *AliasAnalysisVisitor::processGEPFirstDimension(Instruction *propInst, GEPOperator *I, Value *srcPointer) {
-        //First try to get the point-to of the srcPointer..
-        if (!I || !srcPointer) {
+    std::set<PointerPointsTo*> *AliasAnalysisVisitor::processGEPFirstDimension(Instruction *propInst, GEPOperator *I) {
+        if (!I) {
 #ifdef DEBUG_GET_ELEMENT_PTR
-            dbgs() << "AliasAnalysisVisitor::processGEPFirstDimension(): Null I or srcPointer..\n";
+            dbgs() << "AliasAnalysisVisitor::processGEPFirstDimension(): Null GEP instruction..\n";
 #endif
             return nullptr;
         }
+        //First get the base pointer and its pointees..
+        Value* srcPointer = I->getPointerOperand();
 #ifdef CREATE_DUMMY_OBJ_IF_NULL
-        //hz: try to create dummy objects if there is no point-to information about the pointer variable,
-        //since it can be an outside global variable. (e.g. platform_device).
-        //TODO: are there any ASAN inserted GEP insts and do we need to exclude them?
-        if (!hasPointsToObjects(srcPointer)) {
-#ifdef DEBUG_GET_ELEMENT_PTR
-            dbgs() << "AliasAnalysisVisitor::processGEPFirstDimension(): Try to create an OutsideObject for srcPointer: " 
-            << InstructionUtils::getValueStr(srcPointer) << "\n";
+        std::set<PointerPointsTo*> *basePointsTo = this->getPtos(propInst,srcPointer,true,true);
+#else
+        std::set<PointerPointsTo*> *basePointsTo = this->getPtos(propInst,srcPointer);
 #endif
-            this->createOutsideObj(srcPointer,propInst,true);
-        }
-#endif
-        if (!hasPointsToObjects(srcPointer)) {
+        if (!basePointsTo || basePointsTo->empty()) {
             //No way to sort this out...
 #ifdef DEBUG_GET_ELEMENT_PTR
             errs() << "AliasAnalysisVisitor::processGEPFirstDimension(): No points-to for: " 
@@ -1088,7 +1060,6 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
 #endif
             return nullptr;
         }
-        std::set<PointerPointsTo*> *basePointsTo = getPointsToObjects(srcPointer);
         //Make a copy of the basePointsTo
         std::set<PointerPointsTo*> *srcPointsTo = new std::set<PointerPointsTo*>();
         for (PointerPointsTo *p : *basePointsTo) {
@@ -1435,69 +1406,33 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
     }
 
     void AliasAnalysisVisitor::visitLoadInst(LoadInst &I) {
-
 #ifdef TIMING
         auto t0 = InstructionUtils::getCurTime();
 #endif
 #ifdef DEBUG_LOAD_INSTR
-        errs() << "AliasAnalysisVisitor::visitLoadInst(): " << InstructionUtils::getValueStr(&I) << "\n";
+        dbgs() << "AliasAnalysisVisitor::visitLoadInst(): " << InstructionUtils::getValueStr(&I) << "\n";
 #endif
-        Value* srcPointer = I.getPointerOperand();
-        GEPOperator *gep = dyn_cast<GEPOperator>(I.getPointerOperand());
-        if(gep && gep->getNumOperands() > 0 && gep->getPointerOperand() && !dyn_cast<GetElementPtrInst>(I.getPointerOperand())) {
-#ifdef DEBUG_LOAD_INSTR
-            errs() << "AliasAnalysisVisitor::visitLoadInst(): There is a GEP operator: " << InstructionUtils::getValueStr(gep) << "\n";
-#endif
-            //srcPointer = gep->getPointerOperand();
-            //hz: to get the field sensitive point-to information and record it for the GEP operator value.
-            srcPointer = visitGetElementPtrOperator(&I,gep);
-        } else {
-            if(!hasPointsToObjects(srcPointer)) {
-                srcPointer = srcPointer->stripPointerCasts();
-#ifdef DEBUG_LOAD_INSTR
-                errs() << "AliasAnalysisVisitor::visitLoadInst(): No point-to info, after stripping the pointer casts -0, srcPointer: " 
-                << InstructionUtils::getValueStr(srcPointer) << "\n";
-#endif
-            }
-        }
-
-        // strip pointer casts. if we cannot find any points to for the srcPointer.
-        if(!hasPointsToObjects(srcPointer)) {
-            srcPointer = srcPointer->stripPointerCasts();
-#ifdef DEBUG_LOAD_INSTR
-            errs() << "AliasAnalysisVisitor::visitLoadInst(): No point-to info, after stripping the pointer casts -1, srcPointer: " 
-            << InstructionUtils::getValueStr(srcPointer) << "\n";
-#endif
-        }
-
+        Value *srcPointer = I.getPointerOperand();
+        // Get the src points to information.
 #ifdef CREATE_DUMMY_OBJ_IF_NULL
-        //hz: try to create dummy objects if there is no point-to information about the pointer variable,
-        if(!InstructionUtils::isAsanInst(&I) && !hasPointsToObjects(srcPointer)) {
-            this->createOutsideObj(srcPointer,&I,true);
-        }
+        std::set<PointerPointsTo*> *srcPointsTo = this->getPtos(&I,srcPointer,true,true);
+#else
+        std::set<PointerPointsTo*> *srcPointsTo = this->getPtos(&I,srcPointer);
 #endif
-
-        if(!hasPointsToObjects(srcPointer)) {
+        if (!srcPointsTo || srcPointsTo->empty()) {
 #ifdef DEBUG_LOAD_INSTR
-            errs() << "AliasAnalysisVisitor::visitLoadInst(): srcPointer does not point to any object.\n";
+            dbgs() << "AliasAnalysisVisitor::visitLoadInst(): srcPointer does not point to any object.\n";
 #endif
             return;
         }
-
-        // srcPointer should have pointsTo information.
-        //assert(hasPointsToObjects(srcPointer));
-
-        // Get the src points to information.
-        std::set<PointerPointsTo*>* srcPointsTo = getPointsToObjects(srcPointer);
         // OK, now what? :)
         // Get all objects pointed by all the objects in the srcPointsTo
-
         // this set stores the <fieldid, targetobject> of all the objects to which the srcPointer points to.
         std::set<std::pair<long, AliasObject*>> targetObjects, finalObjects;
         std::set<PointerPointsTo*> *newPointsToInfo = new std::set<PointerPointsTo*>();
         InstLoc *propInst = new InstLoc(&I,this->currFuncCallSites);
         long id = 0;
-        for(PointerPointsTo *currPointsToObj : *srcPointsTo) {
+        for (PointerPointsTo *currPointsToObj : *srcPointsTo) {
             long target_field = currPointsToObj->dstfieldId;
             AliasObject* dstObj = currPointsToObj->targetObject;
             auto to_check = std::make_pair(target_field, dstObj);
@@ -1520,7 +1455,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
                                                            new InstLoc(&I,this->currFuncCallSites), false);
                 //Set up the load tag to handle the potential N*N update problem.
                 pto->loadTag = currPointsToObj->loadTag;
-                pto->loadTag.push_back(new TypeField(srcPointer,id++,(void*)dstObj));
+                pto->loadTag.push_back(new TypeField(&I,id++,(void*)dstObj));
                 newPointsToInfo->insert(newPointsToInfo->end(), pto);
             }
         }
@@ -1672,65 +1607,9 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
 #ifdef DEBUG_STORE_INSTR
         dbgs() << "AliasAnalysisVisitor::visitStoreInst(): " << InstructionUtils::getValueStr(&I) << "\n";
 #endif
-        Value *targetPointer = I.getPointerOperand();
-        GEPOperator *gep = dyn_cast<GEPOperator>(targetPointer);
-        if(gep && gep->getNumOperands() > 0 && gep->getPointerOperand() && !dyn_cast<GetElementPtrInst>(targetPointer)) {
-#ifdef DEBUG_STORE_INSTR
-            dbgs() << "There is a GEP operator for targetPointer: " << InstructionUtils::getValueStr(gep) << "\n";
-#endif
-            //targetPointer = gep->getPointerOperand();
-            //hz: get field-sensitive point-to information for this GEP operator and record it in the global status.
-            targetPointer = visitGetElementPtrOperator(&I,gep);
-        } else {
-            if(!hasPointsToObjects(targetPointer)) {
-                targetPointer = targetPointer->stripPointerCasts();
-#ifdef DEBUG_STORE_INSTR
-                dbgs() << "No point-to info for targetPointer, try to strip the pointer casts -0.\n";
-                dbgs() << "After strip, the targetPointer is: " << InstructionUtils::getValueStr(targetPointer) << "\n";
-#endif
-            }
-        }
-        Value *targetValue = I.getValueOperand();
-        gep = dyn_cast<GEPOperator>(targetValue);
-        if(gep && gep->getNumOperands() > 0 && gep->getPointerOperand() && !dyn_cast<GetElementPtrInst>(targetValue)) {
-#ifdef DEBUG_STORE_INSTR
-            dbgs() << "There is a GEP operator for targetValue: " << InstructionUtils::getValueStr(gep) << "\n";
-#endif
-            //targetValue = gep->getPointerOperand();
-            //hz: get field-sensitive point-to information for this GEP operator and record it in the global status.
-            targetValue = visitGetElementPtrOperator(&I,gep);
-        }
-        Value *targetValue_pre_strip = targetValue;
-        // handle pointer casts
-        if (!hasPointsToObjects(targetValue)) {
-            targetValue = targetValue->stripPointerCasts();
-#ifdef DEBUG_STORE_INSTR
-            dbgs() << "No point-to info for targetValue, try to strip the pointer casts -1.\n";
-            dbgs() << "After strip, the targetValue is: " << InstructionUtils::getValueStr(targetValue) << "\n";
-#endif
-        }
-        //Let's not create dummy objs for the targetValue when processing the store inst to avoid the pointee explosion, if the targetValue
-        //really deserves a pointee dummy obj it should has already been created by other inst visitors.
-        /*
-#ifdef CREATE_DUMMY_OBJ_IF_NULL
-        //hz: try to create dummy objects if there is no point-to information about the pointer variable,
-        //since it can be an outside global variable. (e.g. platform_device).
-        if(!hasPointsToObjects(targetValue)) {
-#ifdef DEBUG_STORE_INSTR
-            dbgs() << "Still no point-to for targetValue, try to create an outside object for: " 
-            << InstructionUtils::getValueStr(targetValue_pre_strip) << "\n";
-#endif
-            if(this->createOutsideObj(targetValue_pre_strip,&I,true)){
-#ifdef DEBUG_STORE_INSTR
-                dbgs() << "Created successfully.\n";
-#endif
-                targetValue = targetValue_pre_strip;
-            }
-        }
-#endif
-        */
         // Get the src points to information.
-        std::set<PointerPointsTo*> *srcPointsTo = getPointsToObjects(targetValue);
+        Value *targetValue = I.getValueOperand();
+        std::set<PointerPointsTo*> *srcPointsTo = this->getPtos(&I,targetValue);
         if (!srcPointsTo || srcPointsTo->empty()) {
             //The src to store doesn't point to anything, maybe this is because the src is a scalar instead of a pointer,
             //anyway no need to process this store inst any more since what we are doing is a point-to analysis.
@@ -1741,11 +1620,9 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
             return;
         }
         //Get the dst points-to info.
-        if(!hasPointsToObjects(targetPointer)) {
-            targetPointer = targetPointer->stripPointerCasts();
-        }
-        std::set<PointerPointsTo *> *dstPointsTo = getPointsToObjects(targetPointer);
-        if(dstPointsTo == nullptr || dstPointsTo->empty()) {
+        Value *targetPointer = I.getPointerOperand();
+        std::set<PointerPointsTo*> *dstPointsTo = this->getPtos(&I,targetPointer);
+        if(!dstPointsTo || dstPointsTo->empty()) {
 #ifdef DEBUG_STORE_INSTR
             dbgs() << "Trying to store something into pointer, which does not point to anything\n";
 #endif
@@ -1770,18 +1647,6 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
         int is_weak = dstPointsTo->size() > 1 ? 1 : 0;
         InstLoc *propInst = new InstLoc(&I,this->currFuncCallSites);
         for (PointerPointsTo *currPointsTo : *dstPointsTo) {
-            //Basic Sanity
-            if (!(currPointsTo->targetPointer == targetPointer || currPointsTo->targetPointer == targetPointer->stripPointerCasts())) {
-                dbgs() << "We're going to crash in AliasAnalysisVisitor::visitStoreInst() :( ...\n";
-                dbgs() << "Inst: " << InstructionUtils::getValueStr(&I) << "\n";
-                dbgs() << "currPointsTo->targetPointer: " << InstructionUtils::getValueStr(currPointsTo->targetPointer) << "\n";
-                dbgs() << "targetPointer: " << InstructionUtils::getValueStr(targetPointer) << "\n";
-                dbgs() << "targetPointer->stripPointerCasts(): " << InstructionUtils::getValueStr(targetPointer->stripPointerCasts()) << "\n";
-                dbgs() << (currPointsTo->targetPointer == targetPointer) << " | " 
-                << (currPointsTo->targetPointer == targetPointer->stripPointerCasts()) << "\n";
-                dbgs() << "currPointsTo->fieldId: " << currPointsTo->fieldId << "\n";
-                assert(false);
-            }
             // perform update
             std::set<PointerPointsTo*> *ptos = ((sdMap.find(currPointsTo) != sdMap.end()) ? &(sdMap[currPointsTo]) : srcPointsTo);
             currPointsTo->targetObject->updateFieldPointsTo(currPointsTo->dstfieldId, ptos, propInst, is_weak);
@@ -1814,40 +1679,35 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
 
         for(User::op_iterator arg_begin = I.arg_begin(), arg_end = I.arg_end(); arg_begin != arg_end; arg_begin++) {
             Value *currArgVal =(*arg_begin).get();
-
-            if(hasPointsToObjects(currArgVal) || hasPointsToObjects(currArgVal->stripPointerCasts())) {
-                unsigned int farg_no;
-                farg_no = 0;
-                std::set<Value*> valuesToMerge;
-                // handle pointer casts
-                if(!hasPointsToObjects(currArgVal)) {
-                    currArgVal = currArgVal->stripPointerCasts();
-                }
-                valuesToMerge.clear();
-                valuesToMerge.insert(valuesToMerge.end(), currArgVal);
-
-                for(Function::arg_iterator farg_begin = currFunction->arg_begin(), farg_end = currFunction->arg_end();
-                        farg_begin != farg_end; farg_begin++) {
+            std::set<Value*> valuesToMerge;
+            valuesToMerge.clear();
+            valuesToMerge.insert(currArgVal);
+            unsigned int farg_no = 0;
+            //Locate the corresponding formal arg.
+            for(Function::arg_iterator farg_begin = currFunction->arg_begin(), farg_end = currFunction->arg_end();
+                farg_begin != farg_end; farg_begin++) {
+                if(farg_no == arg_no) {
+                    //Ok, try to propagate the pto info from actual arg to formal arg.
                     Value *currfArgVal = &(*farg_begin);
-                    if(farg_no == arg_no) {
-                        std::set<PointerPointsTo*> *currArgPointsTo = mergePointsTo(valuesToMerge, &I, currfArgVal);
-                        // ensure that we didn't mess up.
-                        assert(currArgPointsTo != nullptr);
+                    //first get pto info of the actual arg and copy them for the related formal arg.
+                    std::set<PointerPointsTo*> *currArgPointsTo = mergePointsTo(valuesToMerge, &I, currfArgVal);
+                    if (!currArgPointsTo || currArgPointsTo->empty()) {
+                        //This means there are no pto info for the actual arg.
 #ifdef DEBUG_CALL_INSTR
-                        // OK, we need to add pointsto.
-                        dbgs() << "Argument:" << (arg_no + 1) << " has points to information\n";
+                        dbgs() << "AliasAnalysisVisitor::setupCallContext(): no pto info for arg " << (arg_no + 1) << "\n";
 #endif
-                        (*currFuncPointsTo)[currfArgVal] = currArgPointsTo;
                         break;
                     }
-                    farg_no++;
-                }
-            } else {
 #ifdef DEBUG_CALL_INSTR
-                dbgs() << "Argument:" << (arg_no + 1) << " does not point to any object\n";
+                    // OK, we need to add pointsto.
+                    dbgs() << "AliasAnalysisVisitor::setupCallContext(): arg " << (arg_no + 1) << " has points to information\n";
 #endif
+                    (*currFuncPointsTo)[currfArgVal] = currArgPointsTo;
+                    break;
+                }
+                ++farg_no;
             }
-            arg_no++;
+            ++arg_no;
         }
     }
 
@@ -1987,30 +1847,23 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
 #endif
         // get src operand
         Value *srcOperand = I.getArgOperand((unsigned int) memcpyArgs[0]);
-        // get dst operand
-        Value *dstOperand = I.getArgOperand((unsigned int) memcpyArgs[1]);
-        // handle pointer casts
-        if(!hasPointsToObjects(srcOperand)) {
-            srcOperand = srcOperand->stripPointerCasts();
-        }
-        if(!hasPointsToObjects(dstOperand)) {
-            dstOperand = dstOperand->stripPointerCasts();
-        }
         // get points to information.
-        std::set<PointerPointsTo*> *srcPointsTo = getPointsToObjects(srcOperand);
+        std::set<PointerPointsTo*> *srcPointsTo = this->getPtos(&I,srcOperand);
         if (!srcPointsTo || srcPointsTo->empty()) {
 #ifdef DEBUG_CALL_INSTR
             dbgs() << "AliasAnalysisVisitor::handleMemcpyFunction(): no src pto info!\n";
 #endif
             return;
         }
+        // get dst operand
+        Value *dstOperand = I.getArgOperand((unsigned int) memcpyArgs[1]);
+        std::set<PointerPointsTo*> *dstPointsTo = this->getPtos(&I,dstOperand);
         //Ok, now decide the src type to copy.
         Type *ty = this->getMemcpySrcTy(I);
         CompositeType *cty = ty ? dyn_cast<CompositeType>(ty) : nullptr;
 #ifdef DEBUG_CALL_INSTR
         dbgs() << "AliasAnalysisVisitor::handleMemcpyFunction(): inferred memcpy ty: " << InstructionUtils::getTypeStr(ty) << "\n";
 #endif
-        std::set<PointerPointsTo*> *dstPointsTo = getPointsToObjects(dstOperand);
         InstLoc *loc = new InstLoc(&I,this->currFuncCallSites);
         if (!dstPointsTo || dstPointsTo->empty()) {
 #ifdef DEBUG_CALL_INSTR
@@ -2176,10 +2029,7 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
             }
         }
         //Get the src pointees.
-        if (!hasPointsToObjects(srcOperand)) {
-            srcOperand = srcOperand->stripPointerCasts();
-        }
-        std::set<PointerPointsTo*> *srcPointsTo = getPointsToObjects(srcOperand);
+        std::set<PointerPointsTo*> *srcPointsTo = this->getPtos(&I,srcOperand);
         InstLoc *loc = new InstLoc(&I,this->currFuncCallSites);
         std::set<PointerPointsTo*> newPtos;
         if (srcPointsTo && !srcPointsTo->empty()) {
@@ -2236,18 +2086,14 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
 #ifdef DEBUG_CALL_INSTR
             dbgs() << "Current argument: " << InstructionUtils::getValueStr(currArg) << "\n";
 #endif
-            std::set<PointerPointsTo*> *dstPointsTo = getPointsToObjects(currArg);
-            if (dstPointsTo == nullptr) {
-                currArg = currArg->stripPointerCasts();
-                dstPointsTo = getPointsToObjects(currArg);
-            }
             Type *ty = InstructionUtils::inferPointeeTy(currArg);
             if (!ty) {
                 dbgs() << "!!! AliasAnalysisVisitor::handleCfuFunction(): failed to infer the dst obj type!\n";
                 continue;
             }
             CompositeType *cty = dyn_cast<CompositeType>(ty);
-            //TODO: the arg may also be an embedded GEP.
+            //Get the dst pto info.
+            std::set<PointerPointsTo*> *dstPointsTo = this->getPtos(&I,currArg);
             std::set<PointerPointsTo*> newPtos;
             bool user_tainted = false;
             InstLoc *loc = new InstLoc(&I,this->currFuncCallSites);
@@ -2375,8 +2221,8 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
 #ifdef DEBUG_CALL_INSTR
             dbgs() << "Stitching return value for call instruction: " << InstructionUtils::getValueStr(&I) << "\n";
 #endif
-            std::set<PointerPointsTo*>* newPointsToInfo = this->copyPointsToInfo(&I, &(vis->retValPointsTo));
-            if(newPointsToInfo != nullptr) {
+            std::set<PointerPointsTo*> *newPointsToInfo = this->copyPointsToInfo(&I, &(vis->retValPointsTo));
+            if(newPointsToInfo && !newPointsToInfo->empty()) {
                 this->updatePointsToObjects(&I, newPointsToInfo);
             }
         }
@@ -2385,40 +2231,30 @@ void AliasAnalysisVisitor::visitSelectInst(SelectInst &I) {
 
     void AliasAnalysisVisitor::visitReturnInst(ReturnInst &I) {
         Value *targetRetVal = I.getReturnValue();
-        if(targetRetVal != nullptr && (hasPointsToObjects(targetRetVal) || hasPointsToObjects(targetRetVal->stripPointerCasts()))) {
-            // check if pointer casts has a role to play?
-            if(!hasPointsToObjects(targetRetVal)){
-                targetRetVal = targetRetVal->stripPointerCasts();
-            }
-            std::set<PointerPointsTo*>* srcPointsTo = getPointsToObjects(targetRetVal);
-            // Get all objects pointed by all the objects in the targetRetVal
-
-            // this set stores the <fieldid, targetobject> of all the objects to which the targetRetVal points to.
-            std::set<std::pair<long, AliasObject*>> targetObjects;
-            for(PointerPointsTo *currPointsToObj:*srcPointsTo) {
-                if(std::find_if(retValPointsTo.begin(), retValPointsTo.end(), [currPointsToObj](const PointerPointsTo *n) {
-                            return  n->pointsToSameObject(currPointsToObj);
-                            }) == retValPointsTo.end()) {
-                    long target_field = currPointsToObj->dstfieldId;
-                    AliasObject *dstObj = currPointsToObj->targetObject;
-                    auto to_check = std::make_pair(target_field, dstObj);
-                    if (std::find(targetObjects.begin(), targetObjects.end(), to_check) == targetObjects.end()) {
-                        targetObjects.insert(targetObjects.end(), to_check);
-                        // insert into retval points to
+        if (!targetRetVal) {
+            return;
+        }
 #ifdef DEBUG_RET_INSTR
-                        dbgs() << "Return value:";
-                        I.print(dbgs());
-                        dbgs() << ", points to some objects\n";
+        dbgs() << "AliasAnalysisVisitor::visitReturnInst(): Ret: " << InstructionUtils::getValueStr(&I) << "\n";
 #endif
-                        retValPointsTo.insert(retValPointsTo.end(), currPointsToObj);
-                    }
+        std::set<PointerPointsTo*> *srcPointsTo = this->getPtos(&I,targetRetVal);
+        if (srcPointsTo && !srcPointsTo->empty()) {
+            // Get all objects pointed by all the objects in the targetRetVal
+            for (PointerPointsTo *currPointsToObj : *srcPointsTo) {
+                if(std::find_if(this->retValPointsTo.begin(), this->retValPointsTo.end(), [currPointsToObj](const PointerPointsTo *n) {
+                            return  n->pointsToSameObject(currPointsToObj);
+                   }) == this->retValPointsTo.end()) 
+                {
+#ifdef DEBUG_RET_INSTR
+                    dbgs() << "[RET PTO] ";
+                    currPointsToObj->print(dbgs());
+#endif
+                    this->retValPointsTo.insert(currPointsToObj);
                 }
             }
         } else {
 #ifdef DEBUG_RET_INSTR
-            dbgs() << "Return value:";
-            I.print(dbgs());
-            dbgs() << ", does not point to any object. Ignoring.\n";
+            dbgs() << "Ret does not point to any object. Ignoring.\n";
 #endif
         }
     }

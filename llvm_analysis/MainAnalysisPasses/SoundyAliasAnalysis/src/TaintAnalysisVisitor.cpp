@@ -657,6 +657,7 @@ namespace DRCHECKER {
         }else {
             // TODO (below):
             // untaint all the arguments, depending on whether we are indeed calling kernel internal functions.
+            // memset()?
         }
     }
 
@@ -754,7 +755,7 @@ namespace DRCHECKER {
         }
         //Get the branch condition Value.
         Value *condition = I.getCondition();
-        std::set<TaintFlag*>* srcTaintInfo = getTaintInfo(condition);
+        std::set<TaintFlag*> *srcTaintInfo = getTaintInfo(condition);
         if(srcTaintInfo == nullptr) {
             condition = condition->stripPointerCasts();
             srcTaintInfo = getTaintInfo(condition);

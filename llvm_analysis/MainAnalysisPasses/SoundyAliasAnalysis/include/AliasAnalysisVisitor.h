@@ -206,7 +206,9 @@ namespace DRCHECKER {
         //cfu: copy_from_user
         void handleCfuFunction(std::set<long> &taintedArgs, CallInst &I);
 
-        void handleInlinePointerOperand(Instruction &currIns, Value **srcPointer);
+        Value *handleInlinePointerOp(Instruction *I, Value *srcPointer);
+
+        std::set<PointerPointsTo*> *getPtos(Instruction *I, Value *srcPointer, bool create_dummy = false, bool taint = false); 
 
         //hz: A helper method to create and (taint) a new OutsideObject.
         OutsideObject* createOutsideObj(Value *p, Instruction *I, bool taint);
@@ -214,7 +216,7 @@ namespace DRCHECKER {
         void processMultiDimensionGEP(Instruction *propInst, GEPOperator *I, std::set<PointerPointsTo*> *srcPointsTo);
 
         //Process the 1st index of the GEP, return the resulted points-to.
-        std::set<PointerPointsTo*> *processGEPFirstDimension(Instruction *propInst, GEPOperator *I, Value *srcPointer);
+        std::set<PointerPointsTo*> *processGEPFirstDimension(Instruction *propInst, GEPOperator *I);
 
         int bit2Field(Instruction *propInst, GEPOperator *I, PointerPointsTo *pto, unsigned bitWidth, long index);
     };
