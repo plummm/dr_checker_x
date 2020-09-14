@@ -24,6 +24,7 @@ namespace DRCHECKER {
 //#define AGGRESSIVE_PTO_DUP_FILTER
 //#define DEBUG_TMP
 //#define INFER_XENTRY_SHARED_OBJ
+#define DEBUG_HANDLE_INLINE_POINTER
 
     //hz: A helper method to create and (taint) a new OutsideObject.
     //"p" is the pointer for which we need to create the object, "I" is the instruction as a creation site.
@@ -881,11 +882,19 @@ void AliasAnalysisVisitor::visitCastInst(CastInst &I) {
         }
         //First try to strip the pointer cast.
         Value *v = srcPointer->stripPointerCasts();
-        if (hasPointsToObjects(v)) {
+        if (v != srcPointer && hasPointsToObjects(v)) {
+#ifdef DEBUG_HANDLE_INLINE_POINTER
+            dbgs() << "AliasAnalysisVisitor::handleInlinePointerOp(): Got pto by stripping cast: " 
+            << InstructionUtils::getValueStr(srcPointer) << " -> " << InstructionUtils::getValueStr(v) << "\n";
+#endif
             return v;
         }
         //Is it an embedded GEP operator? If so, handle it via "visitGetElementPtrOperator()".
         if (dyn_cast<GEPOperator>(v) && !dyn_cast<GetElementPtrInst>(v)) {
+#ifdef DEBUG_HANDLE_INLINE_POINTER
+            dbgs() << "AliasAnalysisVisitor::handleInlinePointerOp(): Dealing w/ the embedded GEP: "
+            << InstructionUtils::getValueStr(v) << "\n";
+#endif
             return this->visitGetElementPtrOperator(I,dyn_cast<GEPOperator>(v));
         }
         //Well, we've tried our best.
@@ -902,7 +911,7 @@ void AliasAnalysisVisitor::visitCastInst(CastInst &I) {
             return this->getPointsToObjects(srcPointer);
         }
         Value *v = this->handleInlinePointerOp(I,srcPointer);
-        if (create_dummy && !hasPointsToObjects(v)) {
+        if (create_dummy && (v == srcPointer || !hasPointsToObjects(v))) {
             //Ok, try to create the dummy pointee.
             //TODO: create the dummy w/ the original "srcPointer" or "v" (possibly stripped)?
             this->createOutsideObj(v,I,taint);

@@ -8,6 +8,7 @@ rl = [
     ('SoundyAliasAnalysis/src/AliasAnalysisVisitor.cpp','#define DEBUG_STORE_INSTR','//#define DEBUG_STORE_INSTR'),
     ('SoundyAliasAnalysis/src/AliasAnalysisVisitor.cpp','#define DEBUG_CAST_INSTR','//#define DEBUG_CAST_INSTR'),
     ('SoundyAliasAnalysis/src/AliasAnalysisVisitor.cpp','#define DEBUG_UPDATE_POINTSTO','//#define DEBUG_UPDATE_POINTSTO'),
+    ('SoundyAliasAnalysis/src/AliasAnalysisVisitor.cpp','#define DEBUG_HANDLE_INLINE_POINTER','//#define DEBUG_HANDLE_INLINE_POINTER'),
     ('SoundyAliasAnalysis/src/TaintUtils.cpp','#define DEBUG_ADD_NEW_TAINT_FLAG','//#define DEBUG_ADD_NEW_TAINT_FLAG'),
     ('SoundyAliasAnalysis/include/AliasObject.h','#define DEBUG_CREATE_DUMMY_OBJ_IF_NULL','//#define DEBUG_CREATE_DUMMY_OBJ_IF_NULL'),
     ('SoundyAliasAnalysis/include/AliasObject.h','#define DEBUG_FETCH_POINTS_TO_OBJECTS','//#define DEBUG_FETCH_POINTS_TO_OBJECTS'),
