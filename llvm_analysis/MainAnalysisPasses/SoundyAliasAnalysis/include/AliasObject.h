@@ -398,8 +398,7 @@ namespace DRCHECKER {
                 obj->taintedFields.push_back(nft);
             }
             //Copy all_contents_taint_flags
-            obj->all_contents_taint_flags.reset(this->all_contents_taint_flags.makeCopy(loc));
-            obj->all_contents_taint_flags.priv = obj;
+            obj->all_contents_taint_flags.reset(this->all_contents_taint_flags.makeCopy(obj,loc));
             //Recursively copy the embedded objs, if any.
             for (auto &e : this->embObjs) {
                 AliasObject *eo = e.second;

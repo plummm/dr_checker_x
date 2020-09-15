@@ -1812,10 +1812,11 @@ void AliasAnalysisVisitor::visitCastInst(CastInst &I) {
         return obj;
     }
 
-    PointerPointsTo *AliasAnalysisVisitor::copyObj(Value *dstPointer, PointerPointsTo *srcPto, CompositeType *cty, Instruction &propInst) {
-        if (!srcPto) {
+    PointerPointsTo *AliasAnalysisVisitor::copyObj(Value *dstPointer, PointerPointsTo *srcPto, Type *ty, Instruction &propInst) {
+        if (!srcPto || !ty) {
             return nullptr;
         }
+        CompositeType *cty = dyn_cast<CompositeType>(ty);
         InstLoc *loc = new InstLoc(&propInst,this->currFuncCallSites);
         PointerPointsTo *np = srcPto->makeCopyP(dstPointer,loc);
         AliasObject *nobj = nullptr;
@@ -1823,7 +1824,6 @@ void AliasAnalysisVisitor::visitCastInst(CastInst &I) {
             AliasObject *eobj = this->getObj4Copy(np,cty,propInst);
             if (eobj) {
                 nobj = eobj->makeCopy(loc);
-                np->dstfieldId = 0;
             }else {
 #ifdef DEBUG_CALL_INSTR
                 dbgs() << "AliasAnalysisVisitor::copyObj(): cannot match the src object to copy.\n";
@@ -1831,20 +1831,24 @@ void AliasAnalysisVisitor::visitCastInst(CastInst &I) {
             }
         }else {
 #ifdef DEBUG_CALL_INSTR
-            dbgs() << "AliasAnalysisVisitor::copyObj(): Straight copy due to non-comp cpy type.\n";
+            dbgs() << "AliasAnalysisVisitor::copyObj(): the expected type is not composite, so only copy one field...\n";
 #endif
             //This means the copy type is non-composite, which is less likely (possibly because no
-            //type info in the context), in this situation, we faithfully copy the src pointee.
-            nobj = np->targetObject->makeCopy(loc);
+            //type info in the context), so we only copy one non-composite field if possible.
+            nobj = new HeapLocation(propInst, ty, this->currFuncCallSites, nullptr, false);
+            //Propagate the taint and pto records.
+            nobj->mergeField(0, np->targetObject, np->dstfieldId, loc, false);
         }
         if (nobj) {
             np->targetObject = nobj;
+            np->dstfieldId = 0;
             return np;
         }else {
 #ifdef DEBUG_CALL_INSTR
             dbgs() << "AliasAnalysisVisitor::copyObj(): null nobj.\n";
 #endif
             delete(np);
+            delete(loc);
         }
         return nullptr;
     }
@@ -1888,7 +1892,7 @@ void AliasAnalysisVisitor::visitCastInst(CastInst &I) {
                 dbgs() << "[SRC_PTO] ";
                 pto->print(dbgs());
 #endif
-                PointerPointsTo *np = this->copyObj(&I, pto, cty, I);
+                PointerPointsTo *np = this->copyObj(&I, pto, ty, I);
                 if (np) {
                     newPtos.insert(np);
                 }
@@ -2051,7 +2055,7 @@ void AliasAnalysisVisitor::visitCastInst(CastInst &I) {
                 dbgs() << "[SRC PTO]: ";
                 pto->print(dbgs());
 #endif
-                PointerPointsTo *np = this->copyObj(&I, pto, cty, I);
+                PointerPointsTo *np = this->copyObj(&I, pto, ty, I);
                 if (np) {
                     newPtos.insert(np);
                     //if this is a memdup_user, we may need to force a user taint on the dst obj, in case it's not propagated

@@ -524,6 +524,7 @@ namespace DRCHECKER {
                     }
                 }
             }
+            return ft;
         }
 
         void reset(FieldTaint *ft) {

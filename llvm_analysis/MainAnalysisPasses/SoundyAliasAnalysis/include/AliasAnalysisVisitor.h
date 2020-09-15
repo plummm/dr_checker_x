@@ -197,7 +197,7 @@ namespace DRCHECKER {
 
         AliasObject *getObj4Copy(PointerPointsTo *pto, CompositeType *ty, Instruction &I);
 
-        PointerPointsTo *copyObj(Value *dstPointer, PointerPointsTo *srcPto, CompositeType *cty, Instruction &propInst);
+        PointerPointsTo *copyObj(Value *dstPointer, PointerPointsTo *srcPto, Type *ty, Instruction &propInst);
 
         Type *getMemcpySrcTy(CallInst &I);
 
