@@ -192,5 +192,5 @@ if __name__ == '__main__':
     else:
         ext_warns(sys.argv[1])
         #dump_warns_raw()
-        #dump_warns_pretty('IntegerOverflowDetector')
-        dump_warns_pretty('TaintedLoopBoundDetector')
+        dump_warns_pretty('IntegerOverflowDetector')
+        #dump_warns_pretty('TaintedLoopBoundDetector')

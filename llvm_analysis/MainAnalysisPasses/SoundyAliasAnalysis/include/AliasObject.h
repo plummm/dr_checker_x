@@ -1555,14 +1555,16 @@ namespace DRCHECKER {
             this->targetVar = outVal;
             this->targetType = outVarType;
 #ifdef DEBUG_OUTSIDE_OBJ_CREATION
-            dbgs() << "###NEW OutsideObj: targetVar: " << InstructionUtils::getValueStr(this->targetVar) << " ty: " << InstructionUtils::getTypeStr(this->targetType) << "\n";
+            dbgs() << "###NEW OutsideObj: targetVar: " << InstructionUtils::getValueStr(this->targetVar) 
+            << " ty: " << InstructionUtils::getTypeStr(this->targetType) << "\n";
 #endif
         }
         OutsideObject(OutsideObject *origOutsideVar): AliasObject(origOutsideVar) {
             this->targetVar = origOutsideVar->targetVar;
             this->targetType = origOutsideVar->targetType;
 #ifdef DEBUG_OUTSIDE_OBJ_CREATION
-            dbgs() << "###COPY OutsideObj: targetVar: " << InstructionUtils::getValueStr(this->targetVar) << " ty: " << InstructionUtils::getTypeStr(this->targetType) << "\n";
+            dbgs() << "###COPY OutsideObj: targetVar: " << InstructionUtils::getValueStr(this->targetVar) 
+            << " ty: " << InstructionUtils::getTypeStr(this->targetType) << "\n";
 #endif
         }
         AliasObject* makeCopy() {

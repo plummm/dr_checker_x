@@ -655,6 +655,7 @@ namespace DRCHECKER {
                 return;
             }
             if (this->winnerTfs.find(this->lastReset) != this->winnerTfs.end()) {
+                //Winner TFs already collected for current entry.
                 return;
             }
             //Then get all return sites of the entry function.
@@ -670,9 +671,8 @@ namespace DRCHECKER {
                 InstLoc rloc(ri,&ctx);
                 std::set<TaintFlag*> wtfs;
                 this->doGetTf(&rloc,wtfs);
-                //Exclude the inherent TFs..
                 for (TaintFlag *wtf : wtfs) {
-                    if (wtf && !wtf->is_inherent) {
+                    if (wtf) {
                         this->winnerTfs[this->lastReset].insert(wtf);
                     }
                 }

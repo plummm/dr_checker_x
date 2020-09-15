@@ -150,6 +150,8 @@ namespace DRCHECKER {
 
     extern void getCtxOfLocTr(const std::vector<InstLoc*> *tr, std::vector<std::vector<Instruction*>*> &res);
 
+    extern bool sameLocTr(std::vector<InstLoc*> *tr0, std::vector<InstLoc*> *tr1);
+
     class BBTraversalHelper {
     public:
         /***

@@ -2039,6 +2039,7 @@ void AliasAnalysisVisitor::visitCastInst(CastInst &I) {
         }
         //Get the src pointees.
         std::set<PointerPointsTo*> *srcPointsTo = this->getPtos(&I,srcOperand);
+        //Propagate src pto to the dst, or create new dummy dst objs.
         InstLoc *loc = new InstLoc(&I,this->currFuncCallSites);
         std::set<PointerPointsTo*> newPtos;
         if (srcPointsTo && !srcPointsTo->empty()) {

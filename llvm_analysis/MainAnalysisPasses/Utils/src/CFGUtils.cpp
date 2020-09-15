@@ -1047,6 +1047,24 @@ namespace DRCHECKER {
         return;
     }
 
+    bool sameLocTr(std::vector<InstLoc*> *tr0, std::vector<InstLoc*> *tr1) {
+        if (!tr0 != !tr1) {
+            return false;
+        }
+        if (!tr0) {
+            return true;
+        }
+        if (tr0->size() != tr1->size()) {
+            return false;
+        }
+        for (int i = 0; i < tr0->size(); ++i) {
+            if (!(*tr0)[i]->same((*tr1)[i])) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     std::map<BasicBlock*,std::set<BasicBlock*>> BBTraversalHelper::succ_map;
 
     void BBTraversalHelper::_get_all_successors(BasicBlock *bb, std::set<BasicBlock*> &res) {

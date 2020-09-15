@@ -759,8 +759,25 @@ namespace DRCHECKER {
             return tr;
         }
 
+        bool insertTaintPath(std::vector<InstLoc*> *tr, std::set<std::vector<InstLoc*>*> &res) {
+            if (!tr) {
+                return false;
+            }
+            //If no duplication, insert.
+            for (auto t : res) {
+                if (DRCHECKER::sameLocTr(t,tr)) {
+                    return false;
+                }
+            }
+            res.insert(tr);
+            return true;
+        }
+
         //Return all taint paths from the user input to the specified field of an object.
+        //NOTE: we assume that "res" is empty and there is no TF in "tf" when invoking this function at layer 0.
         int getAllUserTaintPaths(TypeField *tf, std::vector<TypeField*> &history, std::set<std::vector<InstLoc*>*> &res) {
+            //obj -> fid -> user taint path to this specific field in the obj.
+            static std::map<AliasObject*, std::map<long, std::set<std::vector<InstLoc*>*>>> pathMap;
             if (!tf || !tf->priv) {
                 return 0;
             }
@@ -770,43 +787,121 @@ namespace DRCHECKER {
             dbgs() << "getAllUserTaintPaths(): #history " << history.size() << ": Get taint paths for " 
             << (const void*)obj << "|" << fid << "\n"; 
 #endif
+            //Ok, see whether the result has already been cached.
+            if (pathMap.find(obj) != pathMap.end() && pathMap[obj].find(fid) != pathMap[obj].end()) {
+                //Cached, return directly w/ path concat.
+                if (pathMap[obj][fid].empty()) {
+                    return 0;
+                }
+                history.push_back(tf);
+                std::vector<InstLoc*> *hp = getFullTaintTrace(history);
+                history.pop_back();
+                if (!hp) {
+                    return 0;
+                }
+                for (std::vector<InstLoc*> *tr : pathMap[obj][fid]) {
+                    if (!tr) {
+                        continue;
+                    }
+                    std::vector<InstLoc*> *np = new std::vector<InstLoc*>(*tr);
+                    np->insert(np->end(),hp->begin(),hp->end());
+                    if (!insertTaintPath(np,res)) {
+                        delete(np);
+                    }
+                }
+                delete(hp);
+                return pathMap[obj][fid].size();
+            }
             if (this->in_taint_history(tf,history,true)) {
                 //A taint loop, stop here.
+#ifdef DEBUG_CONSTRUCT_TAINT_CHAIN
+                dbgs() << "getAllUserTaintPaths(): loop detected, return!\n";
+#endif
                 return 0;
             }
-            int r = 0;
-            //Find out who can taint this obj/field...
-            //NOTE: now we only consider the taint paths valid in the single-thread execution setting (e.g. one TF may be masked by another
-            //during the execution, in which case we only consider the TF that can last to the function return).
-            //TODO: try to detect the concurrency bugs (e.g. just before a TF is masked in one entry, we can invoke another entry function 
-            //in which the obj|field still bear the effect of that TF...)
-            std::set<TaintFlag*> tflgs;
-            obj->getWinnerTfs(fid,tflgs);
 #ifdef DEBUG_CONSTRUCT_TAINT_CHAIN
-            dbgs() << "getAllUserTaintPaths(): #winnerTFs: " << tflgs.size() << "\n";
+            dbgs() << "getAllUserTaintPaths(): no result in cache, do the search!\n";
 #endif
-            for (TaintFlag *flg : tflgs) {
-                if (!flg || !flg->isTainted() || !flg->tag) {
+            //Find out who can taint this obj/field...
+            //First get all eqv objects to the current one.
+            std::set<AliasObject*> eqObjs;
+            getAllEquivelantObjs(obj,eqObjs);
+#ifdef DEBUG_CONSTRUCT_TAINT_CHAIN
+            dbgs() << "getAllUserTaintPaths(): Got " << eqObjs.size() << " eqv objs: ";
+            for (AliasObject *o : eqObjs) {
+                dbgs() << (const void*)o << " ";
+            }
+            dbgs() << "\n";
+#endif
+            //We need to consider all possible taints to every eqv object...
+            int r = 0;
+            for (AliasObject *o : eqObjs) {
+#ifdef DEBUG_CONSTRUCT_TAINT_CHAIN
+                dbgs() << "getAllUserTaintPaths(): process eqv obj: " << (const void*)o << "\n";
+#endif
+                if (!o) {
                     continue;
                 }
-                TaintTag *tag = flg->tag;
-                TypeField ntf(nullptr,tag->fieldId,tag->priv,flg);
-                if (!tag->is_global) {
-                    //Finally got a chain initiated from the user input...
-                    history.push_back(&ntf);
-                    std::vector<InstLoc*> *tr = getFullTaintTrace(history);
-                    if (tr) {
-                        res.insert(tr);
+                //Ok, who can taint this obj|field?
+                //TODO: if the original arg tf->priv is different than the current eqv obj "o", the bug analyst may be
+                //confused about how "tf->priv" can be controlled by the user... Consider what we can do to help.
+                //NOTE: now we only consider the taint paths valid in the single-thread execution setting (e.g. one TF may be masked by another
+                //during the execution, in which case we only consider the TF that can last to the function return).
+                //TODO: try to detect the concurrency bugs (e.g. just before a TF is masked in one entry, we can invoke another entry function 
+                //in which the obj|field still bear the effect of that TF...)
+                std::set<TaintFlag*> tflgs;
+                o->getWinnerTfs(fid,tflgs);
+#ifdef DEBUG_CONSTRUCT_TAINT_CHAIN
+                dbgs() << "getAllUserTaintPaths(): #winnerTFs: " << tflgs.size() << "\n";
+#endif
+                for (TaintFlag *flg : tflgs) {
+                    if (!flg || !flg->isTainted() || !flg->tag) {
+                        continue;
                     }
-                    history.pop_back();
-                    continue;
-                }
-                //Recursion..
-                if (tag->priv) {
-                    r += getAllUserTaintPaths(&ntf,history,res);
+                    TaintTag *tag = flg->tag;
+                    if (flg->is_inherent) {
+                        //This means current obj "o" is a taint source itself, and it has not been tainted by others (i.e. intact),
+                        //so if it's a user taint source, we have already found a taint path, otherwise, there is no need to process
+                        //this taint flag since its tag simply represents itself. 
+                        if (!tag->is_global) {
+                            //Construct the user taint path.
+#ifdef DEBUG_CONSTRUCT_TAINT_CHAIN
+                            dbgs() << "getAllUserTaintPaths(): current obj is a user taint source!\n";
+#endif
+                            std::vector<InstLoc*> *tr = getFullTaintTrace(history);
+                            if (tr && !insertTaintPath(tr,res)) {
+                                delete(tr);
+                            }
+                        }
+                        continue;
+                    }
+                    AliasObject *no = (AliasObject*)(tag->priv);
+                    TypeField ntf((no ? no->targetType : nullptr),tag->fieldId,no,flg);
+                    //If the TF is originated from a user taint source, we've found a path.
+                    if (!tag->is_global) {
+#ifdef DEBUG_CONSTRUCT_TAINT_CHAIN
+                        dbgs() << "getAllUserTaintPaths(): got a user taint: ";
+                        tag->dumpInfo_light(dbgs(),true);
+#endif
+                        history.push_back(&ntf);
+                        std::vector<InstLoc*> *tr = getFullTaintTrace(history);
+                        history.pop_back();
+                        if (tr && !insertTaintPath(tr,res)) {
+                            delete(tr);
+                        }
+                        continue;
+                    }
+                    //Recursively explore a different taint source.
+                    if (no) {
+                        r += getAllUserTaintPaths(&ntf,history,res);
+                    }
                 }
             }
             history.pop_back();
+            if (!history.size()) {
+                //In the end, don't forget to update the cache...
+                pathMap[obj][fid] = res;
+            }
             return r;
         }
 
@@ -871,9 +966,8 @@ namespace DRCHECKER {
         //re-use the AliasObject created by other entry functions, instead it will created its own copy), so here we need to
         //identify all potentially identical objects to the provided one, which ensures that our taint chain construction is
         //sound.
-        int getAllEquivelantObjs(TaintTag *tag, std::set<AliasObject*> &res) {
+        int getAllEquivelantObjs(AliasObject *obj, std::set<AliasObject*> &res) {
             static std::set<std::set<AliasObject*>*> eqObjs;
-            AliasObject *obj = (AliasObject*)(tag->priv);
             if (!obj) {
                 return 0;
             }
@@ -898,7 +992,8 @@ namespace DRCHECKER {
                 eqcls->insert(obj);
                 eqObjs.insert(eqcls);
                 //First we need to collect all access paths to current object.
-                std::set<std::vector<TypeField*>*> *hty = getTagHierarchyTy(tag);
+                //TODO: what if there is a pointsFrom obj who points to a non-zero field in "obj"?
+                std::set<std::vector<TypeField*>*> *hty = getObjHierarchyTy(obj,0);
 #ifdef DEBUG_CONSTRUCT_TAINT_CHAIN
                 dbgs() << "getAllEquivelantObjs(): #accessPaths: " << (hty ? hty->size() : 0) << "\n";
 #endif
@@ -932,7 +1027,6 @@ namespace DRCHECKER {
         //(e.g. go through multiple entry function invocations) taint paths from the user input to the target instruction affected
         //by the given taint flag.
         int getAllUserTaintChains(TaintFlag *tf, std::set<std::vector<InstLoc*>*> &res) {
-            static std::map<TaintTag*,std::set<std::vector<InstLoc*>*>> tagPathMap;
             if (!tf || !tf->isTainted() || !tf->tag) {
                 return 1;
             }
@@ -941,51 +1035,37 @@ namespace DRCHECKER {
             dbgs() << "getAllUserTaintChains(): enum user taint chains for tag: ";
             tag->dumpInfo_light(dbgs(),true);
 #endif
-            if (tagPathMap.find(tag) == tagPathMap.end()) {
+            if (!tag->is_global) {
+                //Ok this is already a user inited taint flag, return the trace in current TF immediately.
 #ifdef DEBUG_CONSTRUCT_TAINT_CHAIN
-                dbgs() << "getAllUserTaintChains(): no records in the cache, do the calculation...\n";
+                dbgs() << "getAllUserTaintChains(): this is already a user taint tag, return the TF trace directly!\n";
 #endif
-                //Find all paths from an user input to this tag.
-                tagPathMap[tag].clear();
-                //No need to find other paths if this is already a user input tag.
-                if (tag->is_global && tag->priv) {
-                    //First need to get all equivelant objects as that in the tag.
-                    std::set<AliasObject*> eqObjs;
-                    getAllEquivelantObjs(tag,eqObjs);
-#ifdef DEBUG_CONSTRUCT_TAINT_CHAIN
-                    dbgs() << "getAllUserTaintChains(): Got " << eqObjs.size() << " eqv objs for the tag: ";
-                    for (AliasObject *o : eqObjs) {
-                        dbgs() << (const void*)o << " ";
-                    }
-                    dbgs() << "\n";
-#endif
-                    //Get all taint paths for each object.
-                    std::vector<TypeField*> history;
-                    for (AliasObject *obj : eqObjs) {
-                        if (!obj) {
-                            continue;
-                        }
-                        history.clear();
-                        TypeField t(obj->targetType,tag->fieldId,obj);
-                        getAllUserTaintPaths(&t,history,tagPathMap[tag]);
-                    }
-                }
-            }
-#ifdef DEBUG_CONSTRUCT_TAINT_CHAIN
-            dbgs() << "getAllUserTaintChains(): Got " << tagPathMap[tag].size() << " user taint paths in total.\n";
-#endif
-            //Iterate through every taint path to current "tag" and decide whether it's compatible to the taint path
-            //in current TaintFlag (i.e. whether the prior path can reach current one), if so, we can concat two paths
-            //and the result to "res".
-            for (std::vector<InstLoc*> *ep : tagPathMap[tag]) {
-                //TODO: how to do the compatibility test?
-                if (!ep) {
-                    continue;
-                }
                 std::vector<InstLoc*> *newPath = new std::vector<InstLoc*>();
-                newPath->insert(newPath->end(),ep->begin(),ep->end());
                 newPath->insert(newPath->end(),tf->instructionTrace.begin(),tf->instructionTrace.end());
                 res.insert(newPath);
+                return 0;
+            }
+            //Ok, so now what represented by "tag" is a global memory location, we need to inspect whether and how it can
+            //be eventually tainted by the user input, and return the taint paths if any.
+            if (tag->priv) {
+                AliasObject *obj = (AliasObject*)tag->priv;
+                std::vector<TypeField*> history;
+                TypeField t(obj->targetType,tag->fieldId,(void*)obj);
+                std::set<std::vector<InstLoc*>*> paths;
+                getAllUserTaintPaths(&t,history,paths);
+#ifdef DEBUG_CONSTRUCT_TAINT_CHAIN
+                dbgs() << "getAllUserTaintChains(): Got " << paths.size() << " user taint paths in total.\n";
+#endif
+                //Append the taint trace in "tf".
+                for (std::vector<InstLoc*> *ep : paths) {
+                    //TODO: how to do the compatibility test?
+                    if (!ep) {
+                        continue;
+                    }
+                    std::vector<InstLoc*> *newPath = new std::vector<InstLoc*>(*ep);
+                    newPath->insert(newPath->end(),tf->instructionTrace.begin(),tf->instructionTrace.end());
+                    res.insert(newPath);
+                }
             }
             return 0;
         }
@@ -1003,7 +1083,7 @@ namespace DRCHECKER {
 
         //NOTE: in this function we use quite some heuristics.
         static bool valid_history(std::vector<std::pair<long, AliasObject*>>& history) {
-            if (history.size() < 16) {
+            if (history.size() < 8) {
                 return true;
             }
             //Ok it's a long history, if it also contains some same typed object types, let's say it's invalid.
@@ -1153,42 +1233,42 @@ namespace DRCHECKER {
         }
 
         //A wrapper of getHierarchyStr() w/ a cache.
-        static std::set<std::string> *getTagHierarchyStr(TaintTag *tag) {
-            static std::map<TaintTag*,std::set<std::string>*> cache;
-            if (!tag || !tag->priv) {
+        static std::set<std::string> *getObjHierarchyStr(AliasObject *obj, long fid) {
+            static std::map<AliasObject*,std::map<long,std::set<std::string>*>> cache;
+            if (!obj) {
                 return nullptr;
             }
-            if (cache.find(tag) == cache.end()) {
+            if (cache.find(obj) == cache.end() || cache[obj].find(fid) == cache[obj].end()) {
                 std::vector<std::pair<long, AliasObject*>> history;
                 history.clear();
                 DRCHECKER::hstrs.clear();
-                traverseHierarchy((AliasObject*)tag->priv, tag->fieldId, 0, history, hierarchyStrCb);
-                cache[tag] = new std::set<std::string>(DRCHECKER::hstrs);
+                traverseHierarchy(obj, fid, 0, history, hierarchyStrCb);
+                cache[obj][fid] = new std::set<std::string>(DRCHECKER::hstrs);
             }
-            return cache[tag];
+            return cache[obj][fid];
         }
 
         //A wrapper of getHierarchyTy() w/ a cache.
-        static std::set<std::vector<TypeField*>*> *getTagHierarchyTy(TaintTag *tag) {
-            static std::map<TaintTag*,std::set<std::vector<TypeField*>*>*> cache;
-            if (!tag || !tag->priv) {
+        static std::set<std::vector<TypeField*>*> *getObjHierarchyTy(AliasObject *obj, long fid) {
+            static std::map<AliasObject*,std::map<long,std::set<std::vector<TypeField*>*>*>> cache;
+            if (!obj) {
                 return nullptr;
             }
-            if (cache.find(tag) == cache.end()) {
+            if (cache.find(obj) == cache.end() || cache[obj].find(fid) == cache[obj].end()) {
                 std::vector<std::pair<long, AliasObject*>> history;
                 history.clear();
                 for (auto &x : DRCHECKER::htys) {
                     delete(x);
                 }
                 DRCHECKER::htys.clear();
-                traverseHierarchy((AliasObject*)tag->priv, tag->fieldId, 0, history, hierarchyTyCb);
-                cache[tag] = new std::set<std::vector<TypeField*>*>();
+                traverseHierarchy(obj, fid, 0, history, hierarchyTyCb);
+                cache[obj][fid] = new std::set<std::vector<TypeField*>*>();
                 for (auto &x : DRCHECKER::htys) {
                     std::vector<TypeField*> *vtf = new std::vector<TypeField*>(*x);
-                    cache[tag]->insert(vtf);
+                    cache[obj][fid]->insert(vtf);
                 }
             }
-            return cache[tag];
+            return cache[obj][fid];
         }
 
         bool is_prefix_hierarchy_str(std::set<std::string> *hs0, std::set<std::string> *hs1) {
@@ -1263,7 +1343,10 @@ namespace DRCHECKER {
             }
             std::set<TaintTag*> rtags;
             for (TaintTag *tag : *tags) {
-                std::set<std::vector<TypeField*>*> *hty0 = getTagHierarchyTy(tag);
+                if (!tag) {
+                    continue;
+                }
+                std::set<std::vector<TypeField*>*> *hty0 = getObjHierarchyTy((AliasObject*)(tag->priv),tag->fieldId);
                 if (!hty0) {
                     continue;
                 }
@@ -1274,11 +1357,11 @@ namespace DRCHECKER {
                 //See whether its hierarchy is any other tag's prefix.
                 bool is_prefix = false;
                 for (TaintTag *t : *tags) {
-                    if (t == tag) {
+                    if (!t || t == tag) {
                         //Exclude itself.
                         continue;
                     }
-                    std::set<std::vector<TypeField*>*> *hty1 = getTagHierarchyTy(t);
+                    std::set<std::vector<TypeField*>*> *hty1 = getObjHierarchyTy((AliasObject*)(t->priv),t->fieldId);
                     if (!hty1) {
                         continue;
                     }
@@ -1418,7 +1501,7 @@ namespace DRCHECKER {
                         O << "------------------Taint------------------\n";
                         p->dumpInfo(O);
                         if (p->tag && p->tag->priv) {
-                            std::set<std::string> *strs = getTagHierarchyStr(p->tag);
+                            std::set<std::string> *strs = getObjHierarchyStr((AliasObject*)(p->tag->priv),p->tag->fieldId);
                             if (strs && !strs->empty()) {
                                 O << "---TAG OBJ HIERARCHY---\n";
                                 for (auto& hs : *strs) {
@@ -1614,7 +1697,7 @@ namespace DRCHECKER {
                 tagInfoMap[tag_id]["v"] = InstructionUtils::getValueStr(tag->v);
                 tagInfoMap[tag_id]["vid"] = std::to_string((unsigned long)(tag->v));
                 if (tag->priv) {
-                    std::set<std::string> *hstr = getTagHierarchyStr(tag);
+                    std::set<std::string> *hstr = getObjHierarchyStr((AliasObject*)(tag->priv),tag->fieldId);
                     if (hstr && !hstr->empty()) {
                         int hc = 0;
                         for (auto& hs : *hstr) {
