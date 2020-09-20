@@ -80,11 +80,13 @@ namespace DRCHECKER {
     //This is a multi-purpose class to provide some infos.
     class TypeField {
         public:
-        TypeField(Type *ty, long fid, void *priv = nullptr, void *tf = nullptr, Value *v = nullptr) {
+        TypeField(Type *ty, long fid, void *priv = nullptr, std::set<void*> *ptfs = nullptr, Value *v = nullptr) {
             this->ty = ty;
             this->fid = fid;
             this->priv = priv;
-            this->tf = tf;
+            if (ptfs) {
+                this->tfs = *ptfs;
+            }
             this->v = v;
         }
 
@@ -93,16 +95,26 @@ namespace DRCHECKER {
                 this->ty = other->ty;
                 this->fid = other->fid;
                 this->priv = other->priv;
-                this->tf = other->tf;
+                this->tfs = other->tfs;
                 this->v = other->v;
             }
         }
 
         //Constructor wrapper 0: null.
-        TypeField(): TypeField(nullptr,0,nullptr,nullptr,nullptr) {}
+        TypeField(): TypeField(nullptr,0,nullptr,(std::set<void*>*)nullptr,nullptr) {}
 
         //Constructor wrapper 1: mainly used to hold a load tag (i.e. load src pointer, object and field).
-        TypeField(Value *v, long fid, void *obj): TypeField(nullptr,fid,obj,nullptr,v) {}
+        TypeField(Value *v, long fid, void *obj): TypeField(nullptr,fid,obj,(std::set<void*>*)nullptr,v) {}
+
+        //Constructor wrapper 2: single TF
+        /*
+        TypeField(Type *ty, long fid, void *priv = nullptr, void *ptf = nullptr, Value *v = nullptr):
+        TypeField(ty,fid,priv,(std::set<void*>*)nullptr,v) {
+            if (ptf) {
+                this->tfs.insert(ptf);
+            }
+        }
+        */
         
         bool is_same_ty(TypeField *tf);
 
@@ -125,7 +137,7 @@ namespace DRCHECKER {
         long fid = 0;
         void *priv = nullptr;
         //Used to hold a TaintFlag* in some cases.
-        void *tf = nullptr;
+        std::set<void*> tfs;
         Value *v = nullptr;
     };
 
