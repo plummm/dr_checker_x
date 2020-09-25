@@ -772,6 +772,25 @@ namespace DRCHECKER {
                 }
                 if (tf->tfs.size() > 1) {
                     //More than one taint paths for the current link.
+                    //Option 0: Select a shortest path (current choice)
+                    TaintFlag *stf = nullptr;
+                    for (void *pt : tf->tfs) {
+                        if (!pt) {
+                            continue;
+                        }
+                        TaintFlag *tflg = (TaintFlag*)pt;
+                        if (!stf || tflg->instructionTrace.size() < stf->instructionTrace.size()) {
+                            stf = tflg;
+                        }
+                    }
+                    if (stf) {
+                        for (std::vector<InstLoc*> *p : ps) {
+                            //TODO: any cross-entry-func taint path validity test?
+                            p->insert(p->end(),stf->instructionTrace.begin(),stf->instructionTrace.end());
+                        }
+                    }
+                    //Option 1: Insert all
+                    /*
                     tmp.clear();
                     for (std::vector<InstLoc*> *p : ps) {
                         for (void *pt : tf->tfs) {
@@ -784,6 +803,7 @@ namespace DRCHECKER {
                     }
                     ps.clear();
                     ps = tmp;
+                    */
                 }else {
                     TaintFlag *tflg = (TaintFlag*)(*(tf->tfs.begin()));
                     for (std::vector<InstLoc*> *p : ps) {
