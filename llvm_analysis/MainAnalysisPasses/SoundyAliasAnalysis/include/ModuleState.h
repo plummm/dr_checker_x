@@ -749,6 +749,10 @@ namespace DRCHECKER {
             if (!tr) {
                 return false;
             }
+            if (res.size() > 1024) {
+                //Already too many taint paths, to avoid explosion, skip.
+                return false;
+            }
             //If no duplication, insert.
             for (auto t : res) {
                 if (DRCHECKER::sameLocTr(t,tr)) {
@@ -761,6 +765,10 @@ namespace DRCHECKER {
 
         bool insertTaintPath(std::vector<TypeField*> &chain, std::set<std::vector<InstLoc*>*> &res) {
             if (chain.empty()) {
+                return false;
+            }
+            if (res.size() > 1024) {
+                //Already too many taint paths, to avoid explosion, skip.
                 return false;
             }
             std::set<std::vector<InstLoc*>*> ps,tmp;
@@ -821,11 +829,40 @@ namespace DRCHECKER {
             return true;
         }
 
+        //Decide whether we need to give up searching the taint paths due to the path explosion.
+        //Arg: "np": #path already searched; "ntp": #taintPath already found
+        bool valid_taint_history(std::vector<TypeField*> &history, int np, int ntp) {
+            if (np > 10240) {
+                //There are really too many searched paths, so restrict the search to a low level.
+                if (history.size() > 4) {
+                    return false;
+                }
+            }
+            if (history.size() < 8) {
+                return true;
+            }
+            if (ntp > 0) {
+                //At least one user taint path has already been identified, so we can give up here.
+                return false;
+            }
+            if (np > 1024) {
+                //Though we haven't found any taint paths, there are already too many paths searched,
+                //to avoid explosion, we'd better stop the search.
+                return false;
+            }
+            return true;
+        }
+
         //Return all taint paths from the user input to the specified field of an object.
         //NOTE: we assume that "res" is empty and there is no TF in "tf" when invoking this function at layer 0.
         int getAllUserTaintPaths(TypeField *tf, std::vector<TypeField*> &history, std::set<std::vector<InstLoc*>*> &res) {
             //obj -> fid -> user taint path to this specific field in the obj.
             static std::map<AliasObject*, std::map<long, std::set<std::vector<InstLoc*>*>>> pathMap;
+            static int cnt_sp = 0;
+            if (history.empty()) {
+                //Root node (i.e. layer 0), reset the counter for #path searched.
+                cnt_sp = 0;
+            }
             if (!tf || !tf->priv) {
                 return 0;
             }
@@ -837,6 +874,8 @@ namespace DRCHECKER {
 #endif
             //Ok, see whether the result has already been cached.
             if (pathMap.find(obj) != pathMap.end() && pathMap[obj].find(fid) != pathMap[obj].end()) {
+                //Anyway we will return directly here and stop searching along this path, so increase the counter.
+                ++cnt_sp;
                 //Cached, return directly w/ path concat.
                 if (pathMap[obj][fid].empty()) {
                     return 0;
@@ -870,6 +909,16 @@ namespace DRCHECKER {
 #ifdef DEBUG_CONSTRUCT_TAINT_CHAIN
                 dbgs() << "getAllUserTaintPaths(): loop detected, return!\n";
 #endif
+                ++cnt_sp;
+                return 0;
+            }
+            if (!this->valid_taint_history(history,cnt_sp,res.size())) {
+                //Stop searching to avoid the taint path explosion.
+#ifdef DEBUG_CONSTRUCT_TAINT_CHAIN
+                dbgs() << "getAllUserTaintPaths(): too many taint paths, stop here...\n";
+#endif
+                history.pop_back();
+                ++cnt_sp;
                 return 0;
             }
 #ifdef DEBUG_CONSTRUCT_TAINT_CHAIN
@@ -919,6 +968,7 @@ namespace DRCHECKER {
                             dbgs() << "getAllUserTaintPaths(): current obj is a user taint source!\n";
 #endif
                             insertTaintPath(history,res);
+                            ++cnt_sp;
                         }
                         continue;
                     }
@@ -935,6 +985,7 @@ namespace DRCHECKER {
                         history.push_back(&ntf);
                         insertTaintPath(history,res);
                         history.pop_back();
+                        ++cnt_sp;
                         continue;
                     }
                     //Ok, we now need to recursively explore the taint source of current TF, to avoid duplication,
