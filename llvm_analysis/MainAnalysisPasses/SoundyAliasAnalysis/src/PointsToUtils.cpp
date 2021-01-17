@@ -8,7 +8,7 @@
 using namespace llvm;
 
 namespace DRCHECKER {
-#define DEBUG_FUNCTION_PTR_ALIASING
+// #define DEBUG_FUNCTION_PTR_ALIASING
 
     std::set<PointerPointsTo*>* PointsToUtils::getPointsToObjects(GlobalState &currState,
                                                                   std::vector<Instruction *> *currFuncCallSites,

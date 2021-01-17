@@ -5,6 +5,8 @@
 #include "TaintAnalysisVisitor.h"
 #include "PointsToUtils.h"
 #include "TaintUtils.h"
+#include "getPath.h"
+// #include "Universal.h"
 
 using namespace llvm;
 namespace DRCHECKER {
@@ -17,7 +19,9 @@ namespace DRCHECKER {
 //#define DEBUG_BIN_INSTR
 #define ENFORCE_TAINT_PATH
 //#define DEBUG_ENFORCE_TAINT_PATH
-#define DEBUG_STORE_INSTR_MAPPING
+// #define DEBUG_STORE_INSTR_MAPPING
+
+    
 
     InstLoc *TaintAnalysisVisitor::makeInstLoc(Value *v) {
         return new InstLoc(v,this->currFuncCallSites);
@@ -25,6 +29,274 @@ namespace DRCHECKER {
 
     std::set<TaintFlag*>* TaintAnalysisVisitor::getTaintInfo(Value *targetVal) {
         return TaintUtils::getTaintInfo(this->currState, this->currFuncCallSites, targetVal);
+    }
+
+    void TaintAnalysisVisitor::debugInstTaint(Instruction &I){
+        errs() << "\ndebugging inst: " << "\n";
+        I.print(errs());
+        errs() << "\n";
+        auto inst = dyn_cast<CastInst>(&I);
+        auto srcopr = inst->getOperand(0);
+        auto taintmap = this->currState.taintInformation[this->currState.getContext(this->currFuncCallSites)];
+        if(taintmap->find(srcopr) != taintmap->end()){
+            errs() << "Found srcopr!\nsrcopr is: ";
+            srcopr->print(errs());
+            errs() << "\n";
+            for(auto taintinfo : *(*taintmap)[srcopr]){
+                if(taintinfo->isTainted()){
+                    errs() << "srcopr is tainted!\n";
+                }
+            }
+        }
+        auto srcptos = this->getPtos(srcopr);
+        if(srcptos){
+            errs() << "srcopr has ptos!\n";
+            errs() << "the size is: " << srcptos->size() << "\n";
+            for(auto pto : *srcptos){
+                if(pto->targetObject->targetType->isStructTy()){
+                    errs() << "pto type is: " << pto->targetObject->targetType->getStructName().str() << "\n";
+                }
+                for(auto fdtts : pto->targetObject->taintedFields){
+                    errs() << "fid: " << fdtts->fieldId << "\n";
+                    for(auto fdtt : fdtts->targetTaint){
+                        if(fdtt->isTainted()){
+                            errs() << "tainted\n";
+                        }else{
+                            errs() << "not tainted\n";
+                        }
+                    }
+                }
+            }
+        }
+        if(taintmap->find(&I) != taintmap->end()){
+            errs() << "Found dstopr!\ndstopr is: ";
+            I.print(errs());
+            errs() << "\n";
+            for(auto taintinfo : *(*taintmap)[&I]){
+                if(taintinfo->isTainted()){
+                    errs() << "dstopr is tainted!\n";
+                }
+            }
+        }
+        auto dstptos = this->getPtos(&I);
+        if(dstptos){
+            errs() << "dstopr has ptos!\n";
+            errs() << "the size is: " << dstptos->size() << "\n";
+            for(auto pto : *dstptos){
+                if(pto->targetObject->targetType->isStructTy()){
+                    errs() << "pto type is: " << pto->targetObject->targetType->getStructName().str() << "\n";
+                }
+                for(auto fdtts : pto->targetObject->taintedFields){
+                    errs() << "fid: " << fdtts->fieldId << "\n";
+                    for(auto fdtt : fdtts->targetTaint){
+                        if(fdtt->isTainted()){
+                            errs() << "tainted\n";
+                        }else{
+                            errs() << "not tainted\n";
+                        }
+                    }
+                }
+            }
+        }
+        errs() << "\n";
+
+        
+        
+
+    }
+
+    
+
+    void printPath(std::vector<Instruction*> *CallSites, Instruction *site, int skipfirstbb, int filecount, std::string filenameprefix = ""){
+        std::vector<llvm::BasicBlock *> thePath;
+        int skip = 0;
+        for(auto i = 0; i < CallSites->size() - 1; i += 2){
+            getPath* pathfinder = new getPath();
+            auto src = (*CallSites)[i]->getParent();
+            auto dst = (*CallSites)[i + 1]->getParent();
+            pathfinder->BBvisitor(src, dst, 0);
+            pathfinder->DFSvisit(src, dst);
+            if(pathfinder->ShortestPath){
+                auto skiped = false;
+                for(auto bb : *(pathfinder->ShortestPath)){
+                    if(0 < skip && skip < skipfirstbb && !skiped){
+                        skip++;
+                        skiped = true;
+                    }else{
+                        thePath.push_back(bb);
+                    }
+                    if(skip == 0){
+                        skip++;
+                    }
+                    
+                }
+            }
+            delete pathfinder;
+        }
+        getPath* pathfinder = new getPath();
+        auto src = (*CallSites)[CallSites->size() - 1]->getParent();
+        auto dst = site->getParent();
+        pathfinder->BBvisitor(src, dst, 0);
+        pathfinder->DFSvisit(src, dst);
+        if(pathfinder->ShortestPath){
+            auto skiped = false;
+            for(auto bb : *(pathfinder->ShortestPath)){
+                if(0 < skip && skip < skipfirstbb && !skiped){
+                    skip++;
+                    skiped = true;
+                }else{
+                    thePath.push_back(bb);
+                }
+                if(skip == 0){
+                    skip++;
+                }
+            }
+        }
+        
+        delete pathfinder;
+        // errs() << "\n\n";
+        ofstream fout;
+        fout.open(printPathDir + "/" + filenameprefix + to_string(filecount));
+        for(auto bb = thePath.begin(), be = thePath.end(); bb != be; bb++){
+            auto firstins = (*bb)->getFirstNonPHIOrDbg();
+            auto nextbb = bb + 1;
+            auto dbgloc = firstins->getDebugLoc();
+            while((!dbgloc || (dbgloc->getLine() == 0)) && !firstins->isTerminator()){
+                firstins = firstins->getNextNonDebugInstruction();
+                dbgloc = firstins->getDebugLoc();
+            }
+            std::string firstfilename = "";
+            unsigned int firstline = 0;
+            if(dbgloc){
+                firstfilename = dbgloc->getFilename().str();
+                firstline = dbgloc->getLine();
+            }
+            auto lastins = (*bb)->getTerminator();
+            dbgloc = lastins->getDebugLoc();
+            while((!dbgloc || (dbgloc->getLine() == 0)) && firstins != (*bb)->getFirstNonPHIOrDbg()){
+                lastins = lastins->getPrevNonDebugInstruction();
+                dbgloc = lastins->getDebugLoc();
+            }
+            std::string lastfilename = "";
+            unsigned int lastline = 0;
+            if(dbgloc){
+                lastfilename = dbgloc->getFilename().str();
+                lastline = dbgloc->getLine();
+            } else
+                continue;
+
+            if (isa<BranchInst>(lastins)) {
+                //errs() << *(*bb) << "\n";
+                //errs() << firstfilename << ":" << firstline << "\n  w";
+                //errs() << lastfilename << ":" << lastline;
+                if (nextbb != be && (*bb)->getParent() == (*nextbb)->getParent()) {
+                    string brStr = "";
+                    if(lastfilename != "" && lastline != 0){
+                        brStr += lastfilename + ":" + to_string(lastline) + " ";
+                    }
+                    auto firstins = (*nextbb)->getFirstNonPHIOrDbg();
+                    auto dbgloc = firstins->getDebugLoc();
+                    while((!dbgloc || (dbgloc->getLine() == 0)) && firstins != nullptr){
+                        firstins = firstins->getNextNonDebugInstruction();
+                        dbgloc = firstins->getDebugLoc();
+                    }
+
+                    if (dbgloc)
+                        brStr += dbgloc->getFilename().str() + ":" + to_string(dbgloc->getLine()) + " ";
+                    else
+                        continue;
+
+                    int n = lastins->getNumOperands();
+                    if (n == 3) {
+                        Value *br1 = lastins->getOperand(1);
+                        Value *br2 = lastins->getOperand(2);
+                        Value *targetBr = nullptr;
+                        //errs() << "branches: " << br1 << " " << br2 << " " << (*nextbb) << "\n";
+                        if (br1 == *nextbb)
+                            targetBr = br2;
+                        else
+                            targetBr = br1;
+                        if (BasicBlock *targetBB = dyn_cast<BasicBlock>(targetBr)) {
+                            if (targetBB->getUniquePredecessor() == nullptr) {
+                                brStr += "** ";
+                                errs() << dbgloc->getFilename().str() << ":" << to_string(dbgloc->getLine()) << " has more than one predecessor\n";
+                            }
+                            auto firstins = targetBB->getFirstNonPHIOrDbg();
+                            auto dbgloc = firstins->getDebugLoc();
+                            while((!dbgloc || (dbgloc->getLine() == 0)) && firstins != nullptr){
+                                firstins = firstins->getNextNonDebugInstruction();
+                                dbgloc = firstins->getDebugLoc();
+                            }
+                            if (dbgloc)
+                                brStr += dbgloc->getFilename().str() + ":" + to_string(dbgloc->getLine()) + "\n";
+                            else
+                                continue;
+                        }
+                    } else {
+                        continue;
+                    }
+                    errs() << brStr;
+                    fout << brStr;
+                } else {
+                    errs() << lastfilename << ":" << lastline << "\n";
+                }
+                /*BranchInst *brInst = dyn_cast<BranchInst>(lastline);
+                int n = brInst->getNumOperands();
+                if (n != 2) {
+                    errs() << "Branch doesn't have 2 operands!\n";
+                } else {
+                    Value *target1 = brInst->getOperand(0);
+                    Value *target2 = brInst->getOperand(1);
+                    target1->
+                }*/
+            }
+        }
+        
+        fout << site->getDebugLoc()->getFilename().str() << ":" << to_string(site->getDebugLoc()->getLine()) << "\n";
+        fout << "$\n";
+        string str;
+        llvm::raw_string_ostream(str) << *site;
+        fout << str << "\n";
+        fout.close();
+    }
+
+    void fromVultoUse(std::vector<Instruction *> *vulcallsites, std::vector<Instruction *> *usecallsites, Instruction *usesite, int filecount, std::string filenameprefix = ""){
+        std::vector<Instruction *> cpvulcallsites, cpusecallsites;
+        std::vector<Instruction *> *PathfromVultoUse = new std::vector<Instruction *>();
+        auto smallsize = vulcallsites->size() > usecallsites->size() ? usecallsites->size() : vulcallsites->size();
+        int i = 0;
+        for(; i < smallsize; i++){
+            if((*vulcallsites)[i] != (*usecallsites)[i]){
+                break;
+            }
+        }
+        int tmp = i;
+        for(; tmp < vulcallsites->size(); tmp++){
+            cpvulcallsites.push_back((*vulcallsites)[tmp]);
+        }
+        tmp = i;
+        for(; tmp < usecallsites->size(); tmp++){
+            cpusecallsites.push_back((*usecallsites)[tmp]);
+        }
+        for(auto idx = cpvulcallsites.size() - 1; idx > 0; idx -= 2){
+            PathfromVultoUse->push_back(cpvulcallsites[idx]);
+            auto getret = new getRet();
+            getret->BBvisit(cpvulcallsites[idx]->getParent(), 0);
+            if(getret->found){
+                PathfromVultoUse->push_back(getret->ret);
+            }else{
+                errs() << "unable to find a ret inst!\n";
+                return;
+            }
+            
+        }
+        PathfromVultoUse->push_back(cpvulcallsites[0]);
+        for(auto idx = 1; idx < cpusecallsites.size(); idx += 2){
+            PathfromVultoUse->push_back(cpusecallsites[idx - 1]);
+            PathfromVultoUse->push_back(cpusecallsites[idx]);
+        }
+        printPath(PathfromVultoUse, usesite, (cpvulcallsites.size() + 1) / 2, filecount, filenameprefix);
+
     }
 
     //"I" is the inst site where need the ptr taint info. 
@@ -233,6 +505,56 @@ namespace DRCHECKER {
 #endif
             }
         }
+
+        auto taintmap = this->currState.taintInformation[this->currState.getContext(this->currFuncCallSites)];
+        if(taintmap->find(srcOperand) != taintmap->end()){
+            for(auto taintinfo : *(*taintmap)[srcOperand]){
+                if(taintinfo->isTainted()){
+                    auto dstptos = this->getPtos(&I);
+                    if(dstptos){
+                        bool hastainted = false;
+                        for(auto pto : *dstptos){
+                            if(pto->targetObject->taintedFields.size() > 0){
+                                hastainted = true;
+                            }
+                        }
+                        if(!hastainted){
+                            for(auto pto : *dstptos){
+                                auto instloc = new InstLoc(&I, this->currFuncCallSites);
+                                pto->targetObject->setAsTaintFieldSrc(instloc, this->currState.getDataLayout(), true, 0);
+                            }
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+
+        // auto currtoptaintinfo = this->currState.taintInformation[this->currState.getContext(this->currFuncCallSites)];
+        // if(currtoptaintinfo){
+        //     errs() << "found currtoptaintinfo\n" << "\n";
+        //     if(currtoptaintinfo->find(srcOperand) != currtoptaintinfo->end()){
+        //         errs() << "found srcopr taint info\n";
+        //         for(auto ttinfo : *(*currtoptaintinfo)[srcOperand]){
+        //             if(ttinfo->isTainted()){
+        //                 errs() << "tainted!\n" << "\n";
+        //             }
+        //         }
+        //     }
+        // }
+        
+
+        //debugInstTaint(I);
+
+        // auto ptos = this->getPtos(&I);
+        // if(ptos){
+        //         for(auto pto : *ptos){
+        //         if(pto->targetObject->embObjs.size() > 0){
+        //             errs() << "embedded!" << "\n";
+        //         }
+        //     }
+        // }
+        
     }
 
     void TaintAnalysisVisitor::visitBinaryOperator(BinaryOperator &I) {
@@ -287,18 +609,25 @@ namespace DRCHECKER {
         std::set<Value*> allVals;
         for(unsigned i=0; i<I.getNumOperands(); i++) {
             Value* currOp = I.getOperand(i);
-            RangeAnalysis::Range currRange = this->currState.getRange(currOp);
-            if(currRange.isBounded()) {
-                // if the range of the index we use is bounded?
-                // it may not be bad.
-                continue;
-            }
+            // RangeAnalysis::Range currRange = this->currState.getRange(currOp);
+            // if(currRange.isBounded()) {
+            //     // if the range of the index we use is bounded?
+            //     // it may not be bad.
+            //     continue;
+            // }
             allVals.insert(allVals.end(), currOp);
         }
         std::set<TaintFlag*> *newTaintInfo = mergeTaintInfo(allVals, &I);
         if(newTaintInfo != nullptr) {
             updateTaintInfo(&I, newTaintInfo);
         }
+
+        //debug for taint
+        //errs() << "debugging gep inst\n";
+        //I.print(errs());
+        //errs() <<"\n";
+        
+
     }
 
     void TaintAnalysisVisitor::visitLoadInst(LoadInst &I) {
@@ -318,12 +647,53 @@ namespace DRCHECKER {
         }
         //Now get the pto info of the src pointer.
         std::set<PointerPointsTo*> *srcPointsTo = this->getPtos(srcPointer);
+        if (srcPointsTo == nullptr){
+            errs() << "No ptos for src ptr ";
+            // I.print(errs());
+            errs() << "\n";
+        }
         if (srcPointsTo && !srcPointsTo->empty()) {
             // this set stores the <fieldid, targetobject> of all the objects to which the srcPointer points to.
             std::set<std::pair<long, AliasObject *>> targetObjects;
             for (PointerPointsTo *currPointsToObj : *srcPointsTo) {
                 long target_field = currPointsToObj->dstfieldId;
                 AliasObject *dstObj = currPointsToObj->targetObject;
+                auto fdtaintinfo = dstObj->getFieldTaint(target_field);
+                
+                if(fdtaintinfo){
+                    for(auto taintinfo : fdtaintinfo->targetTaint){
+                        if(taintinfo->isTainted()){
+                            // errs() << "Load" << "\n";
+                            // I.print(errs());
+                            // errs() << "\n";
+                            // errs() << I.getDebugLoc()->getFilename() << "\n";
+                            // errs() << I.getDebugLoc()->getLine() << "\n";
+                            for(auto user : I.users()){
+                                if(isa<CallInst>(&*user)){
+                                    auto nextcall = dyn_cast<CallInst>(&*user);
+                                    if(nextcall->getCalledValue() == dyn_cast<Value>(&I)
+                                     || nextcall->getCalledValue()->stripPointerCasts() == dyn_cast<Value>(&I)
+                                     && this->currState.visitedsites.find(nextcall) == this->currState.visitedsites.end()){
+#ifdef DEBUG_CALL_INSTR
+                                        errs() << "Func call dereference" << "\n";
+                                        nextcall->print(errs());
+                                        errs() << "\n";
+#endif
+                                        errs() << nextcall->getDebugLoc()->getFilename() << "\n";
+                                        errs() << nextcall->getDebugLoc()->getLine() << "\n";
+                                        if(srcPointsTo->size() > 1){
+                                            fromVultoUse(&this->currState.vulsitecontext, this->currFuncCallSites, nextcall, this->currState.filecounter++, "path2FuncPtrDef-n-");
+                                        }else{
+                                            fromVultoUse(&this->currState.vulsitecontext, this->currFuncCallSites, nextcall, this->currState.filecounter++, "path2FuncPtrDef-p-");
+                                        }
+                                        this->currState.visitedsites.insert(nextcall);
+                                        this->currState.taintedindirectcalls.insert(nextcall);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 auto to_check = std::make_pair(target_field, dstObj);
                 if (std::find(targetObjects.begin(), targetObjects.end(), to_check) == targetObjects.end()) {
                     targetObjects.insert(targetObjects.end(), to_check);
@@ -363,6 +733,8 @@ namespace DRCHECKER {
         } else {
             delete(newTaintInfo);
         }
+
+        //debugInstTaint(I);
 
     }
 
@@ -422,6 +794,8 @@ namespace DRCHECKER {
         */
     }
 
+    
+
     void TaintAnalysisVisitor::visitStoreInst(StoreInst &I) {
 #ifdef DEBUG_STORE_INSTR
         dbgs() << "TaintAnalysisVisitor::visitStoreInst(): " << InstructionUtils::getValueStr(&I) << "\n";
@@ -435,6 +809,25 @@ namespace DRCHECKER {
         std::set<PointerPointsTo*> uniqueDstPto;
         if(dstPointsTo && !dstPointsTo->empty()) {
             for (PointerPointsTo *currPointsToObj : *dstPointsTo) {
+                long target_field = currPointsToObj->dstfieldId;
+                AliasObject *dstObj = currPointsToObj->targetObject;
+                auto fdtaintinfo = dstObj->getFieldTaint(target_field);
+                if(fdtaintinfo){
+                    for(auto taintinfo : fdtaintinfo->targetTaint){
+                        if(taintinfo->isTainted() && this->currState.visitedsites.find(&I) == this->currState.visitedsites.end()){
+                            errs() << "Store" << "\n";
+                            errs() << I.getDebugLoc()->getFilename() << "\n";
+                            errs() << I.getDebugLoc()->getLine() << "\n";
+                            if(dstPointsTo->size() > 1){
+                                fromVultoUse(&this->currState.vulsitecontext, this->currFuncCallSites, &I, this->currState.filecounter++, "path2MemWrite-n-");
+                            }else{
+                                fromVultoUse(&this->currState.vulsitecontext, this->currFuncCallSites, &I, this->currState.filecounter++, "path2MemWrite-p-");
+                            }
+                            
+                            this->currState.visitedsites.insert(&I);
+                        }
+                    }
+                }
                 if (std::find_if(uniqueDstPto.begin(),uniqueDstPto.end(),[currPointsToObj](const PointerPointsTo *pto){
                     return currPointsToObj->pointsToSameObject(pto);
                 }) == uniqueDstPto.end())
@@ -512,7 +905,7 @@ namespace DRCHECKER {
 
     void TaintAnalysisVisitor::visitVACopyInst(VACopyInst &I) {
         // No idea how to handle this
-        assert(false);
+        //assert(false);
     }
 
     void TaintAnalysisVisitor::setupCallContext(CallInst &I, Function *currFunction,
@@ -522,12 +915,14 @@ namespace DRCHECKER {
         unsigned int arg_no = 0;
 
         for (User::op_iterator arg_begin = I.arg_begin(), arg_end = I.arg_end(); arg_begin != arg_end; arg_begin++) {
+            errs() << "entered 1 time " << "\n";
             Value *currArgVal =(*arg_begin).get();
             std::set<TaintFlag*> *currArgTaintInfo = this->getTFs(currArgVal);
             if (!currArgTaintInfo || currArgTaintInfo->empty()) {
 #ifdef DEBUG_CALL_INSTR
                 dbgs() << "TaintAnalysisVisitor::setupCallContext(): arg " << arg_no << " does not have taint info.\n";
 #endif
+                arg_no++;
                 continue;
             }
 #ifdef DEBUG_CALL_INSTR
@@ -661,6 +1056,8 @@ namespace DRCHECKER {
 
         // create a new TaintAnalysisVisitor
         TaintAnalysisVisitor *vis = new TaintAnalysisVisitor(currState, currFunc, callSiteContext);
+
+        //debugInstTaint(I);
 
         return vis;
     }

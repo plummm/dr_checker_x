@@ -5,26 +5,26 @@
 
 namespace DRCHECKER {
 
-#define DEBUG_GET_ELEMENT_PTR
+//#define DEBUG_GET_ELEMENT_PTR
 //#define DEBUG_ALLOCA_INSTR
-#define DEBUG_CAST_INSTR
+//#define DEBUG_CAST_INSTR
 //#define DEBUG_BINARY_INSTR
 //#define DEBUG_PHI_INSTR
-#define DEBUG_LOAD_INSTR
-#define DEBUG_STORE_INSTR
-#define DEBUG_CALL_INSTR
+//#define DEBUG_LOAD_INSTR
+//#define DEBUG_STORE_INSTR
+//#define DEBUG_CALL_INSTR
 //#define STRICT_CAST
 //#define DEBUG_RET_INSTR
 //#define FAST_HEURISTIC
 //#define MAX_ALIAS_OBJ 50
 //hz: Enable creating new outside objects on the fly when the pointer points to nothing.
 #define CREATE_DUMMY_OBJ_IF_NULL
-#define DEBUG_CREATE_DUMMY_OBJ
-#define DEBUG_UPDATE_POINTSTO
+//#define DEBUG_CREATE_DUMMY_OBJ
+//#define DEBUG_UPDATE_POINTSTO
 //#define AGGRESSIVE_PTO_DUP_FILTER
 //#define DEBUG_TMP
 //#define INFER_XENTRY_SHARED_OBJ
-#define DEBUG_HANDLE_INLINE_POINTER
+//#define DEBUG_HANDLE_INLINE_POINTER
 
     //hz: A helper method to create and (taint) a new OutsideObject.
     //"p" is the pointer for which we need to create the object, "I" is the instruction as a creation site.
@@ -75,7 +75,7 @@ namespace DRCHECKER {
                 //First set this new obj as a taint source, since it's very likely that this is a shared obj inited in other entry functions.
                 //TODO: consider whether it's possible that this obj is a user inited taint source, if so, how to recognize this?
                 //TODO: it's strange to consider the taint stuff in the AliasAnalysis.
-                robj->setAsTaintSrc(loc,true);
+                //robj->setAsTaintSrc(loc,true);
                 //Then propagate the taint flags from the pointer "p" to the obj.
                 std::set<TaintFlag*> *existingTaints = TaintUtils::getTaintInfo(this->currState,this->currFuncCallSites,p);
                 if (existingTaints) {
@@ -710,6 +710,7 @@ void AliasAnalysisVisitor::visitCastInst(CastInst &I) {
      * First check if we are converting to pointer, if yes, then we need to compute points to
      * If not, check if src value has points to information, if yes, then we need to compute points to
      */
+
     Type *dstType = I.getDestTy();
     Type *srcType = I.getSrcTy();
     Type *srcPointeeTy = nullptr;
@@ -786,6 +787,23 @@ void AliasAnalysisVisitor::visitCastInst(CastInst &I) {
 #endif
         }
     }
+    // errs() << "debugging castinst" << "\n";
+    // if(!hasPointsToObjects(&I)){
+    //     auto ptr = I.getOperand(0);
+    //     auto ptrptos = this->getPtos(&I, ptr);
+    //     auto Iptos = this->getPtos(&I, &I);
+    //     if(ptrptos && Iptos){
+    //         errs() << "size " << ptrptos->size() << "\n";
+    //         for(auto ptrpto : *ptrptos){
+    //             for(auto Ipto : *Iptos){
+    //                 if(ptrpto == Ipto){
+    //                     errs() << "Same!" << "\n";
+    //                 }
+    //             }
+    //         }
+    //     }
+        
+    // }
 }
 
     //TODO: we need to handle the potential pointer arithmetic here...
@@ -1325,6 +1343,7 @@ void AliasAnalysisVisitor::visitCastInst(CastInst &I) {
         //Have we got the parent object that can hold the resOffset?
         if (resOffset < 0 || (uint64_t)resOffset >= dl->getTypeStoreSizeInBits(pto->targetObject->targetType)) {
             //No.. We need infer the container type...
+            return -1;
 #ifdef DEBUG_GET_ELEMENT_PTR
             dbgs() << "AliasAnalysisVisitor::bit2Field(): the recorded parent object is not enough,\
             we need to infer the unknown container object...\n";
@@ -1673,7 +1692,7 @@ void AliasAnalysisVisitor::visitCastInst(CastInst &I) {
     }
 
     void AliasAnalysisVisitor::visitVACopyInst(VACopyInst &I) {
-        assert(false);
+        //assert(false);
     }
 
     //Propagate the pto records of the actual args to the formal args. 

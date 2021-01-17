@@ -39,6 +39,14 @@ using json = nlohmann::json;
 using namespace llvm;
 
 namespace DRCHECKER {
+
+
+    struct callsiteinfo{
+        std::string funcname;
+        Function* func;
+        std::string filename;
+        int linenum;
+    };
 //#define DEBUG_GLOBALS
     /***
      * Class that abstracts the context.
@@ -147,14 +155,42 @@ namespace DRCHECKER {
         //1 = preliminary phase, 2 = main analysis phase, 3 = bug detection phase.
         int analysis_phase = 0;
 
+        //Current interesting value
+        Value* basePointer;
+        int offsetfrbase;
+        Function* entryfunc;
+        Instruction* interestinginst;
+        bool taintedAllTarget = false;
 
-        GlobalState(RangeAnalysis::RangeAnalysis *ra, DataLayout *currDataLayout) {
-            this->range_analysis = ra;
+        std::set<Instruction *> visitedsites;
+
+        std::map<Instruction *, std::set<Value *>> baseptrmap;
+
+        int filecounter;
+
+        std::vector<callsiteinfo*> callsiteinfos;
+
+        std::set<Instruction*> topcallsites;
+
+        int calltracepointer;
+        int calltracebasepointer;
+
+        std::vector<Instruction *>vulsitecontext;
+
+        std::map<Value *, int> offset4baseptrs;
+
+        std::set<CallInst *> taintedindirectcalls;
+
+        //std::vector<CalltraceItem*> syzcalltrace;
+
+
+        GlobalState(DataLayout *currDataLayout) {
+            //this->range_analysis = ra;
             this->targetDataLayout = currDataLayout;
         }
 
         ~GlobalState() {
-            cleanup();
+            //cleanup();
 
         }
 
@@ -262,8 +298,8 @@ namespace DRCHECKER {
                 if (globalObjectCache.find((Value*)targetFunction) != globalObjectCache.end()) {
                     return globalObjectCache[(Value*)targetFunction];
                 }else {
-                    dbgs() << "!!! getReferencedGlobal(): Cannot find the targetFunction in the cache: "
-                    << targetFunction->getName().str() << "\n";
+                    // dbgs() << "!!! getReferencedGlobal(): Cannot find the targetFunction in the cache: "
+                    // << targetFunction->getName().str() << "\n";
                 }
             }
             if(actualGlobal != nullptr) {

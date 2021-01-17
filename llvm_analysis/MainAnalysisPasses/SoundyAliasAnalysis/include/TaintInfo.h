@@ -16,8 +16,8 @@
 #include "../../Utils/include/CFGUtils.h"
 #include <vector>
 
-#define DEBUG_UPDATE_FIELD_TAINT
-#define DEBUG_FETCH_FIELD_TAINT
+// #define DEBUG_UPDATE_FIELD_TAINT
+// #define DEBUG_FETCH_FIELD_TAINT
 
 using namespace llvm;
 namespace DRCHECKER {

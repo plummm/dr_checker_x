@@ -12,10 +12,10 @@ using namespace llvm;
 
 namespace DRCHECKER {
 
-#define DEBUG_IS_ASAN_INST
-//#define DEBUG_GET_TY_DESC
-#define DEBUG_RELATE_TYPE_NAME
-#define DEBUG_FUNCTION_PTR_RESOLVE
+// #define DEBUG_IS_ASAN_INST
+// //#define DEBUG_GET_TY_DESC
+// #define DEBUG_RELATE_TYPE_NAME
+// #define DEBUG_FUNCTION_PTR_RESOLVE
 
     bool InstructionUtils::isPointerInstruction(Instruction *I) {
         bool retVal = false;

@@ -109,8 +109,13 @@ namespace DRCHECKER {
 
         virtual void visit(BasicBlock *BB);
 
+        
+
         // main analysis function.
         void analyze();
+
+        std::set<PointerPointsTo*>* getPointsToObjects(Value *srcPointer);
+        bool hasPointsToObjects(Value *srcPointer);
     private:
         // maximum number of times a basic block can be analyzed.
         const static unsigned long MAX_NUM_TO_VISIT = 5;

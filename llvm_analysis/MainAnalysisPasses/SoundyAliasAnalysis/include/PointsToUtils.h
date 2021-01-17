@@ -7,6 +7,7 @@
 
 #include "AliasObject.h"
 #include "ModuleState.h"
+#include "Universal.h"
 
 using namespace llvm;
 namespace DRCHECKER {

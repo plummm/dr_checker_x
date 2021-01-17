@@ -9,7 +9,7 @@ using namespace llvm;
 
 namespace DRCHECKER {
 
-#define DEBUG_CREATE_HEAP_OBJ
+// #define DEBUG_CREATE_HEAP_OBJ
 
     void* AliasFuncHandlerCallback::handleAllocationFunction(CallInst &callInst, Function *targetFunction,
                                                             void *private_data) {
@@ -65,16 +65,16 @@ namespace DRCHECKER {
         if(this->targetChecker->is_kmalloc_function(targetFunction)) {
             // OK, this is kmalloc function, now check if this is kzmalloc?
             Value *kmalloc_flag = callInst.getArgOperand(1);
-            RangeAnalysis::Range flag_range = this->currState->getRange(kmalloc_flag);
-            if(flag_range.isBounded()) {
-                uint64_t lb = flag_range.getLower().getZExtValue();
-                uint64_t ub = flag_range.getUpper().getZExtValue();
-                // These are the flag values given when kzalloc is called.
-                if((lb & 0x8000) || (ub & 0x8000)) {
-                    targetObj->is_initialized = true;
-                    targetObj->initializingInstructions.insert(&callInst);
-                }
-            }
+            // RangeAnalysis::Range flag_range = this->currState->getRange(kmalloc_flag);
+            // if(flag_range.isBounded()) {
+            //     uint64_t lb = flag_range.getLower().getZExtValue();
+            //     uint64_t ub = flag_range.getUpper().getZExtValue();
+            //     // These are the flag values given when kzalloc is called.
+            //     if((lb & 0x8000) || (ub & 0x8000)) {
+            //         targetObj->is_initialized = true;
+            //         targetObj->initializingInstructions.insert(&callInst);
+            //     }
+            // }
         } else {
             targetObj->is_initialized = true;
             targetObj->initializingInstructions.insert(&callInst);

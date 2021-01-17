@@ -25,20 +25,20 @@ using namespace llvm;
 //#define DEBUG_OUTSIDE_OBJ_CREATION
 #define ENABLE_SUB_OBJ_CACHE
 #define SMART_FUNC_PTR_RESOLVE
-#define DEBUG_SMART_FUNCTION_PTR_RESOLVE
-#define DEBUG_FETCH_POINTS_TO_OBJECTS
-#define DEBUG_CHANGE_HEAPLOCATIONTYPE
-#define DEBUG_UPDATE_FIELD_POINT
-#define DEBUG_CREATE_DUMMY_OBJ_IF_NULL
-#define DEBUG_CREATE_EMB_OBJ
-#define DEBUG_CREATE_EMB_OBJ
-#define DEBUG_CREATE_HOST_OBJ
-#define DEBUG_CREATE_HOST_OBJ
-#define DEBUG_INFER_CONTAINER
-#define DEBUG_SPECIAL_FIELD_POINTTO
-#define DEBUG_SHARED_OBJ_CACHE
-#define DEBUG_OBJ_RESET
-#define DEBUG_OBJ_COPY
+// #define DEBUG_SMART_FUNCTION_PTR_RESOLVE
+// #define DEBUG_FETCH_POINTS_TO_OBJECTS
+// #define DEBUG_CHANGE_HEAPLOCATIONTYPE
+// #define DEBUG_UPDATE_FIELD_POINT
+// #define DEBUG_CREATE_DUMMY_OBJ_IF_NULL
+// #define DEBUG_CREATE_EMB_OBJ
+// #define DEBUG_CREATE_EMB_OBJ
+// #define DEBUG_CREATE_HOST_OBJ
+// #define DEBUG_CREATE_HOST_OBJ
+// #define DEBUG_INFER_CONTAINER
+// #define DEBUG_SPECIAL_FIELD_POINTTO
+// #define DEBUG_SHARED_OBJ_CACHE
+// #define DEBUG_OBJ_RESET
+// #define DEBUG_OBJ_COPY
 
 namespace DRCHECKER {
 //#define DEBUG_FUNCTION_ARG_OBJ_CREATION
@@ -736,6 +736,7 @@ namespace DRCHECKER {
             this->embObjs[fieldId] = dstObject;
             dstObject->parent = this;
             dstObject->parent_field = fieldId;
+            return true;
         }
 
         //get the outermost parent object.
@@ -1167,6 +1168,100 @@ namespace DRCHECKER {
                 this->is_taint_src = (is_global ? 1 : -1);
                 return true;
             }
+            return false;
+        }
+
+        //set some fields taint src
+        bool setAsTaintFieldSrc(InstLoc *loc, DataLayout *dl, bool is_global = true, int ofset = 0) {
+#ifdef DEBUG_UPDATE_FIELD_TAINT
+            dbgs() << "AliasObject::setAsTaintSrc(): set as taint src, obj: " << (const void*)this << "\n";
+#endif
+            Value *v = this->getValue();
+            if (v == nullptr && this->targetType == nullptr) {
+#ifdef DEBUG_UPDATE_FIELD_TAINT
+                dbgs() << "AliasObject::setAsTaintSrc(): Neither Value nor Type information available for obj: " << (const void*)this << "\n";
+#endif
+                return false;
+            }
+            // TaintTag *atag = nullptr;
+            // if (v) {
+            //     atag = new TaintTag(-1,v,is_global,(void*)this);
+            // }else {
+            //     atag = new TaintTag(-1,this->targetType,is_global,(void*)this);
+            // }
+            // //NOTE: inehrent TF is born w/ the object who might be accessed in different entry functions, so the "targetInstr" of its
+            // //inherent TF should be set to "nullptr" to indicate that it's effective globally from the very beginning, so that it can
+            // //also easily pass the taint path check when being propagated.
+            // //TODO: justify this decision.
+            // TaintFlag *atf = new TaintFlag(nullptr,false,atag);
+            // atf->is_inherent = true;
+            //if (this->addAllContentTaintFlag(atf)) {
+                //add the taint to all available fields.
+                std::set<long> allAvailableFields = this->getAllAvailableFields();
+#ifdef DEBUG_UPDATE_FIELD_TAINT
+                dbgs() << "AliasObject::setAsTaintSrc(): Updating field taint for obj: " << (const void*)this << "\n";
+#endif
+                for (auto fieldId : allAvailableFields) {
+                    if(this->targetType->isStructTy()){
+                        auto sttype = dyn_cast<StructType>(this->targetType);
+                        auto stlayout = dl->getStructLayout(sttype);
+                        if(int(stlayout->getElementOffset(fieldId)) >= ofset){
+                            TaintTag *tag = nullptr;
+                            if (v) {
+                                tag = new TaintTag(fieldId,v,is_global,(void*)this);
+                            }else {
+                                tag = new TaintTag(fieldId,this->targetType,is_global,(void*)this);
+                            }
+                            //We're sure that we want to set "this" object as the taint source, so it's a strong TF.
+                            TaintFlag *newFlag = new TaintFlag(nullptr,true,tag);
+                            newFlag->is_inherent = true;
+                            this->addFieldTaintFlag(fieldId, newFlag);
+                        }
+                    }
+                    
+#ifdef DEBUG_UPDATE_FIELD_TAINT
+                    dbgs() << "AliasObject::setAsTaintSrc(): Adding taint to: " << (const void*)this << " | " << fieldId << "\n";
+#endif
+                }
+
+                // for(auto tfdd : this->taintedFields){
+                //     errs() << tfdd->fieldId << "\n";
+                //     for(auto tfdi : tfdd->targetTaint){
+                //         if(tfdi->isTainted()){
+                //             errs() << "tainted" << "\n";
+                //         }
+                //     }
+                // }
+                // if(this->targetType->isStructTy()){
+                //     errs() << "This obj type is: " << this->targetType->getStructName().str() << "\n";
+                // }
+                
+
+                // if(this->embObjs.size() > 0){
+                //     errs() << "has embobjs!" << "\n";
+                //     errs() << "this obj has: " << this->embObjs.size() << "\n";
+                //     for(auto embobj : this->embObjs){
+                //         errs() << "Their types are: " << embobj.second->targetType->getStructName().str() << "\n";
+                //     }
+                // }
+                
+
+                if(ofset < 0){
+                    errs() << "offset is negative!" << "\n";
+                    if(this->parent && this->parent->targetType->isStructTy()){
+                        auto stlayout = dl->getStructLayout(dyn_cast<StructType>(this->parent->targetType));
+                        auto offsetbyparent = stlayout->getElementOffset(this->parent_field);
+                        auto taintoffsetobyparent = int(offsetbyparent) + ofset;
+                        this->parent->setAsTaintFieldSrc(loc, dl, true, taintoffsetobyparent);
+                        // errs() << "has parent! " << "\n";
+                        // if(this->parent->embObjs.size() > 0){
+                        //     errs() << "parent has: " << this->parent->embObjs.size() << " emb objs!" << "\n";
+                        // }
+                    }
+                }
+                //this->is_taint_src = (is_global ? 1 : -1);
+                return true;
+            //}
             return false;
         }
 

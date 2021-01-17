@@ -9,12 +9,12 @@ namespace DRCHECKER {
     Function *currEntryFunc = nullptr;
 
     bool validTyForOutsideObj(Type *ty) {
-        if (!ty || !dyn_cast<CompositeType>(ty)) {
-#ifdef DEBUG_CREATE_DUMMY_OBJ_IF_NULL
-            dbgs() << "validTyForOutsideObj(): it's not a composite type, cannot create the outside obj!\n";
-#endif
-            return false;
-        }
+//         if (!ty || !dyn_cast<CompositeType>(ty)) {
+// #ifdef DEBUG_CREATE_DUMMY_OBJ_IF_NULL
+//             dbgs() << "validTyForOutsideObj(): it's not a composite type, cannot create the outside obj!\n";
+// #endif
+//             return false;
+//         }
         if (InstructionUtils::isNullCompTy(ty)) {
 #ifdef DEBUG_CREATE_DUMMY_OBJ_IF_NULL
             dbgs() << "validTyForOutsideObj(): it's an opaque struct type or null composite type, cannot create the outside obj!\n";
@@ -46,7 +46,7 @@ namespace DRCHECKER {
         if (!newObj) {
             return;
         }
-        /*
+        
         //TODO: we need to re-consider whether to propagate the host field TF (inherent or not or both?) 
         //to the new dummy pointee obj, consider the case where a "store" assigns the address of a real 
         //obj to the host field - in that situation we actually wouldn't propagate the host field TFs.
@@ -69,12 +69,12 @@ namespace DRCHECKER {
             //NOTE: "is_weak" is inherited.
             newObj->taintAllFields(ntf);
         }
-        */
+        
         //If the host object is a global taint source, then we also set the newly created field pointee object as so.
         //TODO: justify this decision.
-        if (this->is_taint_src) {
-            newObj->setAsTaintSrc(targetInstr,(this->is_taint_src > 0));
-        }
+        // if (this->is_taint_src) {
+        //     newObj->setAsTaintSrc(targetInstr,(this->is_taint_src > 0));
+        // }
     }
 
     Type *getLoadedPointeeTy(Instruction *targetInstr) {
@@ -836,12 +836,12 @@ namespace DRCHECKER {
             return nullptr;
         }
         //Don't create OutsideObject for null ptr.
-        if (p->getName().str().empty() && !dyn_cast<Instruction>(p)){
-#ifdef DEBUG_CREATE_DUMMY_OBJ_IF_NULL
-            dbgs() << "createOutsideObj(): Null value name! Cannot create an outside object!\n";
-#endif
-            return nullptr;
-        }
+//         if (p->getName().str().empty() && !dyn_cast<Instruction>(p)){
+// #ifdef DEBUG_CREATE_DUMMY_OBJ_IF_NULL
+//             dbgs() << "createOutsideObj(): Null value name! Cannot create an outside object!\n";
+// #endif
+//             return nullptr;
+//         }
 #ifdef DEBUG_CREATE_DUMMY_OBJ_IF_NULL
         dbgs() << "createOutsideObj(): Try to create new outside object.\n";
 #endif

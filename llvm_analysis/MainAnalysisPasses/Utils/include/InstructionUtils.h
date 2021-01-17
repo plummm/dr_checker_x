@@ -23,7 +23,7 @@
 #include <ctime>
 #include "../../SoundyAliasAnalysis/include/ResType.h"
 
-#define TIMING
+//#define TIMING
 
 using namespace llvm;
 

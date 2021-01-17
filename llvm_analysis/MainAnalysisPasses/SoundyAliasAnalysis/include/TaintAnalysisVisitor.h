@@ -15,6 +15,8 @@ using namespace llvm;
 
 namespace DRCHECKER {
 
+    
+
     //#define CONTROL_TAINT
 
     /***
@@ -62,6 +64,8 @@ namespace DRCHECKER {
             dbgs() << "TaintAnalysisVisitor: Visit(): " << InstructionUtils::getValueStr(&I) << "\n";
 #endif
         }
+
+        void debugInstTaint(Instruction &I);
 
         virtual void visitBinaryOperator(BinaryOperator &I);
 
