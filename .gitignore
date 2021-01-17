@@ -30,3 +30,8 @@ Icon
 Network Trash Folder
 Temporary Items
 .apdisk
+
+build/
+.gitignore
+.vscode/
+*CMakeLists.txt
