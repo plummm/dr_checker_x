@@ -9,10 +9,15 @@
 #include "VisitorCallback.h"
 #include "TaintInfo.h"
 #include <FunctionChecker.h>
+#include "../../Utils/include/CFGUtils.h"
 
 using namespace llvm;
 
 namespace DRCHECKER {
+
+    
+
+    //#define CONTROL_TAINT
 
     /***
      * The main class that implements the taint propagation for all the relevant
@@ -56,11 +61,11 @@ namespace DRCHECKER {
 
         virtual void visit(Instruction &I) {
 #ifdef DEBUG_TAINT_INSTR_VISIT
-            dbgs() << "Visiting instruction(In TaintAnalysis):";
-            I.print(dbgs());
-            dbgs() << "\n";
+            dbgs() << "TaintAnalysisVisitor: Visit(): " << InstructionUtils::getValueStr(&I) << "\n";
 #endif
         }
+
+        void debugInstTaint(Instruction &I);
 
         virtual void visitBinaryOperator(BinaryOperator &I);
 
@@ -92,6 +97,15 @@ namespace DRCHECKER {
 
         virtual void visitICmpInst(ICmpInst &I);
 
+#ifdef CONTROL_TAINT
+        //hz: add new instruction support to taint analysis.
+        virtual void visitBranchInst(BranchInst &I);
+
+        //virtual void visitIndirectBrInst(IndirectBrInst &I);
+
+        virtual void visitSwitchInst(SwitchInst &I);
+#endif
+
     private:
         /***
          * Get the set of taint flags of the provided value.
@@ -99,6 +113,14 @@ namespace DRCHECKER {
          * @return Set of taint flags of the provided value.
          */
         std::set<TaintFlag*>* getTaintInfo(Value *targetVal);
+
+        /***
+         *
+         * @param targetVal
+         * @param retTaintFlag
+         * @param I
+         */
+        void getPtrTaintInfo(Value *targetVal, std::set<TaintFlag*> &retTaintFlag, Instruction *I);
 
         /***
          * Update the taint information of the provided value by the the set of flags.
@@ -114,7 +136,7 @@ namespace DRCHECKER {
          * @param srcVals values whose taint values need to be merged.
          * @return Set of new taint flags
          */
-        std::set<TaintFlag*> *mergeTaintInfo(std::set<Value *> &srcVals, Value *targetInstr);
+        std::set<TaintFlag*> *mergeTaintInfo(std::set<Value*> &srcVals, Instruction *targetInstr);
 
 
         /***
@@ -123,14 +145,7 @@ namespace DRCHECKER {
          * @param newTaintInfo set of taint flag to which the new taint flag should be added.
          * @param newTaintFlag new taint flag that needs to be added.
          */
-        static void addNewTaintFlag(std::set<TaintFlag*> *newTaintInfo, TaintFlag *newTaintFlag);
-
-        /***
-         * Propogate taint to the provided arguments according to their index.
-         * @param taintedArgs list containing indexes of tainted arguments.
-         * @param I Call instruction responsible for this operation.
-         */
-        void propogateTaintToArguments(std::set<long> &taintedArgs, CallInst &I);
+        static int addNewTaintFlag(std::set<TaintFlag*> *newTaintInfo, TaintFlag *newTaintFlag);
 
         /***
          * Propagate taint to the arguments of a memcpy function.
@@ -165,10 +180,17 @@ namespace DRCHECKER {
          * @param dstTaintInfo [optional] set to which the copied taint info needs to be added
          * @return pointer to the newly created or provided via dstTaintInfo set of taint info
          */
-        std::set<TaintFlag*>* makeTaintInfoCopy(Value *srcOperand, Instruction *targetInstruction,
-                                                std::set<TaintFlag*>* srcTaintInfo,
+        std::set<TaintFlag*> *makeTaintInfoCopy(Instruction *targetInstruction, std::set<TaintFlag*>* srcTaintInfo, 
                                                 std::set<TaintFlag*> *dstTaintInfo = nullptr);
 
+        std::set<TaintFlag*> *makeTaintInfoCopy(Instruction *targetInstruction, TaintFlag *srcTaintFlag, 
+                                                std::set<TaintFlag*> *dstTaintInfo = nullptr);
+
+        std::set<TaintFlag*> *getTFs(Value *v);
+
+        std::set<PointerPointsTo*> *getPtos(Value *srcPointer); 
+        
+        InstLoc *makeInstLoc(Value *v);
 
     };
 }

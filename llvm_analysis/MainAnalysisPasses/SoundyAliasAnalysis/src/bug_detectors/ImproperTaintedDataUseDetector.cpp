@@ -1,6 +1,7 @@
 //
 // Created by machiry on 1/30/17.
 //
+#include <llvm/IR/Operator.h>
 #include "bug_detectors/ImproperTaintedDataUseDetector.h"
 #include "bug_detectors/warnings/ImproperTaintedDataUseWarning.h"
 #include "PointsToUtils.h"
@@ -9,6 +10,7 @@ using namespace llvm;
 
 namespace DRCHECKER {
 //#define DEBUG_KERNEL_MEMORY_LEAK_DETECTOR
+#define ONLY_ONE_WARNING
 
     VisitorCallback* ImproperTaintedDataUseDetector::visitCallInst(CallInst &I, Function *targetFunction,
                                                                    std::vector<Instruction *> *oldFuncCallSites,
@@ -27,7 +29,7 @@ namespace DRCHECKER {
                 // if this is a copy_from_user method?
                 // check if dst object is a heap object
                 Value *sizeArg = I.getArgOperand(2);
-                Range sizeRange = this->currState.getRange(sizeArg);
+                RangeAnalysis::Range sizeRange = this->currState.getRange(sizeArg);
                 if(sizeRange.isBounded()) {
                     std::set<Value *> toCheck;
                     toCheck.clear();
@@ -59,7 +61,7 @@ namespace DRCHECKER {
                         // a malloced object which is not bounded i.e whose size can vary.
                         for(AliasObject *currObj:allObjects) {
                             if(currObj->isHeapObject()) {
-                                Range currObjRange = this->currState.getRange(currObj->getAllocSize());
+                                RangeAnalysis::Range currObjRange = this->currState.getRange(currObj->getAllocSize());
                                 if(!currObjRange.isBounded()) {
                                     allInterestingObjects.insert(currObj);
                                 }
@@ -68,13 +70,15 @@ namespace DRCHECKER {
                     }
 
                     // OK. Raise warning for each of the objects in allInterestingObjects.
-                    for (AliasObject *currObj:allInterestingObjects) {
+                    for (AliasObject *currObj : allInterestingObjects) {
                         std::string warningMsg = "Constant size used to copy into object allocated "
                                                  "with non-constant size";
                         if(this->currState.is_read_write_function) {
                             warningMsg = "Constant size used in file read/write function";
                         }
-                        std::vector<Instruction *> instructionTrace;
+                        //NOTE: this warning has nothing to do w/ the taint analysis, so no need to include the taint trace
+                        //actually we don't have taint trace information in this detector as well...
+                        std::vector<InstLoc*> instructionTrace;
 
                         VulnerabilityWarning *currWarning = new ImproperTaintedDataUseWarning(
                                                                 currObj->getObjectPtr(),
@@ -86,6 +90,7 @@ namespace DRCHECKER {
                         if(this->warnedInstructions.find(&I) == this->warnedInstructions.end()) {
                             this->warnedInstructions.insert(&I);
                         }
+
                     }
                 }
 
@@ -104,8 +109,8 @@ namespace DRCHECKER {
                     std::string sscanfFunc("sscanf");
 
                     //kstrto functions
-                    std::string kstrtoFunc("kstrto");
-                    std::string simple_strto("simple_strto");
+                    //std::string kstrtoFunc("kstrto");
+                    //std::string simple_strto("simple_strto");
 
                     std::set<Value *> toCheck;
                     toCheck.clear();
@@ -128,57 +133,95 @@ namespace DRCHECKER {
                             }
                         }
                     }
-                    if ((funcName.compare(0, sscanfFunc.length(), sscanfFunc) == 0) ||
+                    if ((funcName.compare(0, sscanfFunc.length(), sscanfFunc) == 0) /*||
                         (funcName.compare(0, kstrtoFunc.length(), kstrtoFunc) == 0) ||
-                        (funcName.compare(0, simple_strto.length(), simple_strto) == 0) ) {
+                        (funcName.compare(0, simple_strto.length(), simple_strto) == 0)*/ ) {
                         // this is sscanf function. or
                         // kstr function
                         // first argument is the pointer to be checked.
 
                         toCheck.insert(I.getArgOperand(0));
-                    }
 
-                    std::set<AliasObject *> allObjects;
-                    allObjects.clear();
-                    for (auto currVal:toCheck) {
-                        PointsToUtils::getAllAliasObjects(this->currState, oldFuncCallSites, currVal, allObjects);
-                    }
-
-#ifdef DEBUG_KERNEL_MEMORY_LEAK_DETECTOR
-                dbgs() << TAG << ", Got:" << allObjects.size() << " that the src pointer can point to \n";
-#endif
-
-                    // This is a pointer, so get all objects that this can point to
-                    for(auto currObj:allObjects) {
-                        currObj->getAllPointsToObj(allObjects);
-                    }
-
-                    // check if any value in toCheck is tainted, if yes.
-                    // raise a warning.
-
-                    for (AliasObject *currObj:allObjects) {
-                        if (currObj->all_contents_tainted) {
-                            std::string warningMsg = "Tainted Data used in risky function";
-                            std::vector<Instruction *> instructionTrace;
-                            VulnerabilityWarning *currWarning = new ImproperTaintedDataUseWarning(
-                                    currObj->getObjectPtr(),
-                                    this->currFuncCallSites1,
-                                    &instructionTrace,
-                                    warningMsg, &I,
-                                    TAG);
-                            this->currState.addVulnerabilityWarning(currWarning);
-                            if(this->warnedInstructions.find(&I) == this->warnedInstructions.end()) {
-                                this->warnedInstructions.insert(&I);
+                        Value *formatString = I.getArgOperand(1);
+                        llvm::GlobalVariable *targetGlobal =dyn_cast<llvm::GlobalVariable>(formatString);
+                        if(targetGlobal == nullptr) {
+                            GEPOperator *gep = dyn_cast<GEPOperator>(formatString);
+                            if (gep && gep->getNumOperands() > 0 && gep->getPointerOperand()) {
+                                formatString = gep->getPointerOperand();
+                                targetGlobal =dyn_cast<llvm::GlobalVariable>(formatString);
                             }
-                        } else {
-#ifdef DEBUG_KERNEL_MEMORY_LEAK_DETECTOR
-                            dbgs() << TAG << "Ignoring object:" << *currObj->getObjectPtr()
-                                            << ", as its contents are not fully tainted\n";
+                        }
+                        if(targetGlobal != nullptr && targetGlobal->hasInitializer()) {
+                            const Constant *currConst = targetGlobal->getInitializer();
+                            if(dyn_cast<ConstantDataArray>(currConst)) {
+                                const ConstantDataArray *currA = dyn_cast<ConstantDataArray>(currConst);
+                                if(currA->getAsString().find("%s") != std::string::npos) {
+                                    std::string warningMsg = "%s used in sscanf";
+                                    //NOTE: this warning has nothing to do w/ taint anlysis, no need to provide the taint trace.
+                                    std::vector<InstLoc*> instructionTrace;
+                                    VulnerabilityWarning *currWarning = new VulnerabilityWarning(
+                                            this->currFuncCallSites1,
+                                            &instructionTrace,
+                                            warningMsg,
+                                            &I,
+                                            "DangerousFormatSpecifier says:");
+                                    this->currState.addVulnerabilityWarning(currWarning);
+#ifdef ONLY_ONE_WARNING
+                                    return nullptr;
+
 #endif
+                                } else {
+                                    return nullptr;
+                                }
+                            }
                         }
                     }
 
+                    //Check whether the src arg of the risky string functions is tainted, e.g. strcpy(dst,src).
+                    std::set<PointerPointsTo*> currValPointsTo;
+                    for(auto currVal:toCheck) {
+                        std::set<PointerPointsTo*> *currPtsTo = PointsToUtils::getPointsToObjects(this->currState, oldFuncCallSites, currVal);
+                        if(currPtsTo != nullptr) {
+                            currValPointsTo.insert(currPtsTo->begin(), currPtsTo->end());
+                        }
+                    }
 
+                    for(PointerPointsTo *currPtTo : currValPointsTo) {
+                        if (!currPtTo || !currPtTo->targetObject) {
+                            continue;
+                        }
+                        std::set<TaintFlag*> currTaintSet;
+                        currPtTo->targetObject->getFieldTaintInfo(currPtTo->dstfieldId,currTaintSet,new InstLoc(&I,this->currFuncCallSites1));
+                        if (currTaintSet.size()) {
+                            for(TaintFlag *currTaint : currTaintSet) {
+                                if (!currTaint) {
+                                    continue;
+                                }
+                                std::set<std::vector<InstLoc*>*> tchains;
+                                this->currState.getAllUserTaintChains(currTaint,tchains);
+                                if (tchains.empty()) {
+                                    //No taint from user inputs.
+                                    continue;
+                                }
+                                std::string warningMsg = "Tainted Data used in risky function";
+                                std::vector<InstLoc*> &instructionTrace = currTaint->instructionTrace;
+                                VulnerabilityWarning *currWarning = new ImproperTaintedDataUseWarning(
+                                        currPtTo->targetObject->getObjectPtr(),
+                                        this->currFuncCallSites1,
+                                        &tchains,
+                                        warningMsg, &I,
+                                        TAG);
+                                this->currState.addVulnerabilityWarning(currWarning);
+                                if (this->warnedInstructions.find(&I) == this->warnedInstructions.end()) {
+                                    this->warnedInstructions.insert(&I);
+                                }
+#ifdef ONLY_ONE_WARNING
+                                break;
+
+#endif
+                            }
+                        }
+                    }
             }
         } else {
             // only if the function has source.

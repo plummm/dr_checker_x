@@ -1,0 +1,53 @@
+# We don't need the bug detectors, so remove them from the build process and save some port time...
+
+include_directories(include/ ../Utils/include ../Customizations/include ../LinuxKernelCustomizations/include
+        ../RangeAnalysis/include)
+
+file(GLOB SAA_SRCS
+        "src/*.cpp"
+        "include/*.h"
+        )
+
+add_library(SoundyAliasAnalysis MODULE
+        # List your source files here.
+        ${SAA_SRCS}) 
+
+add_library(SoundyAliasAnalysisStatic STATIC
+        # List your source files here.
+        ${SAA_SRCS}) 
+
+
+target_link_libraries(SoundyAliasAnalysis Utils Customizations LinuxKernelCustomizations RangeAnalysis)
+
+target_link_libraries(SoundyAliasAnalysisStatic Utils Customizations LinuxKernelCustomizations RangeAnalysis)
+
+# Use C++11 to compile our pass (i.e., supply -std=c++11).
+target_compile_features(SoundyAliasAnalysis PRIVATE cxx_range_for cxx_auto_type)
+
+target_compile_features(SoundyAliasAnalysisStatic PRIVATE cxx_range_for cxx_auto_type)
+
+set_target_properties(SoundyAliasAnalysisStatic
+        PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+# LLVM is (typically) built with no C++ RTTI. We need to match that;
+# otherwise, we'll get linker errors about missing RTTI data.
+set_target_properties(SoundyAliasAnalysis PROPERTIES
+    COMPILE_FLAGS "-g -fno-rtti"
+)
+
+set_target_properties(SoundyAliasAnalysisStatic PROPERTIES
+        COMPILE_FLAGS "-g -fno-rtti"
+        )
+
+# Get proper shared-library behavior (where symbols are not necessarily
+# resolved when the shared library is linked) on OS X.
+if(APPLE)
+    set_target_properties(SoundyAliasAnalysis PROPERTIES
+        LINK_FLAGS "-undefined dynamic_lookup"
+    )
+    set_target_properties(SoundyAliasAnalysisStatic PROPERTIES
+            LINK_FLAGS "-undefined dynamic_lookup"
+            )
+endif(APPLE)
+
+

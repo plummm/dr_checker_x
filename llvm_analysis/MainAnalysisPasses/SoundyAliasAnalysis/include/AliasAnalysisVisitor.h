@@ -5,12 +5,16 @@
 #ifndef PROJECT_ALIASANALYSISVISITOR_H
 #define PROJECT_ALIASANALYSISVISITOR_H
 
+#include "AliasObject.h"
 #include "ModuleState.h"
 #include "CFGUtils.h"
+#include "InstructionUtils.h"
 #include "VisitorCallback.h"
 #include <FunctionChecker.h>
+#include <llvm/IR/Operator.h>
+#include "TaintUtils.h"
 
-
+//#define DEBUG_ALIAS_INSTR_VISIT
 using namespace llvm;
 
 namespace DRCHECKER {
@@ -58,13 +62,16 @@ namespace DRCHECKER {
 
         virtual void setLoopIndicator(bool inside_loop);
 
+        /*
         virtual void visit(Instruction &I) {
 #ifdef DEBUG_ALIAS_INSTR_VISIT
-                dbgs() << "Visiting instruction(In AliasAnalysis):";
+            dbgs() << "Visiting instruction(In AliasAnalysis):";
             I.print(dbgs());
             dbgs() << "\n";
 #endif
         }
+        */
+
 
         // Implement the visitors
 
@@ -76,6 +83,7 @@ namespace DRCHECKER {
         virtual void visitLoadInst(LoadInst &I);
         virtual void visitStoreInst(StoreInst &I);
         virtual void visitGetElementPtrInst(GetElementPtrInst &I);
+        Value* visitGetElementPtrOperator(Instruction *I,GEPOperator *gep);
 
         // Allocator instructions.
         virtual void visitAllocaInst(AllocaInst &I);
@@ -114,12 +122,17 @@ namespace DRCHECKER {
          * @return Pointer to the set of objects to which the provided pointer points to.
          */
         std::set<PointerPointsTo*>* getPointsToObjects(Value *srcPointer);
+        bool isPtoDuplicated(const PointerPointsTo *p0, const PointerPointsTo *p1, bool dbg);
+        int matchPtoTy(Value *srcPointer, PointerPointsTo *pto, Instruction *I = nullptr, bool create_host = true);
+        int matchPtoTy(Type *srcTy, PointerPointsTo *pto, Instruction *I = nullptr, bool create_host = true);
         /***
          * Update points to information for the provided pointer.
          * @param srcPointer pointer whose points to information need to be updated.
          * @param newPointsToInfo the set of points to information for the provided pointer.
          */
-        void updatePointsToObjects(Value *srcPointer, std::set<PointerPointsTo*>* newPointsToInfo);
+        void updatePointsToObjects(Value *srcPointer, std::set<PointerPointsTo*>* newPointsToInfo, bool free);
+        //This is a wrapper for the single pto case.
+        void updatePointsToObjects(Value *p, AliasObject *obj, InstLoc *propInst = nullptr, long dfid = 0, bool is_weak = false);
         /***
          * This function checks if the provided pointer has points to information.
          * @param srcPointer Pointer which needs to be checked for points to information.
@@ -137,7 +150,12 @@ namespace DRCHECKER {
          * @return Set of new points to information.
          */
         std::set<PointerPointsTo*>* makePointsToCopy(Instruction *propInstruction, Value *srcPointer,
-                                                     std::set<PointerPointsTo*>* srcPointsTo, unsigned long fieldId);
+                                                     std::set<PointerPointsTo*>* srcPointsTo, long fieldId);
+
+        std::set<PointerPointsTo*>* makePointsToCopy_emb(Instruction *propInstruction, Value *srcPointer, Value *resPointer,
+                                                     std::set<PointerPointsTo*>* srcPointsTo, long fieldId);
+
+        AliasObject *createEmbObj(AliasObject *hostObj, long fid, Value *v, Instruction *I = nullptr);
 
         /***
          * Merge points-to information of all the provided values.
@@ -175,7 +193,32 @@ namespace DRCHECKER {
          */
         void handleMemcpyFunction(std::vector<long> &memcpyArgs, CallInst &I);
 
-        void handleInlinePointerOperand(Instruction &currIns, Value **srcPointer);
+        void handleMemdupFunction(CallInst &I);
+
+        AliasObject *getObj4Copy(PointerPointsTo *pto, CompositeType *ty, Instruction &I);
+
+        PointerPointsTo *copyObj(Value *dstPointer, PointerPointsTo *srcPto, Type *ty, Instruction &propInst);
+
+        Type *getMemcpySrcTy(CallInst &I);
+
+        void handleFdCreationFunction(std::map<long,long> &fdFieldMap, Function *currFunc, CallInst &I);
+
+        //cfu: copy_from_user
+        void handleCfuFunction(std::set<long> &taintedArgs, CallInst &I);
+
+        Value *handleInlinePointerOp(Instruction *I, Value *srcPointer);
+
+        std::set<PointerPointsTo*> *getPtos(Instruction *I, Value *srcPointer, bool create_dummy = false, bool taint = false); 
+
+        //hz: A helper method to create and (taint) a new OutsideObject.
+        OutsideObject* createOutsideObj(Value *p, Instruction *I, bool taint);
+
+        void processMultiDimensionGEP(Instruction *propInst, GEPOperator *I, std::set<PointerPointsTo*> *srcPointsTo);
+
+        //Process the 1st index of the GEP, return the resulted points-to.
+        std::set<PointerPointsTo*> *processGEPFirstDimension(Instruction *propInst, GEPOperator *I);
+
+        int bit2Field(Instruction *propInst, GEPOperator *I, PointerPointsTo *pto, unsigned bitWidth, long index);
     };
 
 }

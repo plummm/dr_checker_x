@@ -25,8 +25,17 @@ namespace DRCHECKER {
         Value *targetObj;
 
         ImproperTaintedDataUseWarning(Value *targetObj, std::vector<Instruction*> *callTrace,
-                                      std::vector<Instruction*> *srcTrace, std::string warningMsg,
+                                      std::vector<InstLoc*> *srcTrace, std::string warningMsg,
                                       Instruction *targetInstr, std::string found_by): VulnerabilityWarning(callTrace, srcTrace, warningMsg,
+                                                                                                            targetInstr, found_by) {
+            // Just make sure, we are leaking something.
+            assert(targetObj != nullptr);
+            this->targetObj = targetObj;
+        }
+
+        ImproperTaintedDataUseWarning(Value *targetObj, std::vector<Instruction*> *callTrace,
+                                      std::set<std::vector<InstLoc*>*> *srcTraces, std::string warningMsg,
+                                      Instruction *targetInstr, std::string found_by): VulnerabilityWarning(callTrace, srcTraces, warningMsg,
                                                                                                             targetInstr, found_by) {
             // Just make sure, we are leaking something.
             assert(targetObj != nullptr);

@@ -28,12 +28,13 @@ namespace DRCHECKER {
         GlobalState &currState;
         Function *targetFunction;
         // context of the analysis, basically list of call sites
-        std::vector<Instruction *> *currFuncCallSites;
+        std::vector<Instruction*> *currFuncCallSites;
         FunctionChecker *targetChecker;
 
         TaintedSizeDetector(GlobalState &targetState, Function *toAnalyze,
                             std::vector<Instruction *> *srcCallSites,
                             FunctionChecker *currChecker): currState(targetState) {
+            dbgs() << "Create a TaintedSizeDetector: #ctx: " << (srcCallSites ? srcCallSites->size() : -1) << "\n";
             this->targetFunction = toAnalyze;
             this->currFuncCallSites = srcCallSites;
             this->targetChecker = currChecker;

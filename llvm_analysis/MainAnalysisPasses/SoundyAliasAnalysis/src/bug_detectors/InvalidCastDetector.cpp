@@ -47,10 +47,10 @@ namespace DRCHECKER {
             for(AliasObject *currObj:targetObjects) {
                 // check for each object, if the casting is valid.
                 Value *targetAllocSize = currObj->getAllocSize();
-                std::vector<Instruction *> targetTrace;
+                std::vector<InstLoc*> targetTrace;
                 if(targetAllocSize != nullptr) {
                     // Dynamically created object.
-                    Range targetRange = this->currState.getRange(targetAllocSize);
+                    RangeAnalysis::Range targetRange = this->currState.getRange(targetAllocSize);
                     if(!targetRange.isBounded() || targetRange.getLower() != targetRange.getUpper()) {
                         // raise a warning: Potentially tainted size.
                         // TODO: handle taint flag and check that the taint introducing instruction

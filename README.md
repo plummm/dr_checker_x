@@ -3,18 +3,27 @@ DR.CHECKER : A Soundy Vulnerability Detection Tool for Linux Kernel Drivers
 
 [![License](https://img.shields.io/github/license/angr/angr.svg)](https://github.com/ucsb-seclab/dr_checker/blob/master/LICENSE)
 
-This repo contains all the sources, including setup scripts.
+![warning](https://raw.githubusercontent.com/ucsb-seclab/dr_checker/speedy/images/warning.png)
+
+This repo contains all the sources, including setup scripts. 
+Now with an Amazing UI to view the warnings along with corresponding source files.
 ### Tested on
 Ubuntu >= 14.04.5 LTS
+### Announcements
+**16 Feb 2018**:
+* DR.CHECKER has been dockerized. Refer [Docker Usage](https://github.com/ucsb-seclab/dr_checker/blob/speedy/docs/docker.md) on how to use it.
 
 ## [Frequently Asked Questions](https://github.com/ucsb-seclab/dr_checker/blob/master/docs/faq.md)
+
+## 0. Using Dockerized Setup (Recommended)
+Refer the [Docker Usage](https://github.com/ucsb-seclab/dr_checker/blob/speedy/docs/docker.md) document for details on how to use DR.CHECKER in a pre-built docker container.
 
 ## 1. Setup
 Our implementation is based on LLVM, specifically LLVM 3.8. We also need tools like `c2xml` to parse headers.
 
-First, make sure that you have libxml (required for c2xml):
+First, make sure that you have cmake (used by setup/build scripts) and libxml (required for c2xml):
 ```
-sudo apt-get install libxml2-dev
+sudo apt-get install cmake libxml2-dev
 ```
 
 Next, We have created a single script, which downloads and builds all the required tools.
@@ -25,7 +34,7 @@ usage: setup_drchecker.py [-h] [-b TARGET_BRANCH] [-o OUTPUT_FOLDER]
 
 optional arguments:
   -h, --help        show this help message and exit
-  -b TARGET_BRANCH  Branch (i.e version) of the LLVM to setup. Default:
+  -b TARGET_BRANCH  Branch (i.e. version) of the LLVM to setup. Default:
                     release_38 e.g., release_38
   -o OUTPUT_FOLDER  Folder where everything needs to be setup.
 
@@ -57,7 +66,7 @@ make V=1 O=out ARCH=arm64 > makeout.txt 2>&1
 ```
 NOTE: DO NOT USE MULTIPLE PROCESSES i.e., `-j`. Running in multi-processing mode will mess up the output file as multiple process try to write to the output file.
 
-Thats it. DR.CHECKER will take care from here.
+That's it. DR.CHECKER will take care from here.
 ### 3.2 Running DR.CHECKER analysis
 There are several steps to run DR.CHECKER analysis, all these steps are wrapped in a single script `helper_scripts/runner_scripts/run_all.py`
 How to run:
@@ -89,7 +98,7 @@ optional arguments:
 ```
 The script builds, links and runs DR.CHECKER on all the drivers, as such might take **considerable time(45 min-90 min)**. If you want to run DR.CHECKER manually on individual drivers, refer [standalone](https://github.com/ucsb-seclab/dr_checker/tree/master/docs/standalone.md)
 
-The above script performs following tasks in a multiprocesser mode to make use of all CPU cores:
+The above script performs following tasks in a multiprocessor mode to make use of all CPU cores:
 #### 3.2.1. LLVM Build 
 * Enabled by default.
 
@@ -124,7 +133,7 @@ To skip: `-ske`
 #### 3.2.5.Run Soundy Analysis on all the identified entry points.
 * Enabled by default.
 
-This step will run DR.CHEKER on all the entry points in the file `entry_point_out.txt`. The output for each entry point will be stored in the folder provided for option `-f`.
+This step will run DR.CHECKER on all the entry points in the file `entry_point_out.txt`. The output for each entry point will be stored in the folder provided for option `-f`.
 
 To skip: `-ski`
 #### 3.2.6 Example:
@@ -152,7 +161,15 @@ cd <repo_path>/helper_scripts/runner_scripts
 
 python run_all.py -l ~/mediatek_kernel/llvm_bitcode_out -a 1 -m ~/mediatek_kernel/kernel-3.18/makeout.txt -g aarch64-linux-android-gcc -n 2 -o ~/mediatek_kernel/kernel-3.18/out -k ~/mediatek_kernel/kernel-3.18 -f ~/mediatek_kernel/dr_checker_out
 ```
-The above command takes quite **some time (30 min - 1hr)**, all the analysis results will be in the folder: `~/mediatek_kernel/dr_checker_out`, for each entry point a `.json` file will be created which contains all the warnings in JSON format.
+The above command takes quite **some time (30 min - 1hr)**.
+##### 3.2.6.3 Understanding the output
+First, all the analysis results will be in the folder: **`~/mediatek_kernel/dr_checker_out` (argument given to the option `-f`)**, for each entry point a `.json` file will be created which contains all the warnings in JSON format. These `json` files contain warnings organized by contexts. 
+
+Second, The folder **`~/mediatek_kernel/dr_checker_out/instr_warnings` (w.r.t argument given to the option `-f`)** contains warnings organized by instruction location.
+
+These warnings could be analyzed using our [Visualizer](https://github.com/ucsb-seclab/dr_checker/tree/speedy/visualizer).
+
+Finally, a summary of all the warnings for each entry point organized by the type will be written to the output CSV file: **`~/mediatek_kernel/dr_checker_out/warnings_stats.csv` (w.r.t argument given to the option `-f`)**.
 
 #### 3.2.7 Things to note:
 ##### 3.2.7.1 Value for option `-g`
@@ -175,11 +192,17 @@ This is the path of the folder provided to the option `O=` for `make` command du
 
 Not all kernels need a separate out path. You may build kernel by not providing an option `O`, in which case you SHOULD NOT provide value for that option while running `run_all.py`.
 
-### 3.2 Post-processing DR.CHECKER results
+### 3.3 Visualizing DR.CHECKER results :snowflake:
+We provide a web-based UI to view all the warnings. Please refer [Visualization](https://github.com/ucsb-seclab/dr_checker/tree/speedy/visualizer).
+
+### 3.6 Disabling Vulnerability checkers
+You can disable one or more vulnerability checkers by uncommenting the corresponding `#define DISABLE_*` lines in [BugDetectorDriver.cpp](https://github.com/ucsb-seclab/dr_checker/blob/speedy/llvm_analysis/MainAnalysisPasses/SoundyAliasAnalysis/src/bug_detectors/BugDetectorDriver.cpp#L19)
+
+### 3.5 Post-processing DR.CHECKER results
 To your liking, we also provide a script to post-process the results. [Check it out](https://github.com/ucsb-seclab/dr_checker/blob/master/docs/postprocessing.md).
 
 Have fun!!
 
 ## 4. Contact
-Aravind Machiry (machiry@cs.ucsb.edu)
-
+* Slack: [JOIN SLACK CHANNEL](https://join.slack.com/t/driverchecking/shared_invite/enQtNDI3NDgyOTI4MTM1LTk3NTc4OWIxZTQyZjljNzkzMGM4YjczZjI4OTY0ODgyMmY1MWZmM2ZhZGM2OWY0NTMwOWQ5MmZjNzExMTQwODQ)
+* Aravind Machiry (machiry@cs.ucsb.edu)

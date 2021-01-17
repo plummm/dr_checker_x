@@ -3,11 +3,12 @@
 //
 
 #include "PointsToUtils.h"
+#include "../../Utils/include/InstructionUtils.h"
 
 using namespace llvm;
 
 namespace DRCHECKER {
-//#define DEBUG_FUNCTION_PTR_ALIASING
+// #define DEBUG_FUNCTION_PTR_ALIASING
 
     std::set<PointerPointsTo*>* PointsToUtils::getPointsToObjects(GlobalState &currState,
                                                                   std::vector<Instruction *> *currFuncCallSites,
@@ -35,12 +36,17 @@ namespace DRCHECKER {
                targetPointsToMap->find(srcPointer) != targetPointsToMap->end();
     }
 
-    bool PointsToUtils::getTargetFunctions(GlobalState &currState, std::vector<Instruction *> *currFuncCallSites,
-                                           Value *srcPointer, std::vector<Function *> &dstFunctions) {
+    bool PointsToUtils::getTargetFunctions(GlobalState &currState, std::vector<Instruction*> *currFuncCallSites,
+                                           Value *srcPointer, std::set<Function*> &dstFunctions) {
         // first get the type of the function we are looking for.
+        // NOTE: what we get here is a function *pointer* type, but what it's compared to later (i.e. targetFunction->getType())
+        // is actually also a function pointer type, that means, by default a llvm function's type is a pointer.
+#ifdef DEBUG_FUNCTION_PTR_ALIASING
+        dbgs() << "PointsToUtils::getTargetFunctions(): retrieve target functions for pointer: " 
+        << InstructionUtils::getValueStr(srcPointer) << "\n";
+#endif
         Type *targetFunctionType = srcPointer->getType();
         bool retVal = false;
-
         // get points to information, handling casts.
         std::set<PointerPointsTo*>* basePointsTo = PointsToUtils::getPointsToObjects(currState, currFuncCallSites,
                                                                                      srcPointer);
@@ -48,36 +54,27 @@ namespace DRCHECKER {
             basePointsTo = PointsToUtils::getPointsToObjects(currState, currFuncCallSites,
                                                              srcPointer->stripPointerCasts());
         }
-
         // OK, we have some points to information for the srcPointer.
         if(basePointsTo != nullptr) {
             for(PointerPointsTo *currPointsTo: *(basePointsTo)) {
                 // OK, this is a global object.
-                if(currPointsTo->targetObject->isGlobalObject()) {
+                if(currPointsTo && currPointsTo->targetObject && currPointsTo->targetObject->isGlobalObject()) {
                     // Check if it is function.
                     GlobalObject *currGlobObj = (GlobalObject*)(currPointsTo->targetObject);
                     Function *targetFunction = dyn_cast<Function>(currGlobObj->targetVar);
                     if(targetFunction != nullptr) {
-                        if (targetFunction->getType() == targetFunctionType) {
+                        if (InstructionUtils::same_types(targetFunction->getType(), targetFunctionType, true)) {
                             retVal = true;
-                            dstFunctions.push_back(targetFunction);
+                            dstFunctions.insert(targetFunction);
 #ifdef DEBUG_FUNCTION_PTR_ALIASING
-                            dbgs() << "Found Target Function:" << targetFunction->getName() << " for Pointer:";
-                            srcPointer->print(dbgs());
-                            dbgs() << "\n";
+                            dbgs() << "Found Target Function: " << targetFunction->getName() << "\n";
 #endif
                         } else {
 #ifdef DEBUG_FUNCTION_PTR_ALIASING
-                            dbgs()
-                                    << "Function pointer points to a function whose type does not match the pointer type.\n";
-                            dbgs() << "Pointer Type:";
-                            targetFunctionType->print(dbgs());
-                            dbgs() << "\n";
-                            dbgs() << "Destination Function Type:";
-                            targetFunction->getType()->print(dbgs());
-                            dbgs() << "\n";
+                            dbgs() << "!!! Function pointer points to a function whose type does not match the pointer type: "
+                            << "expected: " << InstructionUtils::getTypeStr(targetFunctionType)
+                            << " actual: " << InstructionUtils::getTypeStr(targetFunction->getType()) << "\n";
 #endif
-
                         }
                     }
                 }
@@ -105,53 +102,19 @@ namespace DRCHECKER {
         return addedAtleastOne;
     }
 
-    bool PointsToUtils::getPossibleFunctionTargets(CallInst &callInst, std::vector<Function *> &targetFunctions) {
-        FunctionType *targetFunctionType = callInst.getFunctionType();
-        Module *currModule = callInst.getParent()->getParent()->getParent();
-        for(auto a = currModule->begin(), b = currModule->end(); a != b; a++) {
-            Function *currFunction = &(*a);
-            // does the current function has same type of the call instruction?
-            if(!currFunction->isDeclaration() && currFunction->getFunctionType() == targetFunctionType) {
-                // if yes, see if the function is used in non-call instruction.
-                for (Value::user_iterator i = currFunction->user_begin(), e = currFunction->user_end(); i != e; ++i) {
-                    Instruction *currI = dyn_cast<Instruction>(*i);
-                    CallInst *currC = dyn_cast<CallInst>(*i);
-                    if(currI != nullptr && currC == nullptr) {
-                        // oh the function is used in a non-call instruction.
-                        // potential target, insert into potential targets
-                        targetFunctions.push_back(currFunction);
-                        break;
-                    }
-                }
+    bool PointsToUtils::getTargetObjects(std::set<PointerPointsTo*> *dstPointsTo, std::set<std::pair<long, AliasObject*>> &targetObjects) {
+        if (!dstPointsTo || dstPointsTo->empty()) {
+            return false;
+        }
+        for (PointerPointsTo *currPointsToObj:*dstPointsTo) {
+            long target_field = currPointsToObj->dstfieldId;
+            AliasObject *dstObj = currPointsToObj->targetObject;
+            auto to_check = std::make_pair(target_field, dstObj);
+            if (std::find(targetObjects.begin(), targetObjects.end(), to_check) == targetObjects.end()) {
+                targetObjects.insert(targetObjects.end(), to_check);
             }
         }
-
-        // Find only those functions which are part of the driver.
-        DILocation *instrLoc = nullptr;
-        instrLoc = callInst.getDebugLoc().get();
-        if(instrLoc != nullptr) {
-            std::string currFileName = instrLoc->getFilename();
-            size_t found = currFileName.find_last_of("/");
-            std::string parFol = currFileName.substr(0, found);
-            std::vector<Function *> newList;
-            for(auto cf:targetFunctions) {
-                instrLoc = cf->getEntryBlock().getFirstNonPHIOrDbg()->getDebugLoc().get();
-                if(instrLoc != nullptr) {
-                    currFileName = instrLoc->getFilename();
-                    if(currFileName.find(parFol) != std::string::npos) {
-                        newList.push_back(cf);
-                    }
-                }
-            }
-            targetFunctions.clear();
-            targetFunctions.insert(targetFunctions.end(), newList.begin(), newList.end());
-
-        } else {
-            targetFunctions.clear();
-        }
-
-        return targetFunctions.size() > 0;
+        return true;
     }
-
 
 };

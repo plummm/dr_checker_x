@@ -28,7 +28,7 @@ namespace DRCHECKER {
         long dstObjectSize;
         InvalidCastWarning(Value *srcObj, long srcSize, long dstSize, bool srcSizeTainted,
                            std::vector<Instruction*> *callTrace,
-                           std::vector<Instruction*> *srcTrace, std::string warningMsg,
+                           std::vector<InstLoc*> *srcTrace, std::string warningMsg,
                            Instruction *targetInstr, std::string found_by): VulnerabilityWarning(callTrace,
                                                                                                  srcTrace,
                                                                                                  warningMsg,

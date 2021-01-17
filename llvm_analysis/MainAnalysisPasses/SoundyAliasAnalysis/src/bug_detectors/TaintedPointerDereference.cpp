@@ -22,9 +22,7 @@ namespace DRCHECKER {
             return;
         }
 #ifdef DEBUG_LOAD_INSTR
-        dbgs() << TAG << " Visiting Load Instruction:";
-        I.print(dbgs());
-        dbgs() << "\n";
+        dbgs() << TAG << " Visiting Load Instruction: " << InstructionUtils::getValueStr(&I) << "\n";
 #endif
         Value *srcPointer = I.getPointerOperand();
         std::set<TaintFlag*> *srcTaintInfo = TaintUtils::getTaintInfo(this->currState,
@@ -40,24 +38,30 @@ namespace DRCHECKER {
         // OK, the src pointer is tainted.
         // we are trying to dereference tainted pointer.
         if(srcTaintInfo != nullptr) {
-            for(TaintFlag *currFlag:*srcTaintInfo) {
-                if(currFlag->isTainted()) {
-                    std::string warningMsg = "Trying to read from a user pointer.";
-                    VulnerabilityWarning *currWarning = new VulnerabilityWarning(this->currFuncCallSites,
-                                                                                 &(currFlag->instructionTrace),
-                                                                                 warningMsg, &I,
-                                                                                 TAG);
-                    this->currState.addVulnerabilityWarning(currWarning);
-                    if(this->warnedInstructions.find(&I) == this->warnedInstructions.end()) {
-                        this->warnedInstructions.insert(&I);
-                    }
-#ifdef ONLY_ONE_WARNING
-                    return;
-#endif
+            for(TaintFlag *currFlag : *srcTaintInfo) {
+                if (!currFlag->isTainted()) {
+                    continue;
                 }
+                std::set<std::vector<InstLoc*>*> tchains;
+                this->currState.getAllUserTaintChains(currFlag,tchains);
+                if (tchains.empty()) {
+                    //No taint from user inputs.
+                    continue;
+                }
+                std::string warningMsg = "Trying to read from a user pointer.";
+                VulnerabilityWarning *currWarning = new VulnerabilityWarning(this->currFuncCallSites,
+                                                                             &tchains,
+                                                                             warningMsg, &I,
+                                                                             TAG);
+                this->currState.addVulnerabilityWarning(currWarning);
+                if(this->warnedInstructions.find(&I) == this->warnedInstructions.end()) {
+                    this->warnedInstructions.insert(&I);
+                }
+#ifdef ONLY_ONE_WARNING
+                return;
+#endif
             }
         }
-
     }
 
     void TaintedPointerDereference::visitStoreInst(StoreInst &I) {
@@ -66,9 +70,7 @@ namespace DRCHECKER {
             return;
         }
 #ifdef DEBUG_STORE_INSTR
-        dbgs() << TAG << " Visiting Store Instruction:";
-        I.print(dbgs());
-        dbgs() << "\n";
+        dbgs() << TAG << " Visiting Store Instruction: " << InstructionUtils::getValueStr(&I) << "\n";
 #endif
         Value *srcPointer = I.getPointerOperand();
         std::set<TaintFlag*> *srcTaintInfo = TaintUtils::getTaintInfo(this->currState,
@@ -84,21 +86,28 @@ namespace DRCHECKER {
         // OK, the src pointer is tainted.
         // we are trying to dereference tainted pointer.
         if(srcTaintInfo != nullptr) {
-            for(TaintFlag *currFlag:*srcTaintInfo) {
-                if(currFlag->isTainted()) {
-                    std::string warningMsg = "Trying to write to a user pointer.";
-                    VulnerabilityWarning *currWarning = new VulnerabilityWarning(this->currFuncCallSites,
-                                                                                 &(currFlag->instructionTrace),
-                                                                                 warningMsg, &I,
-                                                                                 TAG);
-                    this->currState.addVulnerabilityWarning(currWarning);
-                    if(this->warnedInstructions.find(&I) == this->warnedInstructions.end()) {
-                        this->warnedInstructions.insert(&I);
-                    }
-#ifdef ONLY_ONE_WARNING
-                    return;
-#endif
+            for(TaintFlag *currFlag : *srcTaintInfo) {
+                if (!currFlag->isTainted()) {
+                    continue;
                 }
+                std::set<std::vector<InstLoc*>*> tchains;
+                this->currState.getAllUserTaintChains(currFlag,tchains);
+                if (tchains.empty()) {
+                    //No taint from user inputs.
+                    continue;
+                }
+                std::string warningMsg = "Trying to write to a user pointer.";
+                VulnerabilityWarning *currWarning = new VulnerabilityWarning(this->currFuncCallSites,
+                                                                             &tchains,
+                                                                             warningMsg, &I,
+                                                                             TAG);
+                this->currState.addVulnerabilityWarning(currWarning);
+                if(this->warnedInstructions.find(&I) == this->warnedInstructions.end()) {
+                    this->warnedInstructions.insert(&I);
+                }
+#ifdef ONLY_ONE_WARNING
+                return;
+#endif
             }
         }
     }
@@ -114,9 +123,7 @@ namespace DRCHECKER {
 
 
 #ifdef DEBUG_STORE_INSTR
-        dbgs() << TAG << " Visiting GetElementPtr Instruction:";
-        I.print(dbgs());
-        dbgs() << "\n";
+        dbgs() << TAG << " Visiting GetElementPtr Instruction: " << InstructionUtils::getValueStr(&I) << "\n";
 #endif
         std::set<TaintFlag*> resultTaintFlags;
         for(unsigned i=0; i<I.getNumOperands();i++) {
@@ -137,21 +144,28 @@ namespace DRCHECKER {
 
         // OK, the src pointer is tainted.
         // we are trying to dereference tainted pointer.
-        for(TaintFlag *currFlag:resultTaintFlags) {
-            if(currFlag->isTainted()) {
-                std::string warningMsg = "Trying to use tainted value as index.";
-                VulnerabilityWarning *currWarning = new VulnerabilityWarning(this->currFuncCallSites,
-                                                                             &(currFlag->instructionTrace),
-                                                                             warningMsg, &I,
-                                                                             TAG);
-                this->currState.addVulnerabilityWarning(currWarning);
-                if(this->warnedInstructions.find(&I) == this->warnedInstructions.end()) {
-                    this->warnedInstructions.insert(&I);
-                }
-#ifdef ONLY_ONE_WARNING
-                return;
-#endif
+        for(TaintFlag *currFlag : resultTaintFlags) {
+            if (!currFlag->isTainted()) {
+                continue;
             }
+            std::set<std::vector<InstLoc*>*> tchains;
+            this->currState.getAllUserTaintChains(currFlag,tchains);
+            if (tchains.empty()) {
+                //No taint from user inputs.
+                continue;
+            }
+            std::string warningMsg = "Trying to use tainted value as index.";
+            VulnerabilityWarning *currWarning = new VulnerabilityWarning(this->currFuncCallSites,
+                                                                         &tchains,
+                                                                         warningMsg, &I,
+                                                                         TAG);
+            this->currState.addVulnerabilityWarning(currWarning);
+            if(this->warnedInstructions.find(&I) == this->warnedInstructions.end()) {
+                this->warnedInstructions.insert(&I);
+            }
+#ifdef ONLY_ONE_WARNING
+            return;
+#endif
         }
     }
 

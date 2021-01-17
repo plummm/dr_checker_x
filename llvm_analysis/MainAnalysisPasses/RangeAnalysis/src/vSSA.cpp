@@ -22,7 +22,7 @@ STATISTIC(numsigmas, "Number of sigmas");
 STATISTIC(numphis, "Number of phis");
 
 void vSSA::getAnalysisUsage(AnalysisUsage &AU) const {
-	AU.addRequired<DominanceFrontier>();
+	AU.addRequired<DominanceFrontierWrapperPass>();
 	AU.addRequired<DominatorTreeWrapperPass>();
 }
 
@@ -36,7 +36,8 @@ bool vSSA::runOnFunction(Function &F) {
 	
 	DTw_ = &getAnalysis<DominatorTreeWrapperPass>();
 	DT_ = &DTw_->getDomTree();
-	DF_ = &getAnalysis<DominanceFrontier>();
+	DFw_ = &getAnalysis<DominanceFrontierWrapperPass>();
+    DF_ = &DFw_->getDominanceFrontier();
 	
 	// Iterate over all Basic Blocks of the Function, calling the function that creates sigma functions, if needed
 	for (Function::iterator Fit = F.begin(), Fend = F.end(); Fit != Fend; ++Fit) {
@@ -47,7 +48,7 @@ bool vSSA::runOnFunction(Function &F) {
 
 void vSSA::createSigmasIfNeeded(BasicBlock *BB)
 {
-	TerminatorInst *ti = BB->getTerminator();
+	Instruction *ti = BB->getTerminator();
 	// If the condition used in the terminator instruction is a Comparison instruction:
 	//for each operand of the CmpInst, create sigmas, depending on some conditions
 	/*
@@ -120,7 +121,7 @@ void vSSA::createSigmasIfNeeded(BasicBlock *BB)
  *  Insert sigmas for the value V;
  *  When sigmas are created, the creation of phis may happen too.
  */
-void vSSA::insertSigmas(TerminatorInst *TI, Value *V)
+void vSSA::insertSigmas(Instruction *TI, Value *V)
 {
 	// Basic Block of the Terminator Instruction
 	BasicBlock *BB = TI->getParent();

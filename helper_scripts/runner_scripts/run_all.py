@@ -89,6 +89,8 @@ def main():
     arg_dict['opt_bin_path'] = get_bin_path('opt')
     arg_dict['soundy_analysis_so'] = os.path.join(passes_dir, "SoundyAliasAnalysis/libSoundyAliasAnalysis.so")
     arg_dict['soundy_analysis_out'] = parsed_args.soundy_analysis_out
+    arg_dict['soundy_analysis_instr_out'] = os.path.join(parsed_args.soundy_analysis_out, "instr_warnings")
+    arg_dict['total_warning_stats'] = os.path.join(parsed_args.soundy_analysis_out, 'warnings_stats.csv')
     __add_temp_files(arg_dict)
 
     component_times = {}
@@ -105,6 +107,7 @@ def main():
         target_components.append(EntryPointIdentifier(arg_dict))
     if not parsed_args.skip_soundy_checker:
         target_components.append(SoundyAnalysisRunner(arg_dict))
+        target_components.append(ComputeWarningStats(arg_dict))
 
     for curr_comp in target_components:
         component_name = curr_comp.get_name()
@@ -158,6 +161,7 @@ def __add_temp_files(target_dict):
     """
     target_dict['entry_point_out'] = os.path.join(target_dict['llvm_bc_out'],  'entry_point_out.txt')
     target_dict['hdr_file_list'] = os.path.join(target_dict['llvm_bc_out'],  'hdr_file_config.txt')
+
 
 if __name__ == "__main__":
     main()

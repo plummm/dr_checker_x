@@ -1,5 +1,5 @@
 include_directories(include/ ../Utils/include ../Customizations/include ../LinuxKernelCustomizations/include
-        ../RangeAnalysis/include)
+        ../RangeAnalysis/include ../z3/include)
 
 file(GLOB SAA_SRCS
         "src/*.cpp"
@@ -19,9 +19,9 @@ add_library(SoundyAliasAnalysisStatic STATIC
         ${SAA_SRCS} src/bug_detectors/InvalidCastDetector.cpp include/bug_detectors/InvalidCastDetector.h include/bug_detectors/warnings/InvalidCastWarning.h src/bug_detectors/warnings/InvalidCastWarning.cpp include/bug_detectors/ImproperTaintedDataUseDetector.h src/bug_detectors/ImproperTaintedDataUseDetector.cpp include/bug_detectors/warnings/ImproperTaintedDataUseWarning.h src/bug_detectors/warnings/ImproperTaintedDataUseWarning.cpp include/bug_detectors/IntegerOverflowDetector.h src/bug_detectors/IntegerOverflowDetector.cpp include/bug_detectors/TaintedLoopBoundDetector.h src/bug_detectors/TaintedLoopBoundDetector.cpp include/bug_detectors/GlobalVariableRaceDetector.h src/bug_detectors/GlobalVariableRaceDetector.cpp)
 
 
-target_link_libraries(SoundyAliasAnalysis Utils Customizations LinuxKernelCustomizations RangeAnalysis)
+target_link_libraries(SoundyAliasAnalysis Utils Customizations LinuxKernelCustomizations RangeAnalysis z3)
 
-target_link_libraries(SoundyAliasAnalysisStatic Utils Customizations LinuxKernelCustomizations RangeAnalysis)
+target_link_libraries(SoundyAliasAnalysisStatic Utils Customizations LinuxKernelCustomizations RangeAnalysis z3)
 
 # Use C++11 to compile our pass (i.e., supply -std=c++11).
 target_compile_features(SoundyAliasAnalysis PRIVATE cxx_range_for cxx_auto_type)
@@ -34,11 +34,11 @@ set_target_properties(SoundyAliasAnalysisStatic
 # LLVM is (typically) built with no C++ RTTI. We need to match that;
 # otherwise, we'll get linker errors about missing RTTI data.
 set_target_properties(SoundyAliasAnalysis PROPERTIES
-    COMPILE_FLAGS "-fno-rtti"
+    COMPILE_FLAGS "-g -fno-rtti"
 )
 
 set_target_properties(SoundyAliasAnalysisStatic PROPERTIES
-        COMPILE_FLAGS "-fno-rtti"
+        COMPILE_FLAGS "-g -fno-rtti"
         )
 
 # Get proper shared-library behavior (where symbols are not necessarily

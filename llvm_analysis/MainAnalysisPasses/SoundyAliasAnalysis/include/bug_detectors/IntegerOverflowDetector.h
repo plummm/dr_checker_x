@@ -33,7 +33,7 @@ namespace DRCHECKER {
         FunctionChecker *targetChecker;
 
         IntegerOverflowDetector(GlobalState &targetState, Function *toAnalyze,
-                            std::vector<Instruction *> *srcCallSites,
+                            std::vector<Instruction*> *srcCallSites,
                             FunctionChecker *currChecker): currState(targetState) {
             this->targetFunction = toAnalyze;
             this->currFuncCallSites = srcCallSites;

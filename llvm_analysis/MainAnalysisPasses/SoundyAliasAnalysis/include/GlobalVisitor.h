@@ -13,11 +13,13 @@
 #include "llvm/IR/CFG.h"
 #include "ModuleState.h"
 #include "VisitorCallback.h"
+#include "../../Utils/include/InstructionUtils.h"
 
 using namespace llvm;
 
 namespace DRCHECKER {
 //#define DEBUG_INSTR_VISIT
+//#define FAST_HEURISTIC
     /***
      * The main guy handling the visiting of driver code.
      * SDTraversal of Fig 1
@@ -27,22 +29,19 @@ namespace DRCHECKER {
 
         GlobalState &currState;
 
-        std::vector<VisitorCallback *> &allCallbacks;
-
-        // a map of basic block to number of times it is analyzed.
-        std::map<const BasicBlock*, unsigned long> numTimeAnalyzed;
+        std::vector<VisitorCallback*> &allCallbacks;
 
         // order in which BBs needs to be analyzed.
         // This ideally should be in topological order of the
         // SCCs (Strongly connected components) in the CFG
         // of the function.
-        std::vector<std::vector<BasicBlock *> *> *traversalOrder;
+        std::vector<std::vector<BasicBlock*>*> *traversalOrder;
 
         // is the analysis within loop.
         bool inside_loop;
 
         // context of the analysis, basically list of call sites
-        std::vector<Instruction *> *currFuncCallSites;
+        std::vector<Instruction*> *currFuncCallSites;
 
         // set of call sites already visited.
         // this will help in preventing analyzing function call
@@ -63,6 +62,10 @@ namespace DRCHECKER {
             targetState.getOrCreateContext(this->currFuncCallSites);
             // clearing all visited call sites.
             this->visitedCallSites.clear();
+            this->inside_loop = false;
+#ifdef FAST_HEURISTIC
+            this->numTimeAnalyzed.clear();
+#endif
         }
 
         virtual void visit(Instruction &I) {
@@ -101,11 +104,18 @@ namespace DRCHECKER {
         virtual void visitICmpInst(ICmpInst &I);
         virtual void visitBranchInst(BranchInst &I);
 
+        //hz: add support for switch inst.
+        virtual void visitSwitchInst(SwitchInst &I);
 
-        void visit(BasicBlock *BB);
+        virtual void visit(BasicBlock *BB);
+
+        
 
         // main analysis function.
         void analyze();
+
+        std::set<PointerPointsTo*>* getPointsToObjects(Value *srcPointer);
+        bool hasPointsToObjects(Value *srcPointer);
     private:
         // maximum number of times a basic block can be analyzed.
         const static unsigned long MAX_NUM_TO_VISIT = 5;

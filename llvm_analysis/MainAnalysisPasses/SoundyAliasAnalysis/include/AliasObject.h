@@ -2,6 +2,8 @@
 // Created by machiry on 10/24/16.
 //
 
+#ifndef PROJECT_ALIASOBJECT_H
+#define PROJECT_ALIASOBJECT_H
 #include <set>
 #include <llvm/Support/Debug.h>
 #include "llvm/Pass.h"
@@ -12,51 +14,107 @@
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Type.h"
 #include "TaintInfo.h"
-#ifndef PROJECT_ALIASOBJECT_H
-#define PROJECT_ALIASOBJECT_H
+#include "../../Utils/include/CFGUtils.h"
 
 using namespace llvm;
 #ifdef DEBUG
 #undef DEBUG
 #endif
+
+//hz: some debug output options.
+//#define DEBUG_OUTSIDE_OBJ_CREATION
+#define ENABLE_SUB_OBJ_CACHE
+#define SMART_FUNC_PTR_RESOLVE
+// #define DEBUG_SMART_FUNCTION_PTR_RESOLVE
+// #define DEBUG_FETCH_POINTS_TO_OBJECTS
+// #define DEBUG_CHANGE_HEAPLOCATIONTYPE
+// #define DEBUG_UPDATE_FIELD_POINT
+// #define DEBUG_CREATE_DUMMY_OBJ_IF_NULL
+// #define DEBUG_CREATE_EMB_OBJ
+// #define DEBUG_CREATE_EMB_OBJ
+// #define DEBUG_CREATE_HOST_OBJ
+// #define DEBUG_CREATE_HOST_OBJ
+// #define DEBUG_INFER_CONTAINER
+// #define DEBUG_SPECIAL_FIELD_POINTTO
+// #define DEBUG_SHARED_OBJ_CACHE
+// #define DEBUG_OBJ_RESET
+// #define DEBUG_OBJ_COPY
+
 namespace DRCHECKER {
 //#define DEBUG_FUNCTION_ARG_OBJ_CREATION
-//#define DEBUG_FETCH_POINTS_TO_OBJECTS
 
     class AliasObject;
-
 
     /***
      * Handles general points to relation.
      */
     class ObjectPointsTo {
     public:
-        // field id, if the parent object is a structure.
-        long fieldId;
+        // the source object and field that points to the target object and field.
+        long fieldId = 0;
+        AliasObject *srcObject = nullptr;
         // field id of the destination object to which this pointer points tp
-        long dstfieldId;
+        long dstfieldId = 0;
         // object to which we point to.
-        AliasObject *targetObject;
+        AliasObject *targetObject = nullptr;
         // instruction which resulted in this points to information.
-        Value* propogatingInstruction;
+        //Value* propagatingInstruction;
+        InstLoc *propagatingInst = nullptr;
+        //Whether this pto record is a weak update (e.g. the original dst pointer points to multiple locations in multiple objects,
+        //so we are not sure whether this pto will be for sure updated for a certain object field at the 'propagatingInst').
+        //NOTE that this concept is only useful when updating the object fieldPointsTo 
+        //(i.e. for address-taken llvm objects), while for top-level variables (e.g. %x),
+        //when we update its pto record we always know which top-level variable is to be updated (i.e. always a strong update).
+        bool is_weak = false;
+        //For customized usage.
+        //E.g. when processing GEP, sometimes we may convert all indices into a single offset and 
+        //skip "processGEPMultiDimension", use this flag to indicate this.
+        int flag = 0;
+        //indicates whether this pto record is currently active (e.g. may be invalidated by another strong post-dom pto update.).
+        bool is_active = true;
+
         ObjectPointsTo() {
-
+            this->flag = 0;
+            this->is_active = true;
         }
+
         ~ObjectPointsTo() {
+        }
 
+        ObjectPointsTo(AliasObject *srcObject, long fieldId, AliasObject *targetObject, long dstfieldId, 
+                       InstLoc *propagatingInst = nullptr, bool is_Weak = false) 
+        {
+            this->fieldId = fieldId;
+            this->srcObject = srcObject;
+            this->targetObject = targetObject;
+            this->dstfieldId = dstfieldId;
+            this->propagatingInst = propagatingInst;
+            this->is_weak = is_weak;
+            this->flag = 0;
+            this->is_active = true;
         }
-        ObjectPointsTo(ObjectPointsTo *srcObjPointsTo) {
-            this->fieldId = srcObjPointsTo->fieldId;
-            this->dstfieldId = srcObjPointsTo->dstfieldId;
-            this->targetObject = srcObjPointsTo->targetObject;
-            this->propogatingInstruction = srcObjPointsTo->propogatingInstruction;
+
+        ObjectPointsTo(ObjectPointsTo *pto):
+        ObjectPointsTo(pto->srcObject,pto->fieldId,pto->targetObject,pto->dstfieldId,pto->propagatingInst,pto->is_weak) {
+            this->is_active = pto->is_active;
         }
+
+        //A wrapper for convenience.
+        ObjectPointsTo(AliasObject *targetObject, long dstfieldId, InstLoc *propagatingInst = nullptr, bool is_Weak = false):
+        ObjectPointsTo(nullptr,0,targetObject,dstfieldId,propagatingInst,is_Weak) {
+        }
+
         virtual ObjectPointsTo* makeCopy() {
             return new ObjectPointsTo(this);
         }
+
+        //NOTE: this comparison doesn't consider the additional properties including "propagatingInst" and "is_weak"
         virtual bool isIdenticalPointsTo(const ObjectPointsTo *that) const {
-            // No default implementation
-            assert(false);
+            if (!that) {
+                return false;
+            }
+            return this->fieldId == that->fieldId &&
+                   this->pointsToSameObject(that);
         }
 
         virtual bool pointsToSameObject(const ObjectPointsTo *that) const {
@@ -75,10 +133,17 @@ namespace DRCHECKER {
             os << "Field :" << fieldId << " points to " << dstfieldId <<" of the object, with ID:" << obj.targetObject;
             return os;
         }*/
-        friend llvm::raw_ostream& operator<<(llvm::raw_ostream& os, const ObjectPointsTo& obj) {
+        friend llvm::raw_ostream& operator<< (llvm::raw_ostream& os, const ObjectPointsTo& obj) {
             os << "Field :" << obj.fieldId << " points to " << obj.dstfieldId <<" of the object, with ID:" << obj.targetObject;
             return os;
         }
+
+        void print(llvm::raw_ostream& OS);
+
+        int inArray(Type *ety);
+
+        //If current pto points to an array element, this can change the pto to another desired element in the same array.
+        int switchArrayElm(Type *ty, long fid);
     };
 
 
@@ -90,24 +155,75 @@ namespace DRCHECKER {
         const static long TYPE_CONST=2;
         // The src pointer that points to
         Value *targetPointer;
+        // The load tag is designed to hold the memory access path for a pto record of a top-level llvm var,
+        // this can help us solve the N*N update problem.
+        // e.g.
+        // %0 <-- load src   (say src points to 6 mem locs, each of which holds a pointer that has 2 pointees, so %0 will have 12 ptos)
+        // %1 = GEP %0, off0 (#pto will remain the same between %0 and %1 (or less due to some filtering logics) for non-load IRs)
+        // %2 = GEP %0, off1
+        // %3 <-- load %1    (in theory %1 has 12 #ptos now, assume each also holds a pointer who has 2 pointees, so %3 has 24 #pto)
+        // store %3 --> %2   (will we do a 24*12 update? No, the correct way is a 12*2*1 update...) 
+        // Imagine we now have the load tag for every pointee of %3 (who has 2-layer loads from "src"):
+        // src_pointee[0-11] --> %1_pointee[0-23]
+        // and that for %2 (1 layer load from src):
+        // src_pointee[0-11]
+        // By inspecting the load tags of %3 and %2, we can naturally have 12*2*1 pto pairs by "src_pointee[0-11]".
+        std::vector<TypeField*> loadTag;
 
         PointerPointsTo(PointerPointsTo *srcPointsTo): ObjectPointsTo(srcPointsTo) {
             this->targetPointer = srcPointsTo->targetPointer;
+            this->loadTag = srcPointsTo->loadTag;
+        }
+
+        PointerPointsTo(Value *targetPointer, AliasObject *srcObject, long fieldId, AliasObject *targetObject, long dstfieldId, 
+                        InstLoc *propagatingInst = nullptr, bool is_Weak = false): 
+        ObjectPointsTo(srcObject, fieldId, targetObject, dstfieldId, propagatingInst, is_Weak) 
+        {
+            this->targetPointer = targetPointer;
+        }
+
+        //A wrapper for convenience
+        PointerPointsTo(Value *targetPointer, AliasObject *targetObject, long dstfieldId, 
+                        InstLoc *propagatingInst = nullptr, bool is_Weak = false): 
+        PointerPointsTo(targetPointer, nullptr, 0, targetObject, dstfieldId, propagatingInst, is_Weak) 
+        {
+            //
         }
 
         PointerPointsTo() {
-
         }
 
-        ObjectPointsTo* makeCopy() {
+        ObjectPointsTo *makeCopy() {
             return new PointerPointsTo(this);
         }
+
+        PointerPointsTo *makeCopyP() {
+            return new PointerPointsTo(this);
+        }
+
+        //We want to copy only a part of current pto but replace the remainings.
+        PointerPointsTo *makeCopyP(Value *targetPointer, AliasObject *targetObject, long dstfieldId,
+                                   InstLoc *propagatingInst = nullptr, bool is_Weak = false)
+        {
+            PointerPointsTo *pto = new PointerPointsTo(targetPointer,targetObject,dstfieldId,propagatingInst,is_Weak);
+            pto->fieldId = this->fieldId;
+            pto->srcObject = this->srcObject;
+            pto->loadTag = this->loadTag;
+            return pto;
+        }
+
+        //A wrapper for convenience.
+        PointerPointsTo *makeCopyP(Value *targetPointer, InstLoc *propagatingInst = nullptr, bool is_Weak = false) {
+            return this->makeCopyP(targetPointer,this->targetObject,this->dstfieldId,propagatingInst,is_Weak);
+        }
+
         long getTargetType() const {
             // Simple polymorphism.
             return PointerPointsTo::TYPE_CONST;
         }
+
         bool isIdenticalPointsTo(const ObjectPointsTo *that) const {
-            if(that != nullptr && that->getTargetType() == PointerPointsTo::TYPE_CONST) {
+            if (that && that->getTargetType() == PointerPointsTo::TYPE_CONST) {
                 PointerPointsTo* actualObj = (PointerPointsTo*)that;
                 return this->targetPointer == actualObj->targetPointer &&
                        this->targetObject == actualObj->targetObject &&
@@ -124,6 +240,7 @@ namespace DRCHECKER {
             os << " from field:" << fieldId <<" points to field:"<< dstfieldId <<" of the object, with ID:" << this->targetObject;
             return os;
         }*/
+
         friend llvm::raw_ostream& operator<<(llvm::raw_ostream& os, const PointerPointsTo& obj) {
             PointerPointsTo* actualObj = (PointerPointsTo *)(&obj);
             os << "Pointer:";
@@ -131,6 +248,8 @@ namespace DRCHECKER {
             os << " from field:" << obj.fieldId <<" points to field:"<< obj.dstfieldId <<" of the object, with ID:" << obj.targetObject;
             return os;
         }
+
+        void print(llvm::raw_ostream& OS);
     };
 
 
@@ -149,20 +268,22 @@ namespace DRCHECKER {
         // All pointer variables that can point to this object.
         std::vector<PointerPointsTo *> pointersPointsTo;
         // This represents points from information, all objects which can point to this.
-        std::vector<AliasObject*> pointsFrom;
+        // The key is the src object, the value is the pto records in src object that point to this obj.
+        std::map<AliasObject*,std::set<ObjectPointsTo*>> pointsFrom;
         // All Objects that could be pointed by this object.
-        std::vector<ObjectPointsTo*> pointsTo;
+        // The key is the field number, the value is all pto records of this field.
+        std::map<long,std::set<ObjectPointsTo*>> pointsTo;
+        // The reference instruction of this AliasObject (usually the inst where this obj is created.).
+        Instruction *refInst = nullptr;
 
         //Information needed for Taint Analysis.
         // fields that store information which is tainted.
         std::vector<FieldTaint*> taintedFields;
 
-        bool auto_generated;
+        bool auto_generated = false;
 
-        // field to indicate that all contents of this object
-        // are tainted or not.
-        bool all_contents_tainted = false;
-        TaintFlag *all_contents_taint_flag = nullptr;
+        //Hold the taint flags that are effective for all fields, we use a special "FieldTaint" (fid=-1) for it.
+        FieldTaint all_contents_taint_flags;
 
         // flag which indicates whether the object is initialized or not.
         // by default every object is initialized.
@@ -170,9 +291,20 @@ namespace DRCHECKER {
         // the set of instructions which initialize this object
         std::set<Instruction*> initializingInstructions;
 
+        // Whether this object is immutable.
+        bool is_const = false;
+
         unsigned long id;
 
+        //hz: indicate whether this object is a taint source.
+        int is_taint_src = 0;
 
+        //hz: This maps the field to the corresponding object (embedded) if the field is an embedded struct in the host object.
+        std::map<long,AliasObject*> embObjs;
+
+        //hz: it's possible that this obj is embedded in another obj.
+        AliasObject *parent = nullptr;
+        long parent_field;
 
         unsigned long getID() const{
             return this->id;
@@ -183,24 +315,39 @@ namespace DRCHECKER {
             this->targetType = srcAliasObject->targetType;
             this->pointersPointsTo.insert(this->pointersPointsTo.end(), srcAliasObject->pointersPointsTo.begin(),
                                           srcAliasObject->pointersPointsTo.end());
-            this->pointsFrom.insert(this->pointsFrom.end(), srcAliasObject->pointsFrom.begin(),
-                                          srcAliasObject->pointsFrom.end());
-            this->pointsTo.insert(this->pointsTo.end(), srcAliasObject->pointsTo.begin(),
-                                          srcAliasObject->pointsTo.end());
+            this->pointsFrom = srcAliasObject->pointsFrom;
+            this->pointsTo = srcAliasObject->pointsTo;
             this->id = getCurrID();
+            this->lastPtoReset = srcAliasObject->lastPtoReset;
 
             this->is_initialized = srcAliasObject->is_initialized;
             this->initializingInstructions.insert(srcAliasObject->initializingInstructions.begin(),
                                                   srcAliasObject->initializingInstructions.end());
-
+            this->is_const = srcAliasObject->is_const;
+            //this->is_taint_src = srcAliasObject->is_taint_src;
+            this->embObjs = srcAliasObject->embObjs;
+            this->parent = srcAliasObject->parent;
+            this->parent_field = srcAliasObject->parent_field;
+            this->refInst = srcAliasObject->refInst;
         }
+
         AliasObject() {
+            //hz: init some extra fields
+            this->id = getCurrID();
+            this->parent = nullptr;
+            this->parent_field = 0;
+            this->refInst = nullptr;
         }
 
         ~AliasObject() {
-            // delete all object points to
-            for(ObjectPointsTo *ob:pointsTo) {
-                delete(ob);
+            // delete all object pointsTo and the related pointsFrom in other objects.
+            for (auto &x : pointsTo) {
+                for (ObjectPointsTo *pto : x.second) {
+                    if (pto->targetObject) {
+                        pto->targetObject->erasePointsFrom(this,pto);
+                    }
+                    delete(pto);
+                }
             }
 
             // delete all field taint.
@@ -209,216 +356,657 @@ namespace DRCHECKER {
             }
         }
 
-        unsigned long countObjectPointsTo(long srcfieldId) {
+        //Imagine that we invoke a memcpy() to make a copy of "this" object, in this case, we need to reserve
+        //the original pto and taint info, recursively copy the embedded objs, but give up records like "pointsFrom"...
+        //NOTE: if "loc" is specified, we should copy only the pto and taint facts that are valid at "loc".
+        AliasObject *makeCopy(InstLoc *loc) {
+#ifdef DEBUG_OBJ_COPY
+            dbgs() << "AliasObject::makeCopy(): try to make a copy of obj: " << (const void*)this << "\n";
+#endif
+            AliasObject *obj = new AliasObject();
+            obj->targetType = this->targetType;
+            //Copy the "pointTo" records, note that we cannot simply copy the ObjectPointsTo*, instead we need to make a copy of each
+            //ObjectPointsTo, besides, we also need to update the "pointsFrom" record of each field pointee obj (to add the newly created
+            //"obj" as a new src object).
+            for (auto &e : this->pointsTo) {
+                std::set<ObjectPointsTo*> ptos, *ps = &(e.second);
+                if (loc) {
+                    this->getLivePtos(e.first,loc,&ptos);
+                    ps = &ptos;
+                }
+                for (ObjectPointsTo *pto : *ps) {
+                    if (pto && pto->targetObject) {
+                        ObjectPointsTo *npto = new ObjectPointsTo(pto);
+                        npto->srcObject = obj;
+                        (obj->pointsTo)[e.first].insert(npto);
+                        npto->targetObject->addPointsFrom(obj,npto);
+                    }
+                }
+            }
+            obj->lastPtoReset = this->lastPtoReset;
+            obj->is_initialized = this->is_initialized;
+            obj->initializingInstructions = this->initializingInstructions;
+            obj->is_const = this->is_const;
+            obj->auto_generated = this->auto_generated;
+            obj->is_taint_src = this->is_taint_src;
+            //Copy all the taint flags for each field.
+            for (FieldTaint *ft : this->taintedFields) {
+                if (!ft) {
+                    continue;
+                }
+                FieldTaint *nft = ft->makeCopy(obj,loc);
+                obj->taintedFields.push_back(nft);
+            }
+            //Copy all_contents_taint_flags
+            obj->all_contents_taint_flags.reset(this->all_contents_taint_flags.makeCopy(obj,loc));
+            //Recursively copy the embedded objs, if any.
+            for (auto &e : this->embObjs) {
+                AliasObject *eo = e.second;
+                if (eo) {
+                    AliasObject *no = eo->makeCopy(loc);
+                    if (no) {
+                        (obj->embObjs)[e.first] = no;
+                    }else {
+                        //Is this possible...
+                        dbgs() << "!!! AliasObject::makeCopy(): failed to make a copy of the emb object: " << (const void*)eo << "\n";
+                    }
+                }
+            }
+#ifdef DEBUG_OBJ_COPY
+            dbgs() << "AliasObject::makeCopy(): copy created: " << (const void*)obj << "\n";
+#endif
+            return obj;
+        }
+
+        //Merge the field pto and TFs from another object w/ the same type, at the "loc".
+        void mergeObj(AliasObject *obj, InstLoc *loc, bool is_weak) {
+#ifdef DEBUG_OBJ_COPY
+            dbgs() << "AliasObject::mergeObj(): try to merge obj: " << (const void*)obj << " -> " << (const void*)this << "\n";
+#endif
+            if (!obj || !InstructionUtils::same_types(obj->targetType,this->targetType) || !loc) {
+#ifdef DEBUG_OBJ_COPY
+                dbgs() << "AliasObject::mergeObj(): sanity check failed, return.\n";
+#endif
+                return;
+            }
+            //Merge the pto records of each field.
+            int wflag = (is_weak ? 1 : 0);
+            for (auto &e : obj->pointsTo) {
+                std::set<ObjectPointsTo*> ptos;
+                obj->getLivePtos(e.first,loc,&ptos);
+                if (!ptos.empty()) {
+                    this->updateFieldPointsTo(e.first,&ptos,loc,wflag);
+                }
+            }
+            //Merge the "all_contents_taint_flags".
+            std::set<TaintFlag*> tfs;
+            obj->all_contents_taint_flags.getTf(loc,tfs);
+            for (TaintFlag *tf : tfs) {
+                //The reachability from this "tf" to "loc" has already been ensured by "getTf()",
+                //so it's safe to directly copy the "tf" w/ the new target instruction "loc".
+                TaintFlag *ntf = new TaintFlag(tf,loc);
+                ntf->is_weak |= is_weak;
+                this->taintAllFields(ntf);
+            }
+            //Merge the TFs from each field.
+            for (FieldTaint *ft : obj->taintedFields) {
+                if (ft) {
+                    //First get live all taints for the field.
+                    tfs.clear();
+                    ft->getTf(loc,tfs);
+                    for (TaintFlag *tf : tfs) {
+                        TaintFlag *ntf = new TaintFlag(tf,loc);
+                        ntf->is_weak |= is_weak;
+                        this->addFieldTaintFlag(ft->fieldId,ntf);
+                    }
+                }
+            }
+            //Recursively merge each embedded object.
+            for (auto &e : obj->embObjs) {
+                AliasObject *sobj = e.second;
+                AliasObject *dobj = nullptr;
+                if (this->embObjs.find(e.first) == this->embObjs.end()) {
+                    //This means we need to create the required embedded object to receive the data from "obj".
+                    dobj = this->createEmbObj(e.first,nullptr,loc);
+                }else {
+                    dobj = (this->embObjs)[e.first];
+                }
+                if (sobj && dobj) {
+                    dobj->mergeObj(sobj,loc,is_weak);
+                }
+            }
+#ifdef DEBUG_OBJ_COPY
+            dbgs() << "AliasObject::mergeObj(): done: " << (const void*)obj << " -> " << (const void*)this << "\n";
+#endif
+        }
+
+        //Merge a specified field in another object to "fid" of "this", including its pto and TFs.
+        void mergeField(long fid, AliasObject *mobj, long mfid, InstLoc *loc, bool is_weak) {
+#ifdef DEBUG_OBJ_COPY
+            dbgs() << "AliasObject::mergeField(): " << (const void*)mobj << "|" << mfid << " -> " << (const void*)this 
+            << "|" << fid << "\n";
+#endif
+            //First need to make sure the src and dst field have the same type.
+            if (!mobj || !loc) {
+                return;
+            }
+            Type *dty = this->getNonCompFieldTy(fid);
+            Type *sty = mobj->getNonCompFieldTy(mfid);
+            if (!InstructionUtils::same_types(sty,dty,true)) {
+#ifdef DEBUG_OBJ_COPY
+                dbgs() << "AliasObject::mergeField(): type mismatch.\n";
+#endif
+                return;
+            }
+            //Propagate the pto record.
+            std::set<std::pair<long, AliasObject*>> dstObjs;
+            //NOTE: here we will not try to create dummy pointee objects (i.e. just propagate the pto as is).
+            mobj->fetchPointsToObjects(mfid,dstObjs,loc,true,false);
+            for (auto &e : dstObjs) {
+                this->addObjectToFieldPointsTo(fid,e.second,loc,is_weak,e.first);
+            }
+            //Propagate the taint.
+            std::set<TaintFlag*> tfs;
+            mobj->getFieldTaintInfo(mfid,tfs,loc);
+            for (TaintFlag *tf : tfs) {
+                TaintFlag *ntf = new TaintFlag(tf,loc);
+                ntf->is_weak |= is_weak;
+                this->addFieldTaintFlag(fid,ntf);
+            }
+        }
+
+        //If "act" is negative, return # of all pto on file, otherwise, only return active/inactive pto records.
+        unsigned long countObjectPointsTo(long srcfieldId, int act = -1) {
             /***
-             * Count the number of objects that could be pointer by
+             * Count the number of object-field combinations that could be pointed by
              * a field (i.e srcfieldId).
-             */
-            unsigned long numObjects = 0;
-            for(ObjectPointsTo *obj:pointsTo) {
-                if(obj->fieldId == srcfieldId) {
-                    numObjects++;
-                }
-            }
-            return numObjects;
-        }
-
-        void getAllPointsToObj(std::set<AliasObject*> &dstObjects) {
-            /***
-             * Get all objects this object can point to, from all the fields
-             */
-            for(auto currpo:this->pointsTo) {
-                if(dstObjects.find(currpo->targetObject) == dstObjects.end()) {
-                    dstObjects.insert(currpo->targetObject);
-                }
-            }
-        }
-
-        void performStrongUpdate(long srcfieldId, std::set<PointerPointsTo*>* dstPointsTo, Instruction *propogatingInstr) {
-            /***
-             * Make the field (srcfieldId) of this object point to
-             * any of the objects pointed by dstPointsTo
-             *
-             * This function does strong update, i.e first it removes all points to information
-             * for the field srcfieldId and then adds the new objects into points to set.
-             */
-            // remove all points to from srcfieldId
-            this->pointsTo.erase(std::remove_if(this->pointsTo.begin(), this->pointsTo.end(),
-                                                [srcfieldId](const ObjectPointsTo* x) {
-                                                        return x->fieldId == srcfieldId;
-                                                    }), this->pointsTo.end());
-
-            this->updateFieldPointsTo(srcfieldId, dstPointsTo, propogatingInstr);
-        }
-
-        void performWeakUpdate(long srcfieldId, std::set<PointerPointsTo*>* dstPointsTo, Instruction *propogatingInstr) {
-            /***
-             * Similar to strong update but does weak update.
-             * i.e it does not remove existing points to information of the field srcFieldId
-             */
-            this->updateFieldPointsTo(srcfieldId, dstPointsTo, propogatingInstr);
-
-        }
-
-        void performUpdate(long srcfieldId, std::set<PointerPointsTo*>* dstPointsTo, Instruction *propogatingInstr) {
-            /***
-             * Update the pointto information of the field pointed by srcfieldId
-             */
-
-            // check if we can perform strong update
-            if(this->countObjectPointsTo(srcfieldId) <= 1) {
-                this->performStrongUpdate(srcfieldId, dstPointsTo, propogatingInstr);
-            } else {
-                this->performWeakUpdate(srcfieldId, dstPointsTo, propogatingInstr);
-            }
-        }
-
-        void updateFieldPointsToFromObjects(std::vector<ObjectPointsTo*>* dstPointsToObject,
-                                            Instruction *propagatingInstr) {
-            /***
-            * Add all objects in the provided pointsTo set to be pointed by the provided srcFieldID
             */
-            if(dstPointsToObject != nullptr) {
-                std::set<AliasObject *> currObjects;
-                //Add all objects that are in the provided set.
-                for (ObjectPointsTo *currPointsTo: *dstPointsToObject) {
-                    long srcfieldId = currPointsTo->fieldId;
-                    // clear all the objects
-                    currObjects.clear();
-                    // first get all objects that could be pointed by srcfieldId of the current object.
-                    fetchPointsToObjects(srcfieldId, currObjects);
-                    // insert points to information only, if it is not present.
-                    if (currObjects.find(currPointsTo->targetObject) == currObjects.end()) {
-                        ObjectPointsTo *newPointsTo = currPointsTo->makeCopy();
-                        newPointsTo->propogatingInstruction = propagatingInstr;
-                        this->pointsTo.push_back(newPointsTo);
+            if (this->pointsTo.find(srcfieldId) == this->pointsTo.end()) {
+                return 0;
+            }
+            if (act < 0) {
+                return this->pointsTo[srcfieldId].size();
+            }
+            int num = 0;
+            for (ObjectPointsTo *pto : this->pointsTo[srcfieldId]) {
+                if (pto && pto->is_active == !!act) {
+                    ++num;
+                }
+            }
+            return num;
+        }
+
+        int addPointerPointsTo(Value *p, InstLoc *loc, long dfid = 0) {
+            if (!p) {
+                return 0;
+            }
+            //NOTE: default is_Weak setting (i.e. strong update) is ok for top-level vars.
+            PointerPointsTo *newPointsTo = new PointerPointsTo(p,this,dfid,loc,false);
+            //De-duplication
+            bool is_dup = false;
+            for (PointerPointsTo *pto : this->pointersPointsTo) {
+                if (!pto) {
+                    continue;
+                }
+                if (!loc != !pto->propagatingInst) {
+                    continue;
+                }
+                if (newPointsTo->isIdenticalPointsTo(pto) && (!loc || loc->same(pto->propagatingInst))) {
+                    is_dup = true;
+                    break;
+                }
+            }
+            if (is_dup) {
+                delete(newPointsTo);
+                return 0;
+            }
+            this->pointersPointsTo.insert(this->pointersPointsTo.end(),newPointsTo);
+            return 1;
+        }
+
+        //update the "pointsFrom" records.
+        bool addPointsFrom(AliasObject *srcObj, ObjectPointsTo *pto) {
+            if (!srcObj || !pto) {
+                return false;
+            }
+            //validity check
+            if (pto->targetObject != this) {
+                return false;
+            }
+            if (this->pointsFrom.find(srcObj) == this->pointsFrom.end()) {
+                this->pointsFrom[srcObj].insert(pto);
+            }else {
+                //Detect the duplication.
+                if(std::find_if(this->pointsFrom[srcObj].begin(), this->pointsFrom[srcObj].end(), [pto](const ObjectPointsTo *n) {
+                            return  n->fieldId == pto->fieldId && n->dstfieldId == pto->dstfieldId;
+                            }) == this->pointsFrom[srcObj].end()) {
+                    this->pointsFrom[srcObj].insert(pto);
+                }
+            }
+            return true;
+        }
+
+        //If "act" is negative, the specified pto record will be removed, otherwise, its "is_active" field will be set to "act".
+        bool erasePointsFrom(AliasObject *srcObj, ObjectPointsTo *pto, int act = -1) {
+            if (!srcObj || !pto || this->pointsFrom.find(srcObj) == this->pointsFrom.end()) {
+                return true;
+            }
+            for (auto it = this->pointsFrom[srcObj].begin(); it != this->pointsFrom[srcObj].end(); ) {
+                ObjectPointsTo *p = *it;
+                if (p->fieldId == pto->fieldId && p->dstfieldId == pto->dstfieldId) {
+                    if (act < 0) {
+                        it = this->pointsFrom[srcObj].erase(it);
+                    }else {
+                        //Just deactivate the pointsFrom record w/o removing it.
+                        p->is_active = !!act;
+                        ++it;
+                    }
+                }else {
+                    ++it;
+                }
+            }
+            return true;
+        }
+
+        //activate/de-activate the field pto record.
+        void activateFieldPto(ObjectPointsTo *pto, bool activate = true) {
+            if (!pto) {
+                return;
+            }
+            if (activate) {
+                pto->is_active = true;
+                if (pto->targetObject) {
+                    pto->targetObject->erasePointsFrom(this,pto,1);
+                }
+            }else {
+                pto->is_active = false;
+                if (pto->targetObject) {
+                    pto->targetObject->erasePointsFrom(this,pto,0);
+                }
+            }
+            return;
+        }
+
+        //Get the type of a specific field in this object.
+        Type *getFieldTy(long fid, int *err = nullptr) {
+            return InstructionUtils::getTypeAtIndex(this->targetType,fid,err);
+        }
+
+        //Sometimes the field itself can be another embedded struct, this function intends to return all types at a specific field.
+        void getNestedFieldTy(long fid, std::set<Type*> &retSet) {
+            Type *ety = (fid ? this->getFieldTy(fid) : this->targetType);
+            InstructionUtils::getHeadTys(ety,retSet);
+            return;
+        }
+
+        //At the field there may be en embedded struct, in this function we just return the non-composite type (should be only 1) at "fid".
+        Type *getNonCompFieldTy(long fid) {
+            Type *ety = (fid ? this->getFieldTy(fid) : this->targetType);
+            if (!ety || !dyn_cast<CompositeType>(ety)) {
+                return ety;
+            }
+            return InstructionUtils::getHeadTy(ety);
+        }
+
+        //We want to get all possible pointee types of a certain field, so we need to 
+        //inspect the detailed type desc (i.e. embed/parent object hierarchy).
+        void getFieldPointeeTy(long fid, std::set<Type*> &retSet) {
+            if (this->pointsTo.find(fid) == this->pointsTo.end()) {
+                return;
+            }
+            for (ObjectPointsTo *obj : this->pointsTo[fid]) {
+                if (obj->fieldId == fid) {
+                    if (!obj->targetObject) {
+                        continue;
+                    }
+                    obj->targetObject->getNestedFieldTy(obj->dstfieldId,retSet);
+                }
+            }
+            return;
+        }
+
+        void logFieldPto(long fid, raw_ostream &O) {
+            if (this->pointsTo.find(fid) == this->pointsTo.end()) {
+                return;
+            }
+            int total = 0, act = 0, strong = 0;
+            for (ObjectPointsTo *pto : this->pointsTo[fid]) {
+                if (pto) {
+                    ++total;
+                    if (pto->is_active) {
+                        ++act;
+                    }
+                    if (!pto->is_weak) {
+                        ++strong;
                     }
                 }
             }
+            O << "Field Pto: " << (const void*)this << " | " << fid << " : " << "#Total: " << total 
+            << " #Active: " << act << " #Strong: " << strong << "\n";
         }
 
-        void addObjectToFieldPointsTo(long fieldId, AliasObject *dstObject, Instruction *propagatingInstr) {
-            /***
-            * Add provided object into pointsTo set of the provided fieldId
-            */
+        //This is a wrapper of "updateFieldPointsTo" for convenience, it assumes that we only have one pto record for the "fieldId" to update,
+        //and this pto points to field 0 (can be customized via "dfid") of "dstObject".
+        //TODO: consider to replace more "updateFieldPointsTo" invocation to this when applicable, to simplify the codebase.
+        void addObjectToFieldPointsTo(long fieldId, AliasObject *dstObject, InstLoc *propagatingInstr = nullptr, 
+                                      bool is_weak = false, long dfid = 0) {
+#ifdef DEBUG_UPDATE_FIELD_POINT
+            dbgs() << "addObjectToFieldPointsTo() for: " << InstructionUtils::getTypeStr(this->targetType) << " | " << fieldId;
+            dbgs() << " Host Obj ID: " << (const void*)this << "\n";
+#endif
             if(dstObject != nullptr) {
-                std::set<AliasObject *> currObjects;
-                long srcfieldId = fieldId;
-                // clear all the objects
-                currObjects.clear();
-                // first get all objects that could be pointed by srcfieldId.
-                fetchPointsToObjects(srcfieldId, currObjects);
-                // insert points to information only,
-                // if the object to be added is not present.
-                if (currObjects.find(dstObject) == currObjects.end()) {
-                    ObjectPointsTo *newPointsTo = new ObjectPointsTo();
-                    newPointsTo->propogatingInstruction = propagatingInstr;
-                    newPointsTo->fieldId = srcfieldId;
-                    newPointsTo->dstfieldId = 0;
-                    newPointsTo->targetObject = dstObject;
-                    this->pointsTo.push_back(newPointsTo);
-                }
+                std::set<ObjectPointsTo*> dstPointsTo;
+                ObjectPointsTo *newPointsTo = new ObjectPointsTo(this,fieldId,dstObject,dfid,propagatingInstr,is_weak);
+                dstPointsTo.insert(newPointsTo);
+                this->updateFieldPointsTo(fieldId,&dstPointsTo,propagatingInstr);
+                //We can now delete the allocated objects since "updateFieldPointsTo" has made a copy.
+                delete(newPointsTo);
             }
         }
 
-        /*virtual void fetchPointsToObjects(long srcfieldId, std::set<AliasObject *> &dstObjects, Instruction *targetInstr = nullptr, bool create_arg_obj=false) {
+        //Just return null if there is no embedded object at the specified field.
+        AliasObject *getEmbObj(long fieldId) {
+            if (this->embObjs.find(fieldId) != this->embObjs.end()) {
+                return this->embObjs[fieldId];
+            }
+            return nullptr;
+        }
 
-             // Get all objects pointed by field identified by srcfieldID
+        //Set the "dstObject" as embedded in field "fieldId".
+        bool setEmbObj(long fieldId, AliasObject *dstObject, bool check_ty = false) {
+            if (!dstObject) {
+                return false;
+            }
+            if (this->embObjs.find(fieldId) != this->embObjs.end()) {
+                //There is already an existing emb obj.
+                return false;
+            }
+            //First check whether the object type matches that of the field, if required.
+            if (check_ty) {
+                Type *ety = this->getFieldTy(fieldId);
+                if (!ety) {
+                    return false;
+                }
+                if (!InstructionUtils::same_types(dstObject->targetType,ety)) {
+                    return false;
+                }
+            }
+            //Now embed the object.
+            //TODO: what if the "dstObject" already has a host object?
+            this->embObjs[fieldId] = dstObject;
+            dstObject->parent = this;
+            dstObject->parent_field = fieldId;
+            return true;
+        }
 
-            for(ObjectPointsTo *obj:pointsTo) {
-                if(obj->fieldId == srcfieldId) {
-                    if(std::find(dstObjects.begin(), dstObjects.end(), obj->targetObject) == dstObjects.end()) {
-                        dstObjects.insert(dstObjects.end(), obj->targetObject);
+        //get the outermost parent object.
+        AliasObject *getTopParent() {
+            AliasObject *obj = this;
+            while (obj->parent) {
+                obj = obj->parent;
+            }
+            return obj;
+        }
+
+        bool getPossibleMemberFunctions_dbg(Instruction *inst, FunctionType *targetFunctionType, Type *host_ty, 
+                                            long field, std::vector<Function *> &targetFunctions) {
+            if (!inst || !targetFunctionType || !host_ty || field < 0 || field >= host_ty->getStructNumElements()) {
+                return false;
+            }
+            Module *currModule = inst->getParent()->getParent()->getParent();
+            for(auto a = currModule->begin(), b = currModule->end(); a != b; a++) {
+                Function *currFunction = &(*a);
+                if(!currFunction->isDeclaration()) {
+                    if (currFunction->getName().str() != "vt_ioctl") {
+                        continue;
+                    }
+                    dbgs() << "Find vt_ioctl()\n";
+                    std::map<CompositeType*,std::set<long>> *res = InstructionUtils::getUsesInStruct(currFunction);
+                    if (res) {
+                        dbgs() << "getUsesInStruct succeed!\n";
+                        for (auto& x : *res) {
+                            dbgs() << "-------------------\n";
+                            dbgs() << InstructionUtils::getTypeStr(x.first) << "\n";
+                            for (auto &y : x.second) {
+                                dbgs() << y << ", ";
+                            }
+                            dbgs() << "\n";
+                        }
+                    }
+                    for (Value::user_iterator i = currFunction->user_begin(), e = currFunction->user_end(); i != e; ++i) {
+                        ConstantExpr *constExp = dyn_cast<ConstantExpr>(*i);
+                        ConstantAggregate *currConstA = dyn_cast<ConstantAggregate>(*i);
+                        GlobalValue *currGV = dyn_cast<GlobalValue>(*i);
+                        dbgs() << "USE: " << InstructionUtils::getValueStr(*i) << "### " << (constExp!=nullptr) 
+                        << "|" << (currConstA!=nullptr) << "|" << (currGV!=nullptr) << "\n";
+                        if(constExp != nullptr) {
+                            for (Value::user_iterator j = constExp->user_begin(), je = constExp->user_end(); j != je; ++j) {
+                                ConstantAggregate *currConstAC = dyn_cast<ConstantAggregate>(*j);
+                                dbgs() << "USE(CEXPR): " << InstructionUtils::getValueStr(*i) << "### " << (currConstAC!=nullptr) << "\n";
+                            }
+                        }
+                        if(currConstA != nullptr) {
+                            dbgs() << "Find its use as a ConstantAggregate:\n";
+                            dbgs() << InstructionUtils::getValueStr(currConstA) << "\n";
+                            Constant *constF = currConstA->getAggregateElement(12);
+                            if (!constF) {
+                                dbgs() << "Failure currConstA->getAggregateElement(12)\n";
+                                continue;
+                            }
+                            dbgs() << "constF: " << InstructionUtils::getValueStr(constF) << "\n";
+                            Function *dstFunc = dyn_cast<Function>(constF);
+                            if (!dstFunc && dyn_cast<ConstantExpr>(constF)) {
+                                dbgs() << "!dstFunc && dyn_cast<ConstantExpr>(constF)\n";
+                                //Maybe this field is a casted function pointer.
+                                ConstantExpr *constE = dyn_cast<ConstantExpr>(constF);
+                                if (constE->isCast()) {
+                                    dbgs() << "constE->isCast()\n";
+                                    Value *op = constE->getOperand(0);
+                                    dstFunc = dyn_cast<Function>(op);
+                                    //dstFunc might still be null.
+                                }
+                            }
+                            if (dstFunc) {
+                                dbgs() << dstFunc->getName().str() << "\n";
+                            }else {
+                                dbgs() << "Null dstFunc\n";
+                            }
+                        }
                     }
                 }
             }
-        }*/
+            return false;
+        }
 
-        void fetchPointsToObjects(long srcfieldId, std::set<AliasObject *> &dstObjects,
-                                  Instruction *targetInstr = nullptr, bool create_arg_obj=false) {
-            /***
-             * Get all objects pointed by field identified by srcfieldID
-             *
-             * i.e if a field does not point to any object.
-             * Automatically generate an object and link it with srcFieldId
-             */
-            bool hasObjects = false;
-#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-            dbgs() << "In AliasObject fetch pointsTo object\n";
+        //Try to find a proper function for a func pointer field in a struct.
+        bool getPossibleMemberFunctions(long field, FunctionType *targetFunctionType, Instruction *inst,
+                                        std::set<Function*> &targetFunctions) {
+            Type *host_ty = this->targetType;
+            if (!inst || !targetFunctionType || !host_ty || !dyn_cast<CompositeType>(host_ty)) {
+                return false;
+            }
+            if (!InstructionUtils::isIndexValid(host_ty,field)) {
+                return false;
+            }
+#ifdef DEBUG_SMART_FUNCTION_PTR_RESOLVE
+            dbgs() << "getPossibleMemberFunctions: inst: ";
+            dbgs() << InstructionUtils::getValueStr(inst) << "\n";
+            dbgs() << "FUNC: " << InstructionUtils::getTypeStr(targetFunctionType);
+            dbgs() << " STRUCT: " << InstructionUtils::getTypeStr(host_ty) << " | " << field << "\n";
 #endif
-            for(ObjectPointsTo *obj:pointsTo) {
-                if(obj->fieldId == srcfieldId) {
-                    if(std::find(dstObjects.begin(), dstObjects.end(), obj->targetObject) == dstObjects.end()) {
-                        dstObjects.insert(dstObjects.end(), obj->targetObject);
-                        hasObjects = true;
-                    }
+            if (!inst->getParent()) {
+                return false;
+            }
+            Module *currModule = inst->getFunction()->getParent();
+            std::string fname = "";
+            std::string tname = "";
+            if (dyn_cast<StructType>(host_ty)) {
+                fname = InstructionUtils::getStFieldName(currModule,dyn_cast<StructType>(host_ty),field);
+                if (dyn_cast<StructType>(host_ty)->hasName()) {
+                    tname = dyn_cast<StructType>(host_ty)->getName().str();
+                    InstructionUtils::trim_num_suffix(&tname);
                 }
             }
-            // if there are no objects that this field points to, generate a dummy object.
-            if(!hasObjects && create_arg_obj) {
-#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-                dbgs() << "Creating a new dynamic AliasObject at:";
-                targetInstr->print(dbgs());
-                dbgs() << "\n";
+            //Put the potential callees into three categories (from mostly likely to unlikely):
+            //(1) Both host struct type and pointer field ID match;
+            //(2) The field names match (e.g. both are .put field, but maybe in different host struct types);
+            //(3) Other potential callees besides (1) and (2).
+            std::set<Function*> grp[3];
+            for(auto a = currModule->begin(), b = currModule->end(); a != b; a++) {
+                Function *currFunction = &(*a);
+                // does the current function has same type of the call instruction?
+                if (currFunction->isDeclaration() || !InstructionUtils::same_types(currFunction->getFunctionType(), targetFunctionType)) {
+                    continue;
+                }
+#ifdef DEBUG_SMART_FUNCTION_PTR_RESOLVE
+                dbgs() << "getPossibleMemberFunctions: Got a same-typed candidate callee: "
+                << currFunction->getName().str() << "\n";
 #endif
-                AliasObject *newObj = this->makeCopy();
-                ObjectPointsTo *newPointsToObj = new ObjectPointsTo();
-                newPointsToObj->propogatingInstruction = targetInstr;
-                newPointsToObj->targetObject = newObj;
-                newPointsToObj->fieldId = srcfieldId;
-                // this is the field of the newly created object to which
-                // new points to points to
-                newPointsToObj->dstfieldId = 0;
-                newObj->auto_generated = true;
-
-                // get the taint for the field and add that taint to the newly created object
-                std::set<TaintFlag*> *fieldTaint = getFieldTaintInfo(srcfieldId);
-#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-                dbgs() << "Trying to get taint for field:" << srcfieldId << " for object:" << this << "\n";
+                if (!InstructionUtils::isPotentialIndirectCallee(currFunction)) {
+#ifdef DEBUG_SMART_FUNCTION_PTR_RESOLVE
+                    dbgs() << "getPossibleMemberFunctions: not a potential indirect callee!\n";
 #endif
-                //TODO: debug add this info
-                if(fieldTaint != nullptr) {
-#ifdef DEBUG_FETCH_POINTS_TO_OBJECTS
-                    dbgs() << "Adding taint for field:" << srcfieldId << " for object:" << newObj << "\n";
-#endif
-                    for(auto existingTaint:*fieldTaint) {
-                        newObj->taintAllFields(existingTaint);
+                    continue;
+                }
+                //In theory, at this point the "currFunction" can already be a possible callee, we may have FP, but not FN.
+                //The below filtering logic (based on the host struct type and field id/name of the function pointer) is to
+                //reduce the FP, but in the meanwhile it may introduce FN...
+                //TODO: for grp (1) and (2), currently we can only recognize the statically assigned function pointer field
+                //(e.g. at the definition site), the dynamically assigned ones will be put into grp (3) now.
+                std::map<CompositeType*,std::set<long>> *res = InstructionUtils::getUsesInStruct(currFunction);
+                if (!res || res->empty()) {
+                    grp[2].insert(currFunction);
+                    continue;
+                }
+                bool match_1 = false, match_2 = false;
+                for (auto& x : *res) {
+                    CompositeType *curHostTy = x.first;
+                    if (!curHostTy || x.second.empty()) {
+                        continue;
                     }
-                } else {
-                    // if all the contents are tainted?
-                    if(this->all_contents_tainted) {
-                        dbgs() << "Trying to get field from an object whose contents are fully tainted\n";
-                        assert(this->all_contents_taint_flag != nullptr);
-                        newObj->taintAllFields(this->all_contents_taint_flag);
+#ifdef DEBUG_SMART_FUNCTION_PTR_RESOLVE
+                    dbgs() << "USE: STRUCT: " << InstructionUtils::getTypeStr(curHostTy) << " #";
+                    for (auto& y : x.second) {
+                        dbgs() << y << ", ";
+                    }
+                    dbgs() << "\n";
+#endif
+                    if (InstructionUtils::same_types(curHostTy, host_ty)) {
+                        if (field == -1 || x.second.find(field) != x.second.end() ||
+                            x.second.find(-1) != x.second.end()) 
+                        {
+#ifdef DEBUG_SMART_FUNCTION_PTR_RESOLVE
+                            dbgs() << "getPossibleMemberFunctions: matched! (host | field).\n";
+#endif
+                            match_1 = true;
+                            break;
+                        }
+                    }
+                    if (dyn_cast<StructType>(curHostTy) && fname != "" && !match_2) {
+                        for (auto& y : x.second) {
+                            std::string curFname = InstructionUtils::getStFieldName(currModule,dyn_cast<StructType>(curHostTy),y);
+                            if (curFname == fname) {
+#ifdef DEBUG_SMART_FUNCTION_PTR_RESOLVE
+                                dbgs() << "getPossibleMemberFunctions: matched! (field name).\n";
+#endif
+                                match_2 = true;
+                                break;
+                            }
+                        }
+                        //If besides the field name matching, their host struct names are also highly similar, we may treat
+                        //this as the highest type 1 matching.
+                        if (match_2 && dyn_cast<StructType>(curHostTy)->hasName()) {
+                            std::string curTname = dyn_cast<StructType>(curHostTy)->getName().str();
+                            InstructionUtils::trim_num_suffix(&curTname);
+                            if (InstructionUtils::similarStName(curTname,tname)) {
+#ifdef DEBUG_SMART_FUNCTION_PTR_RESOLVE
+                                dbgs() << "getPossibleMemberFunctions: matched! (field name + similar struct name).\n";
+#endif
+                                match_1 = true;
+                                break;
+                            }
+                        }
                     }
                 }
-
-                //insert the newly create object.
-                pointsTo.push_back(newPointsToObj);
-
-                dstObjects.insert(dstObjects.end(), newObj);
+                if (match_1) {
+                    grp[0].insert(currFunction);
+                }else if (match_2) {
+                    grp[1].insert(currFunction);
+                }else {
+                    grp[2].insert(currFunction);
+                }
             }
+#ifdef DEBUG_SMART_FUNCTION_PTR_RESOLVE
+            dbgs() << "getPossibleMemberFunctions: #grp0: " << grp[0].size() << " #grp1: " << grp[1].size()
+            << " #grp2: " << grp[2].size() << "\n";
+#endif
+            if (grp[0].size() > 0) {
+                targetFunctions.insert(grp[0].begin(),grp[0].end());
+            }else if (grp[1].size() > 0) {
+                targetFunctions.insert(grp[1].begin(),grp[1].end());
+            }else {
+                targetFunctions.insert(grp[2].begin(),grp[2].end());
+                //Reserve only those functions which are part of the driver.
+                InstructionUtils::filterPossibleFunctionsByLoc(inst,targetFunctions);
+            }
+#ifdef DEBUG_SMART_FUNCTION_PTR_RESOLVE
+            dbgs() << "getPossibleMemberFunctions: #ret: " << targetFunctions.size() << "\n";
+#endif
+            return targetFunctions.size() > 0;
         }
 
         //TaintInfo helpers start
 
-        /***
-         * Get the set of taint flag of the provided field.
-         * @param srcfieldId field id for which taint need to be fetched.
-         * @return set of taint flags.
-         */
-        std::set<TaintFlag*> *getFieldTaintInfo(long srcfieldId) {
-            FieldTaint *targetFieldTaint = this->getFieldTaint(srcfieldId);
-            if(targetFieldTaint != nullptr) {
-                return &(targetFieldTaint->targetTaint);
-            } else {
-                if (this->all_contents_taint_flag) {
-                    this->addFieldTaintFlag(srcfieldId, this->all_contents_taint_flag);
-                    // This cannot be null because we have just added it.
-                    return &(this->getFieldTaint(srcfieldId)->targetTaint);
+        //This is basically a wrapper of "getTf" in FieldTaint..
+        void getFieldTaintInfo(long fid, std::set<TaintFlag*> &r, InstLoc *loc = nullptr, bool get_eqv = true) {
+            if (get_eqv) {
+                std::set<TypeField*> eqs;
+                this->getEqvArrayElm(fid,eqs);
+                if (eqs.size() > 1) {
+                    for (TypeField *e : eqs) {
+                        if (e->fid != fid || e->priv != this) {
+#ifdef DEBUG_FETCH_FIELD_TAINT
+                            dbgs() << "AliasObject::getFieldTaintInfo(): ~~>[EQV OBJ] " << (const void*)(e->priv) << "|" << e->fid << "\n";
+#endif
+                            ((AliasObject*)e->priv)->getFieldTaintInfo(e->fid,r,loc,false);
+                        }
+                        delete(e);
+                    }
                 }
             }
-            return nullptr;
+            FieldTaint *ft = this->getFieldTaint(fid);
+            if (ft) {
+                ft->getTf(loc,r);
+            }else if (!this->all_contents_taint_flags.empty()) {
+                this->all_contents_taint_flags.getTf(loc,r);
+            }
+            return;
+        }
+
+        //Get the winner TFs of a certain field.
+        void getWinnerTfs(long fid, std::set<TaintFlag*> &r, bool get_eqv = true) {
+            if (get_eqv) {
+                std::set<TypeField*> eqs;
+                this->getEqvArrayElm(fid,eqs);
+                if (eqs.size() > 1) {
+                    for (TypeField *e : eqs) {
+                        if (e->fid != fid || e->priv != this) {
+#ifdef DEBUG_FETCH_FIELD_TAINT
+                            dbgs() << "AliasObject::getWinnerTfs(): ~~>[EQV OBJ] " << (const void*)(e->priv) << "|" << e->fid << "\n";
+#endif
+                            ((AliasObject*)e->priv)->getWinnerTfs(e->fid,r,false);
+                        }
+                        delete(e);
+                    }
+                }
+            }
+            FieldTaint *ft = this->getFieldTaint(fid);
+            if (ft) {
+                ft->getWinners(r);
+            }else if (!this->all_contents_taint_flags.empty()) {
+                this->all_contents_taint_flags.getWinners(r);
+            }
+            return;
         }
 
         /***
@@ -429,12 +1017,48 @@ namespace DRCHECKER {
          * @return true if added else false if the taint flag is a duplicate.
          */
         bool addFieldTaintFlag(long srcfieldId, TaintFlag *targetTaintFlag) {
+            if (!targetTaintFlag) {
+                return false;
+            }
+#ifdef DEBUG_UPDATE_FIELD_TAINT
+            dbgs() << "AliasObject::addFieldTaintFlag(): " << InstructionUtils::getTypeStr(this->targetType) 
+            << " | " << srcfieldId << " obj: " << (const void*)this << "\n";
+#endif
             FieldTaint *targetFieldTaint = this->getFieldTaint(srcfieldId);
-            if(targetFieldTaint == nullptr) {
-                targetFieldTaint = new FieldTaint(srcfieldId);
+            //Don't propagate a taint kill to a field which has not been tainted so far...
+            if (!targetTaintFlag->is_tainted && (!targetFieldTaint || targetFieldTaint->empty())) {
+#ifdef DEBUG_UPDATE_FIELD_TAINT
+                dbgs() << "AliasObject::addFieldTaintFlag(): try to add a taint kill flag, but the target\
+                field hasn't been tainted yet, so no action...\n";
+#endif
+                return false;
+            }
+            //Don't propagate a taint which originally comes from the same place (e.g. load and store-back).
+            if (targetTaintFlag->is_tainted && targetTaintFlag->targetInstr && targetTaintFlag->targetInstr->inst && 
+                dyn_cast<StoreInst>(targetTaintFlag->targetInstr->inst) &&
+                InstructionUtils::isSelfStore(dyn_cast<StoreInst>(targetTaintFlag->targetInstr->inst))) 
+            {
+                //This means current TF comes from the same mem location earlier and this is just a store-back,
+                //e.g. x = load %p; x = x + 1; store x, %p;
+                //so no need to add the TF again.
+#ifdef DEBUG_UPDATE_FIELD_TAINT
+                dbgs() << "AliasObject::addFieldTaintFlag(): self-store detected, skip current TF...\n";
+#endif
+                return false;
+            }
+            if (targetFieldTaint == nullptr) {
+                targetFieldTaint = new FieldTaint(srcfieldId,this);
                 this->taintedFields.push_back(targetFieldTaint);
             }
-            return targetFieldTaint->addTaintFlag(targetTaintFlag);
+            return targetFieldTaint->addTf(targetTaintFlag);
+        }
+
+        //This is just a wrapper for convenience and compatibility.
+        bool addAllContentTaintFlag(TaintFlag *tf) {
+            if (!tf) {
+                return false;
+            }
+            return this->all_contents_taint_flags.addTf(tf);
         }
 
         /***
@@ -444,59 +1068,344 @@ namespace DRCHECKER {
          * @return true if added else false if the taint flag is a duplicate.
          */
         bool taintAllFields(TaintFlag *targetTaintFlag) {
-            std::set<long> allAvailableFields;
-            if(!this->all_contents_tainted) {
-                this->all_contents_tainted = true;
-                this->all_contents_taint_flag = targetTaintFlag;
-                if (this->targetType->isStructTy()) {
-                    StructType *resStType = dyn_cast<StructType>(this->targetType);
-#ifdef DEBUG
-                    dbgs() << "\nIs a structure type:" << resStType->getNumElements() << "\n";
-#endif
-                    for (long i = 0; i < (resStType->getNumElements()); i++) {
-                        allAvailableFields.insert(allAvailableFields.end(), i);
-                    }
-
-                } else if (this->targetType->isPointerTy() && this->targetType->getContainedType(0)->isStructTy()) {
-                    // if this is a pointer to a struct.
-                    StructType *resStType = dyn_cast<StructType>(this->targetType->getContainedType(0));
-                    for (long i = 0; i < (resStType->getNumElements()); i++) {
-                        allAvailableFields.insert(allAvailableFields.end(), i);
-                    }
-                } else if (this->pointsTo.size()) {
-                    // has some points to?
-                    // iterate thru pointsTo and get all fields.
-                    for (auto objPoint:this->pointsTo) {
-                        long currFieldID = objPoint->fieldId;
-                        // no added? then add.
-                        if (allAvailableFields.find(currFieldID) == allAvailableFields.end()) {
-                            allAvailableFields.insert(allAvailableFields.end(), currFieldID);
-                        }
-                    }
-
-                } else {
-                    // This must be a scalar type.
-                    // just add taint to the field 0.
-                    allAvailableFields.insert(allAvailableFields.end(), 0);
-                }
-
+            if (this->addAllContentTaintFlag(targetTaintFlag)) {
+                std::set<long> allAvailableFields = getAllAvailableFields();
                 // add the taint to all available fields.
-                for (auto fieldId:allAvailableFields) {
-#ifdef DEBUG
-                    dbgs() << "Adding taint to field:" << fieldId << "\n";
+                for (auto fieldId : allAvailableFields) {
+#ifdef DEBUG_UPDATE_FIELD_TAINT
+                    dbgs() << "AliasObject::taintAllFields(): Adding taint to field:" << fieldId << "\n";
 #endif
-                    addFieldTaintFlag(fieldId, targetTaintFlag);
+                    this->addFieldTaintFlag(fieldId, targetTaintFlag);
                 }
-
                 return true;
             }
             return false;
+        }
 
+        inline Value *getValue();
+
+        inline void setValue(Value*);
+
+        virtual void taintPointeeObj(AliasObject *newObj, long srcfieldId, InstLoc *targetInstr);
+
+        virtual void fetchPointsToObjects(long srcfieldId, std::set<std::pair<long, AliasObject*>> &dstObjects, InstLoc *currInst = nullptr,
+                                          bool get_eqv = true, bool create_obj = true);
+
+        virtual void getEqvArrayElm(long fid, std::set<TypeField*> &res);
+
+        virtual void createFieldPointee(long fid, std::set<std::pair<long, AliasObject*>> &dstObjects, 
+                                        InstLoc *currInst = nullptr, InstLoc *siteInst = nullptr);
+
+        virtual void logFieldAccess(long srcfieldId, Instruction *targetInstr = nullptr, const std::string &msg = "");
+
+        //hz: A helper method to create and (taint) an embedded struct obj in the host obj.
+        //If not null, "v" is the pointer to the created embedded object, "loc" is the creation site.
+        AliasObject *createEmbObj(long fid, Value *v = nullptr, InstLoc *loc = nullptr);
+
+        //Given a embedded object ("this") and its #field within the host object, and the host type, create the host object
+        //and maintain their embedding relationships preperly.
+        //"loc" is the creation site.
+        AliasObject *createHostObj(Type *hostTy, long field, InstLoc *loc = nullptr);
+
+        AliasObject *getNestedObj(long fid, Type *dty = nullptr, InstLoc *loc = nullptr);
+
+        //Get the living field ptos at a certain InstLoc.
+        virtual void getLivePtos(long fid, InstLoc *loc, std::set<ObjectPointsTo*> *retPto);
+
+        //Reset the field pto records when switching to a new entry function.
+        virtual void resetPtos(long fid, Instruction *entry);
+
+        //Decide whether the "p" may point to this AliasObject.
+        //Return: negative: impossible, positive: the larger, the more likely.
+        virtual int maybeAPointee(Value *p);
+
+        //Set this object as a taint source, i.e., attach an inherent taint tag and flag for each field.
+        //The "loc" should usually be the creation site of "this" object.
+        bool setAsTaintSrc(InstLoc *loc, bool is_global = true) {
+#ifdef DEBUG_UPDATE_FIELD_TAINT
+            dbgs() << "AliasObject::setAsTaintSrc(): set as taint src, obj: " << (const void*)this << "\n";
+#endif
+            Value *v = this->getValue();
+            if (v == nullptr && this->targetType == nullptr) {
+#ifdef DEBUG_UPDATE_FIELD_TAINT
+                dbgs() << "AliasObject::setAsTaintSrc(): Neither Value nor Type information available for obj: " << (const void*)this << "\n";
+#endif
+                return false;
+            }
+            TaintTag *atag = nullptr;
+            if (v) {
+                atag = new TaintTag(-1,v,is_global,(void*)this);
+            }else {
+                atag = new TaintTag(-1,this->targetType,is_global,(void*)this);
+            }
+            //NOTE: inehrent TF is born w/ the object who might be accessed in different entry functions, so the "targetInstr" of its
+            //inherent TF should be set to "nullptr" to indicate that it's effective globally from the very beginning, so that it can
+            //also easily pass the taint path check when being propagated.
+            //TODO: justify this decision.
+            TaintFlag *atf = new TaintFlag(nullptr,true,atag);
+            atf->is_inherent = true;
+            if (this->addAllContentTaintFlag(atf)) {
+                //add the taint to all available fields.
+                std::set<long> allAvailableFields = this->getAllAvailableFields();
+#ifdef DEBUG_UPDATE_FIELD_TAINT
+                dbgs() << "AliasObject::setAsTaintSrc(): Updating field taint for obj: " << (const void*)this << "\n";
+#endif
+                for (auto fieldId : allAvailableFields) {
+#ifdef DEBUG_UPDATE_FIELD_TAINT
+                    dbgs() << "AliasObject::setAsTaintSrc(): Adding taint to: " << (const void*)this << " | " << fieldId << "\n";
+#endif
+                    TaintTag *tag = nullptr;
+                    if (v) {
+                        tag = new TaintTag(fieldId,v,is_global,(void*)this);
+                    }else {
+                        tag = new TaintTag(fieldId,this->targetType,is_global,(void*)this);
+                    }
+                    //We're sure that we want to set "this" object as the taint source, so it's a strong TF.
+                    TaintFlag *newFlag = new TaintFlag(nullptr,true,tag);
+                    newFlag->is_inherent = true;
+                    this->addFieldTaintFlag(fieldId, newFlag);
+                }
+                this->is_taint_src = (is_global ? 1 : -1);
+                return true;
+            }
+            return false;
+        }
+
+        //set some fields taint src
+        bool setAsTaintFieldSrc(InstLoc *loc, DataLayout *dl, bool is_global = true, int ofset = 0) {
+#ifdef DEBUG_UPDATE_FIELD_TAINT
+            dbgs() << "AliasObject::setAsTaintSrc(): set as taint src, obj: " << (const void*)this << "\n";
+#endif
+            Value *v = this->getValue();
+            if (v == nullptr && this->targetType == nullptr) {
+#ifdef DEBUG_UPDATE_FIELD_TAINT
+                dbgs() << "AliasObject::setAsTaintSrc(): Neither Value nor Type information available for obj: " << (const void*)this << "\n";
+#endif
+                return false;
+            }
+            // TaintTag *atag = nullptr;
+            // if (v) {
+            //     atag = new TaintTag(-1,v,is_global,(void*)this);
+            // }else {
+            //     atag = new TaintTag(-1,this->targetType,is_global,(void*)this);
+            // }
+            // //NOTE: inehrent TF is born w/ the object who might be accessed in different entry functions, so the "targetInstr" of its
+            // //inherent TF should be set to "nullptr" to indicate that it's effective globally from the very beginning, so that it can
+            // //also easily pass the taint path check when being propagated.
+            // //TODO: justify this decision.
+            // TaintFlag *atf = new TaintFlag(nullptr,false,atag);
+            // atf->is_inherent = true;
+            //if (this->addAllContentTaintFlag(atf)) {
+                //add the taint to all available fields.
+                std::set<long> allAvailableFields = this->getAllAvailableFields();
+#ifdef DEBUG_UPDATE_FIELD_TAINT
+                dbgs() << "AliasObject::setAsTaintSrc(): Updating field taint for obj: " << (const void*)this << "\n";
+#endif
+                for (auto fieldId : allAvailableFields) {
+                    if(this->targetType->isStructTy()){
+                        auto sttype = dyn_cast<StructType>(this->targetType);
+                        auto stlayout = dl->getStructLayout(sttype);
+                        if(int(stlayout->getElementOffset(fieldId)) >= ofset){
+                            TaintTag *tag = nullptr;
+                            if (v) {
+                                tag = new TaintTag(fieldId,v,is_global,(void*)this);
+                            }else {
+                                tag = new TaintTag(fieldId,this->targetType,is_global,(void*)this);
+                            }
+                            //We're sure that we want to set "this" object as the taint source, so it's a strong TF.
+                            TaintFlag *newFlag = new TaintFlag(nullptr,true,tag);
+                            newFlag->is_inherent = true;
+                            this->addFieldTaintFlag(fieldId, newFlag);
+                        }
+                    }
+                    
+#ifdef DEBUG_UPDATE_FIELD_TAINT
+                    dbgs() << "AliasObject::setAsTaintSrc(): Adding taint to: " << (const void*)this << " | " << fieldId << "\n";
+#endif
+                }
+
+                // for(auto tfdd : this->taintedFields){
+                //     errs() << tfdd->fieldId << "\n";
+                //     for(auto tfdi : tfdd->targetTaint){
+                //         if(tfdi->isTainted()){
+                //             errs() << "tainted" << "\n";
+                //         }
+                //     }
+                // }
+                // if(this->targetType->isStructTy()){
+                //     errs() << "This obj type is: " << this->targetType->getStructName().str() << "\n";
+                // }
+                
+
+                // if(this->embObjs.size() > 0){
+                //     errs() << "has embobjs!" << "\n";
+                //     errs() << "this obj has: " << this->embObjs.size() << "\n";
+                //     for(auto embobj : this->embObjs){
+                //         errs() << "Their types are: " << embobj.second->targetType->getStructName().str() << "\n";
+                //     }
+                // }
+                
+
+                if(ofset < 0){
+                    errs() << "offset is negative!" << "\n";
+                    if(this->parent && this->parent->targetType->isStructTy()){
+                        auto stlayout = dl->getStructLayout(dyn_cast<StructType>(this->parent->targetType));
+                        auto offsetbyparent = stlayout->getElementOffset(this->parent_field);
+                        auto taintoffsetobyparent = int(offsetbyparent) + ofset;
+                        this->parent->setAsTaintFieldSrc(loc, dl, true, taintoffsetobyparent);
+                        // errs() << "has parent! " << "\n";
+                        // if(this->parent->embObjs.size() > 0){
+                        //     errs() << "parent has: " << this->parent->embObjs.size() << " emb objs!" << "\n";
+                        // }
+                    }
+                }
+                //this->is_taint_src = (is_global ? 1 : -1);
+                return true;
+            //}
+            return false;
+        }
+
+        //Clear all inherent TFs.
+        void clearAllInhTFs() {
+            this->all_contents_taint_flags.removeInhTFs();
+            for (FieldTaint *ft : this->taintedFields) {
+                if (ft) {
+                    ft->removeInhTFs();
+                }
+            }
+        }
+
+        //In some situations we need to reset this AliasObject, e.g. the obj is originally 
+        //allocated by kmalloc() w/ a type i8, and then converted to a composite type.
+        //NOTE that this is usually for the conversion from non-composite obj to the composite one,
+        //if current obj is already composite, we can create the host obj instead.
+        void reset(Value *v, Type *ty, InstLoc *loc = nullptr) {
+#ifdef DEBUG_OBJ_RESET
+            dbgs() << "AliasObject::reset(): reset obj " << (const void*)this << " to type: " 
+            << InstructionUtils::getTypeStr(ty) << ", v: " << InstructionUtils::getValueStr(v) << "\n";
+#endif
+            std::set<long> oldFields = this->getAllAvailableFields();
+            this->setValue(v);
+            if (v && v->getType() && !ty) {
+                ty = v->getType();
+                if (ty->isPointerTy()) {
+                    ty = ty->getPointerElementType();
+                }
+            }
+            this->targetType = ty;
+            std::set<long> curFields = this->getAllAvailableFields();
+            std::set<long> addFields, delFields;
+            for (auto id : curFields) {
+                if (oldFields.find(id) == oldFields.end()) {
+                    addFields.insert(id);
+                }
+            }
+            for (auto id : oldFields) {
+                if (curFields.find(id) == curFields.end()) {
+                    delFields.insert(id);
+                }
+            }
+            //Sync the "all_contents_taint_flags" w/ the newly available individual fields.
+            //TODO: if "all_contents_taint_flags" is inherent, then we need to create different tags for each new field and set
+            //individual inherent tag.
+            if (addFields.size() && !this->all_contents_taint_flags.empty()) {
+                std::set<TaintFlag*> all_tfs;
+                this->all_contents_taint_flags.getTf(loc,all_tfs);
+                if (all_tfs.empty()) {
+                    return;
+                }
+#ifdef DEBUG_UPDATE_FIELD_TAINT
+                dbgs() << "AliasObject::reset(): re-sync the all_contents_taint_flags to each field in reset obj: " << (const void*)this << "\n";
+#endif
+                for (auto fieldId : addFields) {
+                    for (TaintFlag *tf : all_tfs) {
+#ifdef DEBUG_UPDATE_FIELD_TAINT
+                        dbgs() << "AliasObject::reset(): Adding taint to: " << (const void*)this << " | " << fieldId << "\n";
+#endif
+                        //NOTE: we just inherite the "is_weak" of the previousn TF here.
+                        TaintFlag *ntf = new TaintFlag(tf, loc);
+                        this->addFieldTaintFlag(fieldId, ntf);
+                    }
+                }
+            }
+            if (delFields.size()) {
+                //TODO: In theory we need to delete the field pto and TFs of these missing fields.
+#ifdef DEBUG_UPDATE_FIELD_TAINT
+                dbgs() << "!!! AliasObject::reset(): there are some deleted fields after reset!\n";
+#endif
+            }
+        }
+
+        std::set<long> getAllAvailableFields() {
+            std::set<long> allAvailableFields;
+            Type *ty = this->targetType;
+            if (ty) {
+                if (ty->isPointerTy()) {
+                    ty = ty->getPointerElementType();
+                }
+                if (ty->isStructTy()) {
+                    for (long i = 0; i < ty->getStructNumElements(); ++i) {
+                        allAvailableFields.insert(i);
+                    }
+                    return allAvailableFields;
+                }else if (dyn_cast<SequentialType>(ty)) {
+                    for (long i = 0; i < dyn_cast<SequentialType>(ty)->getNumElements(); ++i) {
+                        allAvailableFields.insert(i);
+                    }
+                    return allAvailableFields;
+                }
+            }
+            if (this->pointsTo.size()) {
+                // has some points to?
+                // iterate thru pointsTo and get all fields.
+                for (auto &x : this->pointsTo) {
+                    if (x.second.size()) {
+                        allAvailableFields.insert(x.first);
+                    }
+                }
+            }else {
+                // This must be a scalar type, or null type info.
+                // just add taint to the field 0.
+                allAvailableFields.insert(0);
+            }
+            return allAvailableFields;
         }
 
         //TaintInfo helpers end
 
-
+        //We just created a new pointee object for a certain field in this host object, at this point
+        //we may still need to handle some special cases, e.g.
+        //(0) This host object A is a "list_head" (i.e. a kernel linked list node) and we created a new "list_head" B pointed to by
+        //the A->next, in this case we also need to set B->prev to A.
+        //(1) TODO: handle more special cases.
+        int handleSpecialFieldPointTo(AliasObject *pobj, long fid, InstLoc *targetInstr) {
+            if (!pobj) {
+                return 0;
+            }
+            Type *ht = this->targetType;
+            Type *pt = pobj->targetType;
+            if (!ht || !pt || !ht->isStructTy() || !pt->isStructTy() || !InstructionUtils::same_types(ht,pt)) {
+#ifdef DEBUG_SPECIAL_FIELD_POINTTO
+                dbgs() << "AliasObject::handleSpecialFieldPointTo(): ht and pt are not the same struct pointer.\n";
+#endif
+                return 0;
+            }
+            //Is it of the type "list_head"?
+            std::string ty_name = ht->getStructName().str();
+#ifdef DEBUG_SPECIAL_FIELD_POINTTO
+            dbgs() << "AliasObject::handleSpecialFieldPointTo(): type name: " << ty_name << "\n";
+#endif
+            if (ty_name.find("struct.list_head") == 0 && fid >= 0 && fid <= 1) {
+#ifdef DEBUG_SPECIAL_FIELD_POINTTO
+                dbgs() << "AliasObject::handleSpecialFieldPointTo(): Handle the list_head case: set the prev and next properly..\n";
+                dbgs() << "AliasObject::handleSpecialFieldPointTo(): hobj: " << (const void*)this 
+                << " pobj: " << (const void*)pobj << " fid: " << fid << "\n";
+#endif
+                pobj->addObjectToFieldPointsTo(1-fid,this,targetInstr,false);
+                return 1;
+            }
+            return 0;
+        }
 
         virtual AliasObject* makeCopy() {
             return new AliasObject(this);
@@ -506,6 +1415,9 @@ namespace DRCHECKER {
             return nullptr;
         }
 
+        virtual void setObjectPtr(Value *v) {
+            return;
+        }
 
         virtual bool isSameObject(AliasObject *other) {
             return this == other;
@@ -541,9 +1453,23 @@ namespace DRCHECKER {
             return false;
         }
 
+        virtual bool isFunctionLocal() {
+            /***
+             * checks whether the current object is a function local object.
+             */
+            return false;
+        }
+
         virtual bool isHeapObject() {
             /***
-             * Returns True if this object is a Heap object.
+             * Returns True if this object is a malloced Heap object.
+             */
+            return false;
+        }
+
+        virtual bool isHeapLocation() {
+            /***
+             * Returns True if this object is a HeapLocation instance.
              */
             return false;
         }
@@ -551,6 +1477,14 @@ namespace DRCHECKER {
         virtual bool isGlobalObject() {
             /***
              * Returns True if this object is a Global object.
+             */
+            return false;
+        }
+
+        //hz: add for new subclass.
+        virtual bool isOutsideObject() {
+            /***
+             * Returns True if this object is an Outside object.
              */
             return false;
         }
@@ -566,10 +1500,29 @@ namespace DRCHECKER {
             return -1;
         }
 
-    private:
+        //NOTE: "is_weak" by default is "-1", this means whether it's a weak update is 
+        //decided by "is_weak" field of each PointerPointsTo in "dstPointsTo",
+        //in some cases, the arg "is_weak" can be set to 0 (strong update) or 1 (weak update) 
+        //to override the "is_weak" field in "dstPointsTo".
+        //NOTE: this function will make a copy of "dstPointsTo" and will not do any modifications 
+        //to "dstPointsTo", the caller is responsible to free "dstPointsTo" if necessary.
+        void updateFieldPointsTo(long srcfieldId, std::set<ObjectPointsTo*> *dstPointsTo, InstLoc *propagatingInstr, int is_weak = -1);
+
+        //A wrapper for compatiability...
+        //TODO: this ugly, need to refactor later.
+        void updateFieldPointsTo(long srcfieldId, std::set<PointerPointsTo*> *dstPointsTo, InstLoc *propagatingInstr, int is_weak = -1) {
+            if (!dstPointsTo || dstPointsTo->empty()) {
+                return;
+            }
+            std::set<ObjectPointsTo*> ptos;
+            for (PointerPointsTo *p : *dstPointsTo) {
+                ptos.insert(p);
+            }
+            this->updateFieldPointsTo(srcfieldId,&ptos,propagatingInstr,is_weak);
+        }
 
         FieldTaint* getFieldTaint(long srcfieldId) {
-            for(auto currFieldTaint:taintedFields) {
+            for(auto currFieldTaint : taintedFields) {
                 if(currFieldTaint->fieldId == srcfieldId) {
                     return currFieldTaint;
                 }
@@ -577,38 +1530,22 @@ namespace DRCHECKER {
             return nullptr;
         }
 
+    private:
 
-        void updateFieldPointsTo(long srcfieldId, std::set<PointerPointsTo*>* dstPointsTo, Instruction *propogatingInstr) {
-            /***
-             * Add all objects in the provided pointsTo set to be pointed by the provided srcFieldID
-             */
-            if(dstPointsTo != nullptr) {
-                std::set<AliasObject*> currObjects;
-                // first get all objects that could be pointed by srcfieldId of the current object.
-                fetchPointsToObjects(srcfieldId, currObjects);
-                //Add all objects that are in the provided set by changing the field id.
-                for (PointerPointsTo *currPointsTo: *dstPointsTo) {
-                    // insert points to information only, if it is not present.
-                    if(currObjects.find(currPointsTo->targetObject) == currObjects.end()) {
-                        ObjectPointsTo *newPointsTo = currPointsTo->makeCopy();
-                        newPointsTo->fieldId = srcfieldId;
-                        newPointsTo->propogatingInstruction = propogatingInstr;
-                        this->pointsTo.push_back(newPointsTo);
-                    }
-                }
-            }
+        //NOTE: the arg "is_weak" has the same usage as updateFieldPointsTo().
+        void updateFieldPointsTo_do(long srcfieldId, std::set<ObjectPointsTo*> *dstPointsTo, InstLoc *propagatingInstr, int is_weak = -1);
 
-        }
-
-
+        //This records the first inst of an entry function we have just swicthed to and reset the field (key is the field ID) pto.
+        std::map<long,Instruction*> lastPtoReset;
 
     protected:
         void printPointsTo(llvm::raw_ostream& os) const {
             os << "Points To Information:\n";
-            for(ObjectPointsTo *obp: this->pointsTo) {
-                os << "\t";
-                os << (*obp);
-                os << "\n";
+            for (auto &x : this->pointsTo) {
+                os << "Field: " << x.first << ":\n";
+                for (ObjectPointsTo *obp : x.second) {
+                    os << "\t" << (*obp) << "\n";
+                }
             }
         }
     };
@@ -616,7 +1553,7 @@ namespace DRCHECKER {
     class FunctionLocalVariable : public AliasObject {
     public:
         Function *targetFunction;
-        AllocaInst *targetAllocaInst;
+        Value *targetAllocaInst;
         Value *targetVar;
         // This differentiates local variables from different calling context.
         std::vector<Instruction *> *callSiteContext;
@@ -650,6 +1587,14 @@ namespace DRCHECKER {
             return this->targetAllocaInst;
         }
 
+        void setObjectPtr(Value *v) {
+            this->targetAllocaInst = v;
+        }
+
+        bool isFunctionLocal() {
+            return true;
+        }
+
         friend llvm::raw_ostream& operator<<(llvm::raw_ostream& os, const FunctionLocalVariable& obj) {
             os << "Function Local variable with type:";
             obj.targetType->print(os);
@@ -657,8 +1602,6 @@ namespace DRCHECKER {
             obj.printPointsTo(os);
             return os;
         }
-
-
     };
 
     class GlobalObject : public AliasObject {
@@ -687,15 +1630,59 @@ namespace DRCHECKER {
             return this->targetVar;
         }
 
+        void setObjectPtr(Value *v) {
+            this->targetVar = v;
+        }
+
         bool isGlobalObject() {
             return true;
         }
     };
 
+    //hz: create a new GlobalObject for a pointer Value w/o point-to information, this
+    //can be used for driver function argument like FILE * which is defined outside the driver module.
+    class OutsideObject : public AliasObject {
+    public:
+        //hz: the pointer to the outside object.
+        Value *targetVar;
+        OutsideObject(Value* outVal, Type *outVarType) {
+            this->targetVar = outVal;
+            this->targetType = outVarType;
+#ifdef DEBUG_OUTSIDE_OBJ_CREATION
+            dbgs() << "###NEW OutsideObj: targetVar: " << InstructionUtils::getValueStr(this->targetVar) 
+            << " ty: " << InstructionUtils::getTypeStr(this->targetType) << "\n";
+#endif
+        }
+        OutsideObject(OutsideObject *origOutsideVar): AliasObject(origOutsideVar) {
+            this->targetVar = origOutsideVar->targetVar;
+            this->targetType = origOutsideVar->targetType;
+#ifdef DEBUG_OUTSIDE_OBJ_CREATION
+            dbgs() << "###COPY OutsideObj: targetVar: " << InstructionUtils::getValueStr(this->targetVar) 
+            << " ty: " << InstructionUtils::getTypeStr(this->targetType) << "\n";
+#endif
+        }
+        AliasObject* makeCopy() {
+            return new OutsideObject(this);
+        }
+
+        Value* getObjectPtr() {
+            return this->targetVar;
+        }
+
+        void setObjectPtr(Value *v) {
+            this->targetVar = v;
+        }
+
+        bool isOutsideObject() {
+            return true;
+        }
+
+    };
+
     class HeapLocation : public AliasObject {
     public:
         Function *targetFunction;
-        Instruction *targetAllocInstruction;
+        Value *targetAllocInstruction;
         std::vector<Instruction *> *callSiteContext;
         Value *targetAllocSize;
         bool is_malloced;
@@ -711,6 +1698,7 @@ namespace DRCHECKER {
             this->is_initialized = false;
             this->initializingInstructions.clear();
         }
+
         HeapLocation(HeapLocation *srcHeapLocation): AliasObject(srcHeapLocation) {
             this->targetAllocInstruction = srcHeapLocation->targetAllocInstruction;
             this->targetFunction = srcHeapLocation->targetFunction;
@@ -719,11 +1707,17 @@ namespace DRCHECKER {
             this->targetAllocSize = srcHeapLocation->targetAllocSize;
             this->is_malloced = srcHeapLocation->is_malloced;
         }
+
         AliasObject* makeCopy() {
             return new HeapLocation(this);
         }
+
         Value* getObjectPtr() {
             return this->targetAllocInstruction;
+        }
+
+        void setObjectPtr(Value *v) {
+            this->targetAllocInstruction = v;
         }
 
         Value* getAllocSize() {
@@ -735,6 +1729,10 @@ namespace DRCHECKER {
              * Return true if this is malloced
              */
             return this->is_malloced;
+        }
+
+        bool isHeapLocation() {
+            return true;
         }
 
     };
@@ -757,61 +1755,94 @@ namespace DRCHECKER {
             this->callSiteContext = srcFunctionArg->callSiteContext;
             this->targetType = srcFunctionArg->targetType;
         }
+
         AliasObject* makeCopy() {
             return new FunctionArgument(this);
         }
+
         Value* getObjectPtr() {
             return this->targetArgument;
         }
 
-        /*void fetchPointsToObjects(long srcfieldId, std::set<AliasObject *> &dstObjects, Instruction *targetInstr = nullptr, bool create_arg_obj=false) {
-            /***
-             * Get all objects pointed by field identified by srcfieldID
-             *
-             * If this is a function argument, we should be able to generate the object on demand.
-             *
-             * i.e if a field does not point to any object.
-             * Automatically generate an object and link it with srcFieldId
-
-            bool hasObjects = false;
-#ifdef DEBUG_FUNCTION_ARG_OBJ_CREATION
-            dbgs() << "In Function ARG fetch pointsTo object\n";
-#endif
-            for(ObjectPointsTo *obj:pointsTo) {
-                if(obj->fieldId == srcfieldId) {
-                    if(std::find(dstObjects.begin(), dstObjects.end(), obj->targetObject) == dstObjects.end()) {
-                        dstObjects.insert(dstObjects.end(), obj->targetObject);
-                        hasObjects = true;
-                    }
-                }
-            }
-            // if there are no objects that this field points to, generate a dummy object.
-            if(!hasObjects && create_arg_obj) {
-#ifdef DEBUG_FUNCTION_ARG_OBJ_CREATION
-                dbgs() << "Creating a new dynamic function arg object at:";
-                targetInstr->print(dbgs());
-                dbgs() << "\n";
-#endif
-                AliasObject *newObj = this->makeCopy();
-                ObjectPointsTo *newPointsToObj = new ObjectPointsTo();
-                newPointsToObj->propogatingInstruction = targetInstr;
-                newPointsToObj->targetObject = newObj;
-                newPointsToObj->fieldId = srcfieldId;
-                newPointsToObj->dstfieldId = 0;
-                newObj->auto_generated = true;
-
-                //insert the newly create object.
-                pointsTo.push_back(newPointsToObj);
-
-                dstObjects.insert(dstObjects.end(), newObj);
-            }
-        }*/
+        void setObjectPtr(Value *v) {
+            this->targetArgument = v;
+        }
 
         bool isFunctionArg() {
             return true;
         }
     };
 
+    //hz: get the llvm::Value behind this AliasObject.
+    Value *AliasObject::getValue() {
+        return this->getObjectPtr();
+        /*
+        Value *v = nullptr;
+        if (this->isGlobalObject()){
+            v = ((DRCHECKER::GlobalObject*)this)->targetVar;
+        }else if(this->isFunctionArg()){
+            v = ((DRCHECKER::FunctionArgument*)this)->targetArgument;
+        }else if (this->isFunctionLocal()){
+            v = ((DRCHECKER::FunctionLocalVariable*)this)->targetVar;
+        }else if (this->isOutsideObject()){
+            v = ((DRCHECKER::OutsideObject*)this)->targetVar;
+        }//TODO: HeapAllocation
+        return v;
+        */
+    }
+
+    void AliasObject::setValue(Value *v) {
+        this->setObjectPtr(v);
+    }
+
+    //hz: A helper method to create a new OutsideObject according to a given type.
+    //Note that all we need is the type, in the program there may not exist any IR that can actually point to the newly created object,
+    //thus this method is basically for the internal use (e.g. in multi-dimension GEP, or in fetchPointToObjects()).
+    extern OutsideObject* createOutsideObj(Type *ty);
+
+    //hz: A helper method to create a new OutsideObject according to the given pointer "p" (possibly an IR).
+    //"loc" is the creation site.
+    extern OutsideObject* createOutsideObj(Value *p, InstLoc *loc = nullptr);
+
+    extern int matchFieldsInDesc(Module *mod, Type *ty0, std::string& n0, Type *ty1, std::string& n1, 
+                                 int bitoff, std::vector<FieldDesc*> *fds, std::vector<unsigned> *res);
+
+    extern void sortCandStruct(std::vector<CandStructInf*> *cands, std::set<Instruction*> *insts);
+
+    //Given 2 field types and their distance (in bits), return a list of candidate struct types.
+    extern std::vector<CandStructInf*> *getStructFrom2Fields(DataLayout *dl, Type *ty0, std::string& n0, 
+                                                             Type *ty1, std::string& n1, long bitoff, Module *mod);
+
+    //This function assumes that "v" is a i8* srcPointer of a single-index GEP and it points to the "bitoff" inside an object of "ty",
+    //our goal is to find out the possible container objects of the target object of "ty" (the single-index GEP aims to locate a field
+    //that is possibly outside the scope of current "ty" so we need to know the container), to do this we will analyze all similar GEPs
+    //that use the same "v" as the srcPointer.
+    //Return: we return a "CandStructInf" to indicate the location of the original "bitoff" inside "ty" in the larger container object.
+    extern CandStructInf *inferContainerTy(Module *m,Value *v,Type *ty,long bitoff);
+
+    //hz: when analyzing multiple entry functions, they may share some objects:
+    //(0) explicit global objects, we don't need to take special care of these objects 
+    //since they are pre-created before all analysis and will naturally shared.
+    //(1) the outside objects created by us on the fly (e.g. the file->private in the driver), 
+    //multiple entry functions in driver (e.g. .ioctl and .read/.write)
+    //can shared the same outside objects, so we design this obj cache to record all 
+    //the top-level outside objects created when analyzing each entry function,
+    //when we need to create a same type outside object later in a different entry function, we will then directly retrieve it from this cache.
+    //TODO: what about the kmalloc'ed objects whose types are later changed to a struct...
+    extern std::map<Type*,std::map<Function*,std::set<OutsideObject*>>> sharedObjCache;
+
+    extern Function *currEntryFunc;
+
+    extern int addToSharedObjCache(OutsideObject *obj);
+
+    extern OutsideObject *getSharedObjFromCache(Value *v,Type *ty);
+
+    //"fd" is a bit offset desc of "pto->targetObject", it can reside in nested composite fields, 
+    //this function creates all nested composite fields
+    //in order to access the bit offset of "fd", while "limit" is the lowest index we try to create an emb obj in fd->host_tys[].
+    extern int createEmbObjChain(FieldDesc *fd, PointerPointsTo *pto, int limit, InstLoc *loc = nullptr);
+
+    extern int createHostObjChain(FieldDesc *fd, PointerPointsTo *pto, int limit, InstLoc *loc = nullptr);
 
 }
 

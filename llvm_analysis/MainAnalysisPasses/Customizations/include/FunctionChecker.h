@@ -102,6 +102,45 @@ namespace DRCHECKER {
         }
 
         /***
+         *  Is this function atoi like function?
+         *
+         * @param targetFunction Function to be checked.
+         * @return true/false
+         */
+        virtual bool is_atoi_function(const Function *targetFunction) {
+            return false;
+        }
+
+        /***
+         * Is this function sscanf?
+         * @param targetFunction Function to be checked.
+         * @return true/false
+         */
+        virtual bool is_sscanf_function(const Function *targetFunction) {
+           return false;
+        }
+
+        /***
+         * Will this function create a new fd?
+         * @param targetFunction Function to be checked.
+         * @return true/false
+         */
+        virtual bool is_fd_creation_function(const Function *targetFunction) {
+           return false;
+        }
+
+        virtual bool is_memdup_function(const Function *targetFunction) {
+            return false;
+        }
+
+        virtual std::map<long,long> get_fd_field_arg_map(const Function *targetFunction) {
+            std::map<long,long> defaultFieldArgMap;
+            // make sure that the function is a fd creation.
+            assert(this->is_fd_creation_function(targetFunction));
+            return defaultFieldArgMap;
+        }
+
+        /***
          *  Get the argument index of source and destination operands of the memcpy function.
          *  srcOperand -> 0
          *  dstOperand -> 1
