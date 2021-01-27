@@ -1247,7 +1247,7 @@ namespace DRCHECKER {
                 
 
                 if(ofset < 0){
-                    errs() << "offset is negative!" << "\n";
+                    errs() << "offset is negative: " << ofset << "\n";
                     if(this->parent && this->parent->targetType->isStructTy()){
                         auto stlayout = dl->getStructLayout(dyn_cast<StructType>(this->parent->targetType));
                         auto offsetbyparent = stlayout->getElementOffset(this->parent_field);

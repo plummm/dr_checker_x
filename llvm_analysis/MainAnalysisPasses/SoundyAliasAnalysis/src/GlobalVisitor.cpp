@@ -108,6 +108,33 @@ namespace DRCHECKER {
         }
     }
 
+    bool checkObjTainted(ObjectPointsTo *pto, int depth){
+        if(depth >= 2){
+            return false;
+        }
+        auto target_field = pto->dstfieldId;
+        auto dstObj = pto->targetObject;
+        if(dstObj){
+            auto fdtaintinfo = dstObj->getFieldTaint(target_field);
+            if(fdtaintinfo){
+                for(auto taintinfo : fdtaintinfo->targetTaint){
+                    if(taintinfo->isTainted()){
+                        return true;
+                    }
+                }
+            }
+            for(auto fdpto : dstObj->pointsTo){
+                for(auto pto_o : fdpto.second){
+                    if(checkObjTainted(pto_o, depth + 1)){
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+
     void GlobalVisitor::processCalledFunction(CallInst &I, Function *currFunc) {
         std::string currFuncName = currFunc->getName().str();
 #ifdef DONOT_CARE_COMPLETION
@@ -127,8 +154,8 @@ namespace DRCHECKER {
             //std::set<std::string> black_funcs{"con_write","do_con_write","io_serial_out","io_serial_in","emulation_required", "kfree", "mutex_lock", "mutex_unlock", "queue_delayed_work_on", "pvclock_read_wallclock", "record_times", "update_rq_clock", "sched_clock_idle_sleep_event", \
                 "printk", "vprintk", "queued_spin_lock_slowpath", "__pv_queued_spin_lock_slowpath", "queued_read_lock_slowpath", "queued_write_lock_slowpath", "dump_page", "__warn_printk", "__put_page", "refcount_dec_and_test", "___cache_free", "trace_kmem_cache_free", "kfree_skb", "refcount_sub_and_test", "unix_write_space", \
                 "free_percpu","refcount_sub_and_test_checked","refcount_dec_and_test_checked","refcount_dec_and_mutex_lock","_raw_spin_lock_bh", "trace_lock_acquire", "_raw_spin_unlock_bh", "lock_release", "mutex_lock_nested", "__mutex_lock", "__mutex_lock_common", "__might_sleep", "llvm.lifetime.start.p0i8", "___might_sleep", "print_kernel_ident", "rcu_is_watching", "debug_lockdep_rcu_enabled"};
-            std::set<std::string> black_funcs{"__kasan_check_read", "__kasan_check_write", "kasan_report_double_free", "kasan_check_read", "kasan_check_write","__mutex_lock", "__mutex_unlock", "queue_delayed_work_on", "pvclock_read_wallclock", "record_times", "kfree", "update_rq_clock", "sched_clock_idle_sleep_event", \
-            "printk", "vprintk", "queued_spin_lock_slowpath", "__pv_queued_spin_lock_slowpath", "queued_read_lock_slowpath", "queued_write_lock_slowpath"};
+            std::set<std::string> black_funcs{"__kasan_check_read", "__kasan_check_write","kasan_report_double_free", "kasan_check_read", "kasan_check_write", "kasan_unpoison_shadow", "queue_delayed_work_on", "pvclock_read_wallclock","mutex_lock", "__mutex_lock", "mutex_unlock", "__mutex_unlock", "record_times", "kfree", "update_rq_clock", "sched_clock_idle_sleep_event", \
+            "__warn_printk", "srm_printk", "snd_printk", "dbgp_printk", "ql4_printk", "printk", "vprintk", "__dump_page", "irq_stack_union", "queued_spin_lock_slowpath", "__pv_queued_spin_lock_slowpath", "queued_read_lock_slowpath", "queued_write_lock_slowpath"};
             std::set<std::string> black_funcs_inc{"asan_report","llvm.dbg","__sanitizer_cov_trace_pc"};
             if (black_funcs.find(currFuncName) != black_funcs.end()) {
                 dbgs() << "Func in blacklist, IGNORING:" << currFuncName << "\n";
@@ -157,7 +184,7 @@ namespace DRCHECKER {
                 auto ptos = getPointsToObjects(arg);
                 if(ptos){
                     for(auto pto : *ptos){
-                        long target_field = pto->dstfieldId;
+                        /*long target_field = pto->dstfieldId;
                         auto dstObj = pto->targetObject;
                         auto fdtaintinfo = dstObj->getFieldTaint(target_field);
                         if(fdtaintinfo){
@@ -166,6 +193,9 @@ namespace DRCHECKER {
                                     goto UsefulCall;
                                 }
                             }
+                        }*/
+                        if(checkObjTainted(pto, 0)){
+                            goto UsefulCall;
                         }
                     }
                 }
@@ -239,7 +269,48 @@ namespace DRCHECKER {
             // Start analyzing the function.
             
             vis->analyze();
-
+            //errs() << "caller: " <<I.getFunction()->getName().str() << " Analyze: "<< currFunc->getName().str() << "\n";
+            if (!terminatingFunc) {
+                for (int i = 0; i < this->currState.callsiteinfos.size() -1; i++) {
+                    auto callee = this->currState.callsiteinfos[i];
+                    auto caller = this->currState.callsiteinfos[i+1];
+                    errs() << "caller func: " <<caller->funcname << " callee func: "<< callee->funcname << "\n";
+                    if (callee->funcname == currFunc->getName().str() && caller->funcname == I.getFunction()->getName().str())
+                        terminatingFunc = true;
+                }
+                if (terminatingFunc) {
+                    int argnum = I.getNumArgOperands();
+                    bool hasTaintInfo = false;
+                    for(int i = 0; i < argnum; i++){
+                        auto arg = I.getArgOperand(i);
+                        if(!hasPointsToObjects(arg)){
+                            arg = arg->stripPointerCasts();
+                        }
+                        auto ptos = getPointsToObjects(arg);
+                        if(ptos){
+                            for(auto pto : *ptos){
+                                if(checkObjTainted(pto, 0)){
+                                    hasTaintInfo = true;
+                                }
+                            }
+                            
+                        }
+                    }
+                    auto ptos = getPointsToObjects(&I);
+                    if(ptos){
+                        for(auto pto : *ptos){
+                            if(checkObjTainted(pto, 0)){
+                                hasTaintInfo = true;
+                            }
+                        }
+                    }
+                    if(!hasTaintInfo){
+                        ofstream fout(this->currState.printPathDir + "/TerminatingFunc");
+                        fout << currFunc->getName().str();
+                        fout.close();
+                    }
+                }
+            }
             // stitch back the contexts of all the member visitor callbacks.
             for(std::map<VisitorCallback *, VisitorCallback *>::iterator iter = parentChildCallBacks.begin();
                 iter != parentChildCallBacks.end();

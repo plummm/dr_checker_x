@@ -15,6 +15,8 @@
 #include "VisitorCallback.h"
 #include "../../Utils/include/InstructionUtils.h"
 
+static bool terminatingFunc = false;
+
 using namespace llvm;
 
 namespace DRCHECKER {

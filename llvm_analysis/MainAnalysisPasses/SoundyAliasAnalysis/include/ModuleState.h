@@ -181,6 +181,8 @@ namespace DRCHECKER {
 
         std::set<CallInst *> taintedindirectcalls;
 
+        std::string printPathDir;
+
         //std::vector<CalltraceItem*> syzcalltrace;
 
 
