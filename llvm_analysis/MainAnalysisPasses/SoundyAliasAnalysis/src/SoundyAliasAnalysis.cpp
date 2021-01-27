@@ -1214,8 +1214,8 @@ namespace DRCHECKER {
                     llvm::DebugLoc dbgloc = (*I).getDebugLoc();
                     if (!dbgloc)
                         continue;
-                    errs() << (*I) << "\n";
-                    errs() << dbgloc->getFilename().str() << ":" << dbgloc->getLine() << "\n";
+                    //errs() << (*I) << "\n";
+                    //errs() << dbgloc->getFilename().str() << ":" << dbgloc->getLine() << "\n";
                     if (isInst<CallInst>(&(*I)) && dbglocMatch(dbgloc, item->filePath, item->line)) {
                         CallInst *call = dyn_cast<CallInst>(&(*I));
                         llvm::Function *callee = call->getCalledFunction();
