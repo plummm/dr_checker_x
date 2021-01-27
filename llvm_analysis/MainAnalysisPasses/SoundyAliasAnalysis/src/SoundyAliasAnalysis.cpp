@@ -280,6 +280,10 @@ namespace DRCHECKER {
                    i->basePointer->print(errs());
                    errs() << "\n";
                 }
+            
+            if (input == NULL) {
+                errs() << "Can not locate the vulnerable site\n";
+            }
 
             for(auto tmpsite : calltrace){
                     if(tmpsite->F == nullptr){
@@ -312,7 +316,6 @@ namespace DRCHECKER {
                 }
 
                 if(!callsite->F){
-                    errs() << "callsite func is null\n";
                     findNextFuncInModule();
                     //continue;
                 }
@@ -404,6 +407,7 @@ namespace DRCHECKER {
     #endif
                 // first instruction of the entry function, used in the initial calling context.
                 std::vector<Instruction*> *pcallSites = new std::vector<Instruction*>();
+                errs() << "currFunction: " << currFunction.getName().str() << " " << &currFunction.getEntryBlock() << "\n";
                 pcallSites->push_back(currFunction.getEntryBlock().getFirstNonPHIOrDbg());
                 
 
@@ -1200,14 +1204,18 @@ namespace DRCHECKER {
                     break;
                 CalltraceItem *item = calltrace[i];
                 auto F = item->F;
+                if (item->F == NULL) {
+                    errs() << "Can not find " << item->funcName << " in bc\n";
+                    return;
+                }
                 inst_iterator I = inst_begin(*F), E = inst_end(*F);
                 errs() << item->filePath << ":" << item->line << "\n";
                 for (; I != E; ++I) {
                     llvm::DebugLoc dbgloc = (*I).getDebugLoc();
                     if (!dbgloc)
                         continue;
-                    //errs() << (*I) << "\n";
-                    //errs() << dbgloc->getFilename().str() << ":" << dbgloc->getLine() << "\n";
+                    errs() << (*I) << "\n";
+                    errs() << dbgloc->getFilename().str() << ":" << dbgloc->getLine() << "\n";
                     if (isInst<CallInst>(&(*I)) && dbglocMatch(dbgloc, item->filePath, item->line)) {
                         CallInst *call = dyn_cast<CallInst>(&(*I));
                         llvm::Function *callee = call->getCalledFunction();
