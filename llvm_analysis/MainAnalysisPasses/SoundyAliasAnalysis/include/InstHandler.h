@@ -6,7 +6,7 @@ using namespace std;
 
 static cl::opt<string> BUG_Vul_File ("VulFile", cl::desc("The file that UAF/OOB occurs"), cl::init(""));
 static cl::opt<string> BUG_Func_File ("FuncFile", cl::desc("The bug may occur in an inline function, this argument indicate the file of first non-inline caller"), cl::init(""));
-static cl::opt<string> BUG_Func ("BUGFunc", cl::desc("The function that UAF/OOB occurs"), cl::init(""));
+static cl::opt<string> BUG_Func ("Func", cl::desc("The function that UAF/OOB occurs"), cl::init(""));
 static cl::opt<string> Calltrace_File ("CalltraceFile", cl::desc("The path of a calltrace"), cl::init(""));
 static cl::opt<int> BUG_Vul_Line ("VulLine", cl::desc("Which line of the vulerable function that UAF/OOB occur"), cl::init(0));
 static cl::opt<int> BUG_Func_Line ("FuncLine", cl::desc("Which line of the caller that UAF/OOB occur"), cl::init(0));
@@ -39,6 +39,7 @@ struct Load {
         offset -= BUG_Offset;
         struct Input *ret = (struct Input *)malloc(sizeof(struct Input));
         //errs() << "basepointer: " << (*basePointer) << "\n";
+        errs() << "Load: " << (*load) << "\n";
         ret->basePointer = basePointer;
         ret->inst = load;
         ret->offset = offset;

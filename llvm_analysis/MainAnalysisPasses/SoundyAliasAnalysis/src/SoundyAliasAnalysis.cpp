@@ -91,6 +91,7 @@ namespace DRCHECKER {
     static cl::opt<std::string> entryConfig("entryConfig",
                                               cl::desc("Config file that specifies all entry functions to be analyzed and the related information like type and user arg"),
                                               cl::value_desc("The path of the config file"), cl::init(""));
+    static cl::opt<string> printPathDir ("PrintPathDir", cl::desc("Print paths to a directory"), cl::init(""));
 
     
 
@@ -279,6 +280,10 @@ namespace DRCHECKER {
                    i->basePointer->print(errs());
                    errs() << "\n";
                 }
+            
+            if (input == NULL) {
+                errs() << "Can not locate the vulnerable site\n";
+            }
 
             for(auto tmpsite : calltrace){
                     if(tmpsite->F == nullptr){
@@ -300,6 +305,7 @@ namespace DRCHECKER {
 
             int filecount = 0;
             int depth = 0;
+            std::set<Instruction *> visitedusesites;
             for(auto callsite : calltrace){
 
                 if(filecount > 20){
@@ -307,6 +313,11 @@ namespace DRCHECKER {
                 }
                 if(depth >= 5 || depth++ >= calltrace.size()){
                     break;
+                }
+
+                if(!callsite->F){
+                    findNextFuncInModule();
+                    //continue;
                 }
                 GlobalState currState(currDataLayout);
                 // set the read and write flag in global state, to be used by differect detectors.
@@ -317,25 +328,13 @@ namespace DRCHECKER {
                 // setting function checker(s).
                 TaintAnalysisVisitor::functionChecker = targetChecker;
                 AliasAnalysisVisitor::callback->targetChecker = targetChecker;
-
-                // Setup aliases for global variables.
-               
-                //hz: taint all global objects, field-sensitive.
-                //addGlobalTaintSource(currState);
-
-                
-                //auto entryfunc = getFuncByName(m, callsite->funcName);
-                //auto bugfunc = getFuncByName(m, BUG_Func);
-
-                
-                // currState.basePointer = input->basePointer;
-                // currState.offsetfrbase = input->offset;
-                if(!callsite->F){
-                    findNextFuncInModule();
+                for(auto visitedusesite : visitedusesites){
+                    currState.visitedsites.insert(visitedusesite);
                 }
 
                 currState.entryfunc = callsite->F;
                 currState.filecounter = filecount;
+                currState.printPathDir = printPathDir;
 
                 int CallTracePointer = 0;
 
@@ -389,44 +388,6 @@ namespace DRCHECKER {
                 //the goal is to set up some preliminary point-to records used in the real target functions.
                 dbgs() << "=========================Preliminary Analysis Phase=========================\n";
                 currState.analysis_phase = 1;
-    //             if (!skipInit) {
-    //                 std::set<Function*> toAnalyzeInitFunctions;
-    //                 for (FuncInf *fi : targetFuncs) {
-    //                     getAllInterestingInitFunctions(m, fi->name, toAnalyzeInitFunctions);
-    //                 }
-    //                 dbgs() << "Analyzing: " << toAnalyzeInitFunctions.size() << " init functions\n";
-    //                 for(auto currInitFunc : toAnalyzeInitFunctions) {
-    //                     dbgs() << "CTX: " << currInitFunc->getName() << " ->\n";
-    // #ifdef TIMING
-    //                     dbgs() << "[TIMING] Start func(1) " << currInitFunc->getName() << ": ";
-    //                     auto t0 = InstructionUtils::getCurTime(&dbgs());
-    // #endif
-    //                     this->printCurTime();
-    //                     std::vector<std::vector<BasicBlock*>*> *traversalOrder =
-    //                             BBTraversalHelper::getSCCTraversalOrder(*currInitFunc);
-
-    //                     std::vector<Instruction*> *pcallSites = new std::vector<Instruction*>();
-    //                     pcallSites->push_back(currInitFunc->getEntryBlock().getFirstNonPHIOrDbg());
-
-    //                     VisitorCallback *aliasVisitorCallback = new AliasAnalysisVisitor(currState, currInitFunc, pcallSites);
-    //                     VisitorCallback *pathVisitorCallback = new PathAnalysisVisitor(currState, currInitFunc, pcallSites);
-
-    //                     std::vector<VisitorCallback*> allCallBacks;
-    //                     allCallBacks.push_back(aliasVisitorCallback);
-    //                     allCallBacks.push_back(pathVisitorCallback);
-
-    //                     GlobalVisitor *vis = new GlobalVisitor(currState, currInitFunc, pcallSites, traversalOrder,
-    //                                                            allCallBacks);
-
-    //                     DRCHECKER::currEntryFunc = currInitFunc;
-
-    //                     vis->analyze();
-    // #ifdef TIMING
-    //                     dbgs() << "[TIMING] End func(1) " << currInitFunc->getName() << " in: ";
-    //                     InstructionUtils::getTimeDuration(t0,&dbgs());
-    // #endif
-    //                 }
-    //             }
 
                 auto t_prev = std::chrono::system_clock::now();
                 auto t_next = t_prev;
@@ -446,28 +407,8 @@ namespace DRCHECKER {
     #endif
                 // first instruction of the entry function, used in the initial calling context.
                 std::vector<Instruction*> *pcallSites = new std::vector<Instruction*>();
+                errs() << "currFunction: " << currFunction.getName().str() << " " << &currFunction.getEntryBlock() << "\n";
                 pcallSites->push_back(currFunction.getEntryBlock().getFirstNonPHIOrDbg());
-                // set up user function args, e.g. pto, initial taint.
-                //setupFunctionArgs(fi, currState, pcallSites);
-
-                // errs() << "Entry inst is:" << "\n";
-                // currFunction.getEntryBlock().getFirstNonPHIOrDbg()->print(errs());
-                // errs() << "\n";
-                // auto entryinst = currFunction.getEntryBlock().getFirstNonPHIOrDbg();
-                // auto dbgloc = entryinst->getDebugLoc();
-                // if(dbgloc){
-                //     errs() << dbgloc->getFilename() << "\n";
-                //     errs() << dbgloc->getLine() << "\n";
-                // }else{
-                //     while(!dbgloc || dbgloc->getLine() == 0){
-                //         entryinst = entryinst->getNextNonDebugInstruction();
-                //         dbgloc = entryinst->getDebugLoc();
-                //     }
-                //     errs() << "Real entry inst is: " << "\n";
-                //     entryinst->print(errs());
-                //     errs() << "\n";
-                //     errs() << dbgloc->getFilename() << "\n" << dbgloc->getLine() << "\n";
-                // }
                 
 
                 std::vector<VisitorCallback *> allCallBacks;
@@ -494,24 +435,13 @@ namespace DRCHECKER {
     #endif
                 DRCHECKER::currEntryFunc = &currFunction;
 
-
-
-                // auto targetPointsToMap = currState.getPointsToInfo(pcallSites);
-                // if (targetPointsToMap->find(currState.basePointer) == targetPointsToMap->end()){
-                //     std::cout << "didn't find ptr info 1" << "\n";
-                // }
-
-                // currState.basePointer->print(errs());
-                // errs() << "\n";
-
-                //createObj4value(currState.basePointer, currState.interestinginst, &currState, pcallSites);
-                // if (targetPointsToMap->find(currState.basePointer) != targetPointsToMap->end()){
-                //     std::cout << "Found ptr info 2" << "\n";
-                // }
-
                 vis->analyze();
 
                 filecount = currState.filecounter;
+
+                for(auto usesite : currState.visitedsites){
+                    visitedusesites.insert(usesite);
+                }
 
     #ifdef TIMING
                 dbgs() << "[TIMING] End func(1) " << currState.entryfunc->getName().str() << " in: ";
@@ -528,211 +458,12 @@ namespace DRCHECKER {
                 this->printCurTime();
                 delete(vis);
 
-    //             for (FuncInf *fi : targetFuncs) {
-    //                 if (!fi || !fi->func || fi->func->isDeclaration()) {
-    //                     dbgs() << "!!! runOnModule(): (!fi || !fi->func || fi->func->isDeclaration())\n";
-    //                     continue;
-    //                 }
-    //                 Function &currFunction = *(fi->func);
-
-    //                 std::vector<std::vector<BasicBlock *> *> *traversalOrder = BBTraversalHelper::getSCCTraversalOrder(currFunction);
-    // #ifdef DEBUG_TRAVERSAL_ORDER
-    //                 std::cout << "Got Traversal order For: " << currFunction.getName().str() << "\n";
-    //                 BBTraversalHelper::printSCCTraversalOrder(traversalOrder,&dbgs());
-    // #endif
-    // #ifdef DEBUG_SCC_GRAPH
-    //                 InstructionUtils::dumpFuncGraph(&currFunction);
-    // #endif
-    //                 // first instruction of the entry function, used in the initial calling context.
-    //                 std::vector<Instruction*> *pcallSites = new std::vector<Instruction*>();
-    //                 pcallSites->push_back(currFunction.getEntryBlock().getFirstNonPHIOrDbg());
-    //                 // set up user function args, e.g. pto, initial taint.
-    //                 setupFunctionArgs(fi, currState, pcallSites);
-
-    //                 std::vector<VisitorCallback *> allCallBacks;
-    //                 // add pre analysis bug detectors/
-    //                 // these are the detectors, that need to be run before all the analysis passes.
-    //                 //BugDetectorDriver::addPreAnalysisBugDetectors(currState, &currFunction, pcallSites,
-    //                 //                                              &allCallBacks, targetChecker);
-
-    //                 // first add all analysis visitors.
-    //                 addAllVisitorAnalysis(currState, &currFunction, pcallSites, &allCallBacks);
-
-    //                 // next, add all bug detector analysis visitors, which need to be run post analysis passed.
-    //                 //BugDetectorDriver::addPostAnalysisBugDetectors(currState, &currFunction, pcallSites,
-    //                 //                                               &allCallBacks, targetChecker);
-
-    //                 // create global visitor and run it.
-    //                 GlobalVisitor *vis = new GlobalVisitor(currState, &currFunction, pcallSites, traversalOrder, allCallBacks);
-
-    //                 //SAAVisitor *vis = new SAAVisitor(currState, &currFunction, pcallSites, traversalOrder);
-    //                 dbgs() << "CTX: " << fi->name << " ->\n";
-    // #ifdef TIMING
-    //                 dbgs() << "[TIMING] Start func(1) " << fi->name << ": ";
-    //                 auto t0 = InstructionUtils::getCurTime(&dbgs());
-    // #endif
-    //                 DRCHECKER::currEntryFunc = &currFunction;
-    //                 vis->analyze();
-
-    // #ifdef TIMING
-    //                 dbgs() << "[TIMING] End func(1) " << fi->name << " in: ";
-    //                 InstructionUtils::getTimeDuration(t0,&dbgs());
-    // #endif
-    //                 //Record the timestamp.
-    //                 t_next = std::chrono::system_clock::now();
-    //                 std::chrono::duration<double> elapsed_seconds = t_next - t_prev;
-    //                 dbgs() << "[TIMING] Anlysis of " << fi->name << " done in : " << elapsed_seconds.count() << "s\n";
-    //                 t_prev = t_next;
-
-    //                 //clean up
-    //                 dbgs() << "[TIMING] Clean up GlobalVisitor at: ";
-    //                 this->printCurTime();
-    //                 delete(vis);
-    //             }
-
                 auto t_now = std::chrono::system_clock::now();
                 elapsed_seconds = t_now - t_start;
                 dbgs() << "[TIMING] All main anlysis done in : " << elapsed_seconds.count() << "s\n";
 
             }
 
-
-            //for()
-
-            // RangeAnalysis::InterProceduralRA<RangeAnalysis::CropDFS> &range_analysis = 
-            // getAnalysis<RangeAnalysis::InterProceduralRA<RangeAnalysis::CropDFS>>();
-
-
-            //The main analysis has finished, now dump the results for manual analysis and debugging.
-            //Print the main analysis results (e.g. AliasAnalysis and TaintAnalysis) and debug info.
-            /*
-            std::string rid = checkFunctionName;
-            if (checkFunctionName.size() == 0) {
-                rid = entryConfig.substr(entryConfig.rfind("/") + 1);
-            }
-
-            dbgs() << "Now start to serialize the taint information...\n";
-            currState.serializeTaintInfo("taint_info_" + rid + "_serialize");
-
-            auto t_end0 = std::chrono::system_clock::now();
-            elapsed_seconds = t_end0 - t_now;
-            dbgs() << "[TIMING] Taint info serialized in : " << elapsed_seconds.count() << "s\n";
-                        
-            dbgs() << "Now start to dump the taint information...\n";
-            std::error_code EC;
-            llvm::raw_fd_ostream o_taint("taint_info_" + rid, EC);
-            //Set a 5MB buffer to improve file I/O performance.
-            o_taint.SetBufferSize(5*1024*1024);
-            currState.dumpTaintInfo(o_taint);
-            o_taint.close();
-
-            auto t_end1 = std::chrono::system_clock::now();
-            elapsed_seconds = t_end1 - t_end0;
-            dbgs() << "[TIMING] Taint info dumped in : " << elapsed_seconds.count() << "s\n";
-            */
-
-            //Bug detection phase: traverse all the code (for every entry function) again and detect potential bugs along the way.
-            //We need to have a separate traversal because we want to detect high-order taint bugs, so we must wait until all analysis have been done.
-//             dbgs() << "=========================Bug Detection Phase=========================\n";
-// #ifdef TIMING
-//             dbgs() << "[TIMING] Bug Detection Phase Starts : ";
-//             auto tb = InstructionUtils::getCurTime(&dbgs());
-// #endif
-//             currState.analysis_phase = 3;
-//             for (FuncInf *fi : targetFuncs) {
-//                 if (!fi || !fi->func || fi->func->isDeclaration()) {
-//                     dbgs() << "!!! runOnModule(): (!fi || !fi->func || fi->func->isDeclaration())\n";
-//                     continue;
-//                 }
-//                 Function &currFunction = *(fi->func);
-
-//                 std::vector<std::vector<BasicBlock *> *> *traversalOrder = BBTraversalHelper::getSCCTraversalOrder(currFunction);
-
-//                 // first instruction of the entry function, used in the initial calling context.
-//                 std::vector<Instruction*> *pcallSites = new std::vector<Instruction*>();
-//                 pcallSites->push_back(currFunction.getEntryBlock().getFirstNonPHIOrDbg());
-
-//                 // Since we have already finished the main alias and taint analysis, here we only need to have a pure traversal of the code and invoke the bug detectors.
-//                 // All pto and taint information have been already saved in the global state (i.e. "currState").
-//                 std::vector<VisitorCallback*> allCallBacks;
-//                 // add pre analysis bug detectors/
-//                 // these are the detectors, that need to be run before all the analysis passes.
-//                 BugDetectorDriver::addPreAnalysisBugDetectors(currState, &currFunction, pcallSites,
-//                                                               &allCallBacks, targetChecker);
-
-//                 // next, add all bug detector analysis visitors, which need to be run post analysis passed.
-//                 BugDetectorDriver::addPostAnalysisBugDetectors(currState, &currFunction, pcallSites,
-//                                                                &allCallBacks, targetChecker);
-
-//                 // create global visitor and run it.
-//                 GlobalVisitor *vis = new GlobalVisitor(currState, &currFunction, pcallSites, traversalOrder, allCallBacks);
-
-//                 dbgs() << "CTX: " << fi->name << " ->\n";
-// #ifdef TIMING
-//                 dbgs() << "[TIMING] Start func(1) " << fi->name << ": ";
-//                 auto t0 = InstructionUtils::getCurTime(&dbgs());
-// #endif
-//                 DRCHECKER::currEntryFunc = &currFunction;
-//                 vis->analyze();
-
-// #ifdef TIMING
-//                 dbgs() << "[TIMING] End func(1) " << fi->name << " in: ";
-//                 InstructionUtils::getTimeDuration(t0,&dbgs());
-// #endif
-//                 //Record the timestamp.
-//                 t_next = std::chrono::system_clock::now();
-//                 std::chrono::duration<double> elapsed_seconds = t_next - t_prev;
-//                 dbgs() << "[TIMING][Bug-Detection] Anlysis of " << fi->name << " done in : " << elapsed_seconds.count() << "s\n";
-//                 t_prev = t_next;
-
-//                 //clean up
-//                 dbgs() << "[TIMING][Bug-Detection] Clean up GlobalVisitor at: ";
-//                 this->printCurTime();
-//                 delete(vis);
-//             }
-// #ifdef TIMING
-//             dbgs() << "[TIMING] Bug Detection Phase finished in : ";
-//             InstructionUtils::getTimeDuration(tb,&dbgs());
-// #endif
-
-//             //Output all potential bugs.
-//             if(outputFile == "") {
-//                 // No file provided, write to dbgs()
-//                 dbgs() << "[+] Writing JSON output :\n";
-//                 dbgs() << "[+] JSON START:\n\n";
-//                 BugDetectorDriver::printAllWarnings(currState, dbgs());
-//                 BugDetectorDriver::printWarningsByInstr(currState, dbgs());
-//                 dbgs() << "\n\n[+] JSON END\n";
-//             } else {
-//                 std::error_code res_code;
-//                 dbgs() << "[+] Writing output to:" << outputFile << "\n";
-//                 llvm::raw_fd_ostream op_stream(outputFile, res_code, llvm::sys::fs::F_Text);
-//                 BugDetectorDriver::printAllWarnings(currState, op_stream);
-//                 op_stream.close();
-
-//                 dbgs() << "[+] Return message from file write:" << res_code.message() << "\n";
-
-//                 std::string instrWarningsFile;
-//                 std::string originalFile = instrWarnings;
-//                 if(!originalFile.empty()) {
-//                     instrWarningsFile = originalFile;
-//                 } else {
-//                     instrWarningsFile = outputFile;
-//                     instrWarningsFile.append(".instr_warngs.json");
-//                 }
-
-//                 dbgs() << "[+] Writing Instr output to:" << instrWarningsFile << "\n";
-//                 llvm::raw_fd_ostream instr_op_stream(instrWarningsFile, res_code, llvm::sys::fs::F_Text);
-//                 BugDetectorDriver::printWarningsByInstr(currState, instr_op_stream);
-//                 instr_op_stream.close();
-
-//                 dbgs() << "[+] Return message from file write:" << res_code.message() << "\n";
-//             }
-
-            //((AliasAnalysisVisitor *)aliasVisitorCallback)->printAliasAnalysisResults(dbgs());
-
-            // clean up.
-            // explicitly delete references to global variables.
             dbgs() << "Clean up global state at: ";
             this->printCurTime();
             //currState.cleanup();
@@ -742,6 +473,7 @@ namespace DRCHECKER {
             dbgs() << "All done: ";
             this->printCurTime();
 
+            exit(0);
             return true;
         }
 
@@ -1472,14 +1204,18 @@ namespace DRCHECKER {
                     break;
                 CalltraceItem *item = calltrace[i];
                 auto F = item->F;
+                if (item->F == NULL) {
+                    errs() << "Can not find " << item->funcName << " in bc\n";
+                    return;
+                }
                 inst_iterator I = inst_begin(*F), E = inst_end(*F);
                 errs() << item->filePath << ":" << item->line << "\n";
                 for (; I != E; ++I) {
                     llvm::DebugLoc dbgloc = (*I).getDebugLoc();
                     if (!dbgloc)
                         continue;
-                    //errs() << (*I) << "\n";
-                    //errs() << dbgloc->getFilename().str() << ":" << dbgloc->getLine() << "\n";
+                    errs() << (*I) << "\n";
+                    errs() << dbgloc->getFilename().str() << ":" << dbgloc->getLine() << "\n";
                     if (isInst<CallInst>(&(*I)) && dbglocMatch(dbgloc, item->filePath, item->line)) {
                         CallInst *call = dyn_cast<CallInst>(&(*I));
                         llvm::Function *callee = call->getCalledFunction();

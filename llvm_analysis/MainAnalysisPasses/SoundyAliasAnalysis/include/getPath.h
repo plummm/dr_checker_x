@@ -22,7 +22,6 @@
 using namespace llvm;
 using namespace llvm::sys;
 using namespace std;
-static cl::opt<string> printPathDir ("printPathDir", cl::desc("The files which contain paths"), cl::init(""));
 
 class getRet{
 

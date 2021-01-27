@@ -105,7 +105,65 @@ namespace DRCHECKER {
 
     }
 
-    
+    bool reverseSeekBasicBlock(BasicBlock *startBB, BasicBlock *endBB, int depth) {
+        for (auto it = pred_begin(startBB), et = pred_end(startBB); it != et; it++) {
+            BasicBlock *pred = *it;
+            if (pred == endBB)
+                return true;
+            if (depth>20)
+                return false;
+            return reverseSeekBasicBlock(pred, endBB, depth + 1);
+        }
+        return false;
+    }
+
+    void selectBranch(Instruction *lastins, BasicBlock *nextbb, string lastfilename, int lastline, std::ofstream &fout) {
+        string brStr = "";
+
+        int n = lastins->getNumOperands();
+        if (n != 3) 
+            return;
+        BasicBlock *correctBB = dyn_cast<BasicBlock>(nextbb);
+        BasicBlock *wrongBB;
+        Value *br1 = lastins->getOperand(1);
+        Value *br2 = lastins->getOperand(2);
+        //errs() << "branches: " << br1 << " " << br2 << " " << (*nextbb) << "\n";
+        if (br1 == nextbb)
+            wrongBB = dyn_cast<BasicBlock>(br2);
+        else
+            wrongBB = dyn_cast<BasicBlock>(br1);
+
+        if (correctBB->getUniquePredecessor() == nullptr)
+            if (reverseSeekBasicBlock(correctBB, wrongBB, 1))
+                brStr += "* ";  // Both branches are fesible
+
+        if(lastfilename != "" && lastline != 0){
+            brStr += lastfilename + ":" + to_string(lastline) + " ";
+        }
+        auto firstins = nextbb->getFirstNonPHIOrDbg();
+        DebugLoc dbgloc;
+        do {
+            dbgloc = firstins->getDebugLoc();
+            firstins = firstins->getNextNonDebugInstruction();
+        } while((!dbgloc.get() || !dbgloc->getLine()) && firstins != nullptr);
+
+        if (dbgloc)
+            brStr += dbgloc->getFilename().str() + ":" + to_string(dbgloc->getLine()) + " ";
+        else
+            return;
+
+        firstins = wrongBB->getFirstNonPHIOrDbg();
+        do {
+            dbgloc = firstins->getDebugLoc();
+            firstins = firstins->getNextNonDebugInstruction();
+        } while((!dbgloc || (dbgloc->getLine() == 0)) && firstins != nullptr);
+        if (dbgloc)
+            brStr += dbgloc->getFilename().str() + ":" + to_string(dbgloc->getLine()) + "\n";
+        else
+            return;
+        //errs() << brStr;
+        fout << brStr;
+    }
 
     void printPath(std::vector<Instruction*> *CallSites, Instruction *site, int skipfirstbb, int filecount, std::string filenameprefix = ""){
         std::vector<llvm::BasicBlock *> thePath;
@@ -156,7 +214,8 @@ namespace DRCHECKER {
         delete pathfinder;
         // errs() << "\n\n";
         ofstream fout;
-        fout.open(printPathDir + "/" + filenameprefix + to_string(filecount));
+        int bb_num = thePath.size();
+        fout.open(filenameprefix + to_string(bb_num) + "-" + to_string(filecount));
         for(auto bb = thePath.begin(), be = thePath.end(); bb != be; bb++){
             auto firstins = (*bb)->getFirstNonPHIOrDbg();
             auto nextbb = bb + 1;
@@ -186,69 +245,11 @@ namespace DRCHECKER {
                 continue;
 
             if (isa<BranchInst>(lastins)) {
-                //errs() << *(*bb) << "\n";
-                //errs() << firstfilename << ":" << firstline << "\n  w";
-                //errs() << lastfilename << ":" << lastline;
                 if (nextbb != be && (*bb)->getParent() == (*nextbb)->getParent()) {
-                    string brStr = "";
-                    if(lastfilename != "" && lastline != 0){
-                        brStr += lastfilename + ":" + to_string(lastline) + " ";
-                    }
-                    auto firstins = (*nextbb)->getFirstNonPHIOrDbg();
-                    auto dbgloc = firstins->getDebugLoc();
-                    while((!dbgloc || (dbgloc->getLine() == 0)) && firstins != nullptr){
-                        firstins = firstins->getNextNonDebugInstruction();
-                        dbgloc = firstins->getDebugLoc();
-                    }
-
-                    if (dbgloc)
-                        brStr += dbgloc->getFilename().str() + ":" + to_string(dbgloc->getLine()) + " ";
-                    else
-                        continue;
-
-                    int n = lastins->getNumOperands();
-                    if (n == 3) {
-                        Value *br1 = lastins->getOperand(1);
-                        Value *br2 = lastins->getOperand(2);
-                        Value *targetBr = nullptr;
-                        //errs() << "branches: " << br1 << " " << br2 << " " << (*nextbb) << "\n";
-                        if (br1 == *nextbb)
-                            targetBr = br2;
-                        else
-                            targetBr = br1;
-                        if (BasicBlock *targetBB = dyn_cast<BasicBlock>(targetBr)) {
-                            if (targetBB->getUniquePredecessor() == nullptr) {
-                                brStr += "** ";
-                                errs() << dbgloc->getFilename().str() << ":" << to_string(dbgloc->getLine()) << " has more than one predecessor\n";
-                            }
-                            auto firstins = targetBB->getFirstNonPHIOrDbg();
-                            auto dbgloc = firstins->getDebugLoc();
-                            while((!dbgloc || (dbgloc->getLine() == 0)) && firstins != nullptr){
-                                firstins = firstins->getNextNonDebugInstruction();
-                                dbgloc = firstins->getDebugLoc();
-                            }
-                            if (dbgloc)
-                                brStr += dbgloc->getFilename().str() + ":" + to_string(dbgloc->getLine()) + "\n";
-                            else
-                                continue;
-                        }
-                    } else {
-                        continue;
-                    }
-                    errs() << brStr;
-                    fout << brStr;
+                    selectBranch(lastins, *nextbb, lastfilename, lastline, fout);
                 } else {
                     errs() << lastfilename << ":" << lastline << "\n";
                 }
-                /*BranchInst *brInst = dyn_cast<BranchInst>(lastline);
-                int n = brInst->getNumOperands();
-                if (n != 2) {
-                    errs() << "Branch doesn't have 2 operands!\n";
-                } else {
-                    Value *target1 = brInst->getOperand(0);
-                    Value *target2 = brInst->getOperand(1);
-                    target1->
-                }*/
             }
         }
         
@@ -647,11 +648,11 @@ namespace DRCHECKER {
         }
         //Now get the pto info of the src pointer.
         std::set<PointerPointsTo*> *srcPointsTo = this->getPtos(srcPointer);
-        if (srcPointsTo == nullptr){
+        /*if (srcPointsTo == nullptr){
             errs() << "No ptos for src ptr ";
             // I.print(errs());
             errs() << "\n";
-        }
+        }*/
         if (srcPointsTo && !srcPointsTo->empty()) {
             // this set stores the <fieldid, targetobject> of all the objects to which the srcPointer points to.
             std::set<std::pair<long, AliasObject *>> targetObjects;
@@ -681,11 +682,7 @@ namespace DRCHECKER {
 #endif
                                         errs() << nextcall->getDebugLoc()->getFilename() << "\n";
                                         errs() << nextcall->getDebugLoc()->getLine() << "\n";
-                                        if(srcPointsTo->size() > 1){
-                                            fromVultoUse(&this->currState.vulsitecontext, this->currFuncCallSites, nextcall, this->currState.filecounter++, "path2FuncPtrDef-n-");
-                                        }else{
-                                            fromVultoUse(&this->currState.vulsitecontext, this->currFuncCallSites, nextcall, this->currState.filecounter++, "path2FuncPtrDef-p-");
-                                        }
+                                        fromVultoUse(&this->currState.vulsitecontext, this->currFuncCallSites, nextcall, this->currState.filecounter++, this->currState.printPathDir + "/path2FuncPtrDef-");
                                         this->currState.visitedsites.insert(nextcall);
                                         this->currState.taintedindirectcalls.insert(nextcall);
                                     }
@@ -794,7 +791,259 @@ namespace DRCHECKER {
         */
     }
 
-    
+    // Even though I dont want to touch any code in this function
+    // But the branch selection strategy is so import
+    // Let me do this
+    void printPath2(std::vector<Instruction*> *Vul2Ass, std::vector<Instruction*> *Ass2Use, Instruction *asssite, Instruction *usesite, int skipfirstbb1, int skipfirstbb2, int filecount, std::string filenameprefix = ""){
+        std::vector<llvm::BasicBlock *> thePath1;
+        int skip = 0;
+        for(auto i = 0; i < Vul2Ass->size() - 1; i += 2){
+            getPath* pathfinder = new getPath();
+            auto src = (*Vul2Ass)[i]->getParent();
+            auto dst = (*Vul2Ass)[i + 1]->getParent();
+            pathfinder->BBvisitor(src, dst, 0);
+            pathfinder->DFSvisit(src, dst);
+            if(pathfinder->ShortestPath){
+                auto skiped = false;
+                for(auto bb : *(pathfinder->ShortestPath)){
+                    if(0 < skip && skip < skipfirstbb1 && !skiped){
+                        skip++;
+                        skiped = true;
+                    }else{
+                        thePath1.push_back(bb);
+                    }
+                    if(skip == 0){
+                        skip++;
+                    }
+                    
+                }
+            }
+            delete pathfinder;
+        }
+        getPath* pathfinder = new getPath();
+        auto src = (*Vul2Ass)[Vul2Ass->size() - 1]->getParent();
+        auto dst = asssite->getParent();
+        pathfinder->BBvisitor(src, dst, 0);
+        pathfinder->DFSvisit(src, dst);
+        if(pathfinder->ShortestPath){
+            auto skiped = false;
+            for(auto bb : *(pathfinder->ShortestPath)){
+                if(0 < skip && skip < skipfirstbb1 && !skiped){
+                    skip++;
+                    skiped = true;
+                }else{
+                    thePath1.push_back(bb);
+                }
+                if(skip == 0){
+                    skip++;
+                }
+            }
+        }
+        
+        delete pathfinder;
+        ofstream fout;
+        int bb_num = thePath1.size();
+        fout.open(filenameprefix + to_string(bb_num) + "-" + to_string(filecount));
+        for(auto bb = thePath1.begin(), be = thePath1.end(); bb != be; bb++){
+            auto firstins = (*bb)->getFirstNonPHIOrDbg();
+            auto nextbb = bb + 1;
+            auto dbgloc = firstins->getDebugLoc();
+            while((!dbgloc || (dbgloc->getLine() == 0)) && !firstins->isTerminator()){
+                firstins = firstins->getNextNonDebugInstruction();
+                dbgloc = firstins->getDebugLoc();
+            }
+            std::string firstfilename = "";
+            unsigned int firstline = 0;
+            if(dbgloc){
+                firstfilename = dbgloc->getFilename().str();
+                firstline = dbgloc->getLine();
+            }
+            auto lastins = (*bb)->getTerminator();
+            dbgloc = lastins->getDebugLoc();
+            while((!dbgloc || (dbgloc->getLine() == 0)) && firstins != (*bb)->getFirstNonPHIOrDbg()){
+                lastins = lastins->getPrevNonDebugInstruction();
+                dbgloc = lastins->getDebugLoc();
+            }
+            std::string lastfilename = "";
+            unsigned int lastline = 0;
+            if(dbgloc){
+                lastfilename = dbgloc->getFilename().str();
+                lastline = dbgloc->getLine();
+            }
+            if (isa<BranchInst>(lastins)) {
+                if (nextbb != be && (*bb)->getParent() == (*nextbb)->getParent()) {
+                    selectBranch(lastins, *nextbb, lastfilename, lastline, fout);
+                } else {
+                    errs() << lastfilename << ":" << lastline << "\n";
+                }
+            }
+        }
+
+
+        std::vector<llvm::BasicBlock *> thePath2;
+        skip = 0;
+        for(auto i = 0; i < Ass2Use->size() - 1; i += 2){
+            getPath* pathfinder = new getPath();
+            auto src = (*Ass2Use)[i]->getParent();
+            auto dst = (*Ass2Use)[i + 1]->getParent();
+            pathfinder->BBvisitor(src, dst, 0);
+            pathfinder->DFSvisit(src, dst);
+            if(pathfinder->ShortestPath){
+                auto skiped = false;
+                for(auto bb : *(pathfinder->ShortestPath)){
+                    if(0 < skip && skip < skipfirstbb2 && !skiped){
+                        skip++;
+                        skiped = true;
+                    }else{
+                        thePath2.push_back(bb);
+                    }
+                    if(skip == 0){
+                        skip++;
+                    }
+                    
+                }
+            }
+            delete pathfinder;
+        }
+        getPath* pathfinder2 = new getPath();
+        src = (*Ass2Use)[Ass2Use->size() - 1]->getParent();
+        dst = usesite->getParent();
+        pathfinder2->BBvisitor(src, dst, 0);
+        pathfinder2->DFSvisit(src, dst);
+        if(pathfinder2->ShortestPath){
+            auto skiped = false;
+            for(auto bb : *(pathfinder2->ShortestPath)){
+                if(0 < skip && skip < skipfirstbb2 && !skiped){
+                    skip++;
+                    skiped = true;
+                }else{
+                    thePath2.push_back(bb);
+                }
+                if(skip == 0){
+                    skip++;
+                }
+            }
+        }
+        
+        delete pathfinder2;
+        for(auto bb = thePath2.begin(), be = thePath2.end(); bb != be; bb++){
+            auto firstins = (*bb)->getFirstNonPHIOrDbg();
+            auto nextbb = bb + 1;
+            auto dbgloc = firstins->getDebugLoc();
+            while((!dbgloc || (dbgloc->getLine() == 0)) && !firstins->isTerminator()){
+                firstins = firstins->getNextNonDebugInstruction();
+                dbgloc = firstins->getDebugLoc();
+            }
+            std::string firstfilename = "";
+            unsigned int firstline = 0;
+            if(dbgloc){
+                firstfilename = dbgloc->getFilename().str();
+                firstline = dbgloc->getLine();
+            }
+            auto lastins = (*bb)->getTerminator();
+            dbgloc = lastins->getDebugLoc();
+            while((!dbgloc || (dbgloc->getLine() == 0)) && firstins != (*bb)->getFirstNonPHIOrDbg()){
+                lastins = lastins->getPrevNonDebugInstruction();
+                dbgloc = lastins->getDebugLoc();
+            }
+            std::string lastfilename = "";
+            unsigned int lastline = 0;
+            if(dbgloc){
+                lastfilename = dbgloc->getFilename().str();
+                lastline = dbgloc->getLine();
+            }
+            if (isa<BranchInst>(lastins)) {
+                if (nextbb != be && (*bb)->getParent() == (*nextbb)->getParent()) {
+                    selectBranch(lastins, *nextbb, lastfilename, lastline, fout);
+                } else {
+                    errs() << lastfilename << ":" << lastline << "\n";
+                }
+            }
+        }
+
+        fout << usesite->getDebugLoc()->getFilename().str() << ":" << to_string(usesite->getDebugLoc()->getLine()) << "\n";
+        fout << "$\n";
+        string str;
+        llvm::raw_string_ostream(str) << *usesite;
+        fout << str << "\n";
+        fout.close();
+
+    }
+
+    void fromVultoAssigntoUse(std::vector<Instruction *> *vulcallsites, std::vector<Instruction *> *assigncallsites, Instruction *assignsite, std::vector<Instruction *> *usecallsites, Instruction *usesite, int filecount, std::string filenameprefix = ""){
+        std::vector<Instruction *> cpvulcallsites, cpasscallsites_a;
+        std::vector<Instruction *> *PathfromVultoAss = new std::vector<Instruction *>();
+        auto smallsize = vulcallsites->size() > assigncallsites->size() ? assigncallsites->size() : vulcallsites->size();
+        int i = 0;
+        for(; i < smallsize; i++){
+            if((*vulcallsites)[i] != (*assigncallsites)[i]){
+                break;
+            }
+        }
+        int tmp = i;
+        for(; tmp < vulcallsites->size(); tmp++){
+            cpvulcallsites.push_back((*vulcallsites)[tmp]);
+        }
+        tmp = i;
+        for(; tmp < assigncallsites->size(); tmp++){
+            cpasscallsites_a.push_back((*assigncallsites)[tmp]);
+        }
+        for(auto idx = cpvulcallsites.size() - 1; idx > 0; idx -= 2){
+            PathfromVultoAss->push_back(cpvulcallsites[idx]);
+            auto getret = new getRet();
+            getret->BBvisit(cpvulcallsites[idx]->getParent(), 0);
+            if(getret->found){
+                PathfromVultoAss->push_back(getret->ret);
+            }else{
+                errs() << "unable to find a ret inst!\n";
+                return;
+            }
+            
+        }
+        PathfromVultoAss->push_back(cpvulcallsites[0]);
+        for(auto idx = 1; idx < cpasscallsites_a.size(); idx += 2){
+            PathfromVultoAss->push_back(cpasscallsites_a[idx - 1]);
+            PathfromVultoAss->push_back(cpasscallsites_a[idx]);
+        }
+
+        std::vector<Instruction *> cpasscallsites_b, cpusecallsites;
+        std::vector<Instruction *> *PathfromAsstoUse = new std::vector<Instruction *>();
+        smallsize = assigncallsites->size() > usecallsites->size() ? usecallsites->size() : assigncallsites->size();
+        i = 0;
+        for(; i < smallsize; i++){
+            if((*assigncallsites)[i] != (*usecallsites)[i]){
+                break;
+            }
+        }
+        tmp = i;
+        for(; tmp < assigncallsites->size(); tmp++){
+            cpasscallsites_b.push_back((*assigncallsites)[tmp]);
+        }
+        tmp = i;
+        for(; tmp < usecallsites->size(); tmp++){
+            cpusecallsites.push_back((*usecallsites)[tmp]);
+        }
+        cpasscallsites_b.push_back(assignsite);
+        for(auto idx = cpasscallsites_b.size() - 1; idx > 0; idx -= 2){
+            PathfromAsstoUse->push_back(cpasscallsites_b[idx]);
+            auto getret = new getRet();
+            getret->BBvisit(cpasscallsites_b[idx]->getParent(), 0);
+            if(getret->found){
+                PathfromAsstoUse->push_back(getret->ret);
+            }else{
+                errs() << "unable to find a ret inst!\n";
+                return;
+            }
+            
+        }
+        PathfromAsstoUse->push_back(cpasscallsites_b[0]);
+        for(auto idx = 1; idx < cpusecallsites.size(); idx += 2){
+            PathfromAsstoUse->push_back(cpusecallsites[idx - 1]);
+            PathfromAsstoUse->push_back(cpusecallsites[idx]);
+        }
+
+        printPath2(PathfromVultoAss, PathfromAsstoUse, assignsite, usesite, (cpvulcallsites.size() + 1) / 2, (cpasscallsites_b.size() + 1) / 2, filecount, filenameprefix);
+    }
 
     void TaintAnalysisVisitor::visitStoreInst(StoreInst &I) {
 #ifdef DEBUG_STORE_INSTR
@@ -819,11 +1068,31 @@ namespace DRCHECKER {
                             errs() << I.getDebugLoc()->getFilename() << "\n";
                             errs() << I.getDebugLoc()->getLine() << "\n";
                             if(dstPointsTo->size() > 1){
-                                fromVultoUse(&this->currState.vulsitecontext, this->currFuncCallSites, &I, this->currState.filecounter++, "path2MemWrite-n-");
+                                bool prior = true;
+                                for(auto obj : *dstPointsTo){
+                                    bool no_taint = true;
+                                    auto fdttinfo = obj->targetObject->getFieldTaint(obj->dstfieldId);
+                                    if(fdttinfo){
+                                        for(auto ttinfo : fdttinfo->targetTaint){
+                                            if(ttinfo->isTainted()){
+                                                no_taint = false;
+                                            }
+                                        }
+                                    }
+                                    if(no_taint){
+                                        prior = false;
+                                    }
+                                }
+                                if(prior){
+                                    fromVultoUse(&this->currState.vulsitecontext, this->currFuncCallSites, &I, this->currState.filecounter++, this->currState.printPathDir + "/path2MemWrite-");
+                                }else{
+                                    if(currPointsToObj->propagatingInst && isa<Instruction>(currPointsToObj->propagatingInst->inst)){
+                                        fromVultoAssigntoUse(&this->currState.vulsitecontext, currPointsToObj->propagatingInst->ctx, dyn_cast<Instruction>(currPointsToObj->propagatingInst->inst), this->currFuncCallSites, &I, this->currState.filecounter++, this->currState.printPathDir + "/path2MemWrite-");
+                                        }
+                                    }
                             }else{
-                                fromVultoUse(&this->currState.vulsitecontext, this->currFuncCallSites, &I, this->currState.filecounter++, "path2MemWrite-p-");
+                                fromVultoUse(&this->currState.vulsitecontext, this->currFuncCallSites, &I, this->currState.filecounter++, this->currState.printPathDir + "/path2MemWrite-");
                             }
-                            
                             this->currState.visitedsites.insert(&I);
                         }
                     }
@@ -915,7 +1184,7 @@ namespace DRCHECKER {
         unsigned int arg_no = 0;
 
         for (User::op_iterator arg_begin = I.arg_begin(), arg_end = I.arg_end(); arg_begin != arg_end; arg_begin++) {
-            errs() << "entered 1 time " << "\n";
+            //errs() << "entered 1 time " << "\n";
             Value *currArgVal =(*arg_begin).get();
             std::set<TaintFlag*> *currArgTaintInfo = this->getTFs(currArgVal);
             if (!currArgTaintInfo || currArgTaintInfo->empty()) {

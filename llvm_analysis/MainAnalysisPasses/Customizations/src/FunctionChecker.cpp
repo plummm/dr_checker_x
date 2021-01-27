@@ -5,7 +5,7 @@
 
 namespace DRCHECKER {
 
-#define DEBUG_HANDLE_FUNCTION
+//#define DEBUG_HANDLE_FUNCTION
 
     void* FunctionHandler::handleFunction(CallInst &callInst, Function *targetFunction, void *private_data,
                                          FunctionHandlerCallback *callback, bool &is_handled) {
