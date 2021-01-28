@@ -15,7 +15,8 @@
 #include "VisitorCallback.h"
 #include "../../Utils/include/InstructionUtils.h"
 
-static bool terminatingFunc = false;
+static std::string terminatingFunc;
+static bool foundTerminatingFunc = false;
 
 using namespace llvm;
 

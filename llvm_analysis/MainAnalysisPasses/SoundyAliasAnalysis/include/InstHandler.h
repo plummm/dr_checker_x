@@ -14,7 +14,7 @@ static cl::opt<int> BUG_Offset ("Offset", cl::desc("Offset from base pointer tha
 static cl::opt<int> BUG_Size ("Size", cl::desc("Size of vulnerable object"), cl::init(0));
 
 static vector<CalltraceItem*> calltrace;
-static int minDistance;
+static int minDistance, tmpDistance;
 static struct Input *head = NULL;
 static Function *inlineCall = NULL;
 static Module *TheModule = NULL;
@@ -39,7 +39,8 @@ struct Load {
         offset -= BUG_Offset;
         struct Input *ret = (struct Input *)malloc(sizeof(struct Input));
         //errs() << "basepointer: " << (*basePointer) << "\n";
-        errs() << "Load: " << (*load) << "\n";
+        errs() << "Load: " << (*load) << " " << ret << "\n";
+        minDistance = tmpDistance;
         ret->basePointer = basePointer;
         ret->inst = load;
         ret->offset = offset;
@@ -49,11 +50,15 @@ struct Load {
         ret->prev = NULL;
         ret->next = NULL;
         if (head == NULL) {
-            head = ret;
+            head = (struct Input *)malloc(sizeof(struct Input));
+            head->next = ret;
+            ret->prev = head;
         } else {
-            head->prev = ret;
-            ret->next = head;
-            head = ret;
+             struct Input *next = head->next;
+            next->prev = ret;
+            ret->next = next;
+            ret->prev = head;
+            head ->next = ret;
         }
         errs() << "-----------------------------------\n";
         errs() << "offset to base obj is " << offset << "\n";
