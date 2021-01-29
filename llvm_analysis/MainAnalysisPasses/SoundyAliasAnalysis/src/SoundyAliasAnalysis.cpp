@@ -284,9 +284,8 @@ namespace DRCHECKER {
             input = input->next;
 
             for(auto i = input; i != NULL; i = i->next){
-                   errs() << "basepointer is: ";
-                   i->basePointer->print(errs());
-                   errs() << "\n";
+                   errs() << "basepointer is: " << *(i->basePointer);
+                   errs() << "size of obj:" << getSizeOfObj(i->basePointer) << "\n";
                 }
 
             for(auto tmpsite : calltrace){
@@ -799,65 +798,13 @@ namespace DRCHECKER {
                 }
             }
         }
-
-        // struct Input *locatePointerAndOffset(Module &M) {
-        // llvm::Value *basePointer = NULL;
-        // Instruction *currinst = NULL;
-        // Function *currfunc = NULL;
-        // uint64_t offset = -1;
-        // int func_bound[2];
-        // dl = new llvm::DataLayout(&M);
-        // for(auto &F : M){
-        //     if (F.getName().str() == BUG_Func) {
-        //         getFuncBoundary(&F, func_bound);
-        //         for (inst_iterator I = inst_begin(F), E = inst_end(F); I != E; ++I) {
-        //             auto dbgloc = (*I).getDebugLoc();
-        //             if (dbgloc && dbgloc->getLine()) {
-        //                 int curLine = dbgloc->getLine();
-        //                 if (curLine >= func_bound[0] && curLine <= func_bound[1]) {
-        //                     //errs() << dbgloc->getFilename().str() << ":" << curLine << "\n";
-        //                     if (curLine > BUG_Func_Line && basePointer != NULL)
-        //                         break;
-        //                 }
-        //                 if (curLine == BUG_Vul_Line && stripFileName(dbgloc->getFilename().str()) == BUG_Vul_File) {
-        //                     auto a = (*I).getOperand(0);
-        //                     auto type = a->getType();
-        //                     if(LoadInst *load = dyn_cast<LoadInst>(&(*I))) {
-        //                         errs() << (*I) << "\n";
-        //                         errs() << "This is a Load instruction\n"; 
-        //                         llvm::Value *op = load->getPointerOperand();
-        //                         APInt ap_offset(64, 0, true);
-        //                         basePointer = op->stripAndAccumulateConstantOffsets(*dl, ap_offset, true);
-        //                         offset = ap_offset.getSExtValue();
-        //                         if(offset >= BUG_Offset){
-        //                             offset -= BUG_Offset;
-        //                         }else{
-        //                             offset = 0;
-        //                         }
-        //                         currinst = &*I;
-        //                         currfunc = &F;
-        //                         errs() << "offset to base obj is " << offset << "\n";
-        //                     }
-        //                 }
-        //             }
-        //         }
-        //         break;
-        //     }
-        // }
-        //     struct Input *ret = (struct Input *)malloc(sizeof(struct Input));
-        //     ret->basePointer = basePointer;
-        //     ret->offset = offset;
-        //     ret->inst = currinst;
-        //     ret->func = currfunc;
-        //     return ret;
-        // }
-
         struct Input *getInput(Module &M) {
             locatePointerAndOffset(M);
             if (!head)
                 return head;
             for (struct Input *i = head->next; i != NULL; i=i->next) {
-                if (i->distance > minDistance) {
+                uint64_t size = getSizeOfObj(i->basePointer);
+                if (i->distance > minDistance || size > i->size) {
                     errs() << "unlink " << i << "\n";
                     struct Input *next = i->next;
                     struct Input *prev = i->prev;
@@ -1325,7 +1272,7 @@ namespace DRCHECKER {
         }
 
         uint64_t getSizeOfObj(llvm::Value *op) {
-            uint64_t targetObjSize = 0;
+            uint64_t targetObjSize = -1;
             llvm::Type *t = op->getType();
             if (t->isPointerTy()) {
                 llvm::Type *targetObjType = t->getPointerElementType();
