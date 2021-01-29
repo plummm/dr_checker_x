@@ -296,6 +296,12 @@ namespace DRCHECKER {
                             }
                         }
                         auto ptos = getPointsToObjects(&I);
+                        if (auto value = dyn_cast<Value>(&I)) {
+                            if(!hasPointsToObjects(value)) {
+                                value = value->stripPointerCasts();
+                            }
+                            ptos = getPointsToObjects(value);
+                        }
                         if(ptos){
                             for(auto pto : *ptos){
                                 if(checkObjTainted(pto, 0)){
