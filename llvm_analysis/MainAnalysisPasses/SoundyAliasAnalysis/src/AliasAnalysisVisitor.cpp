@@ -727,7 +727,7 @@ void AliasAnalysisVisitor::visitCastInst(CastInst &I) {
     dbgs() << "Convert: " << InstructionUtils::getTypeStr(srcType) << " --> " << InstructionUtils::getTypeStr(dstType) << "\n";
     dbgs() << "srcOperand: " << InstructionUtils::getValueStr(srcOperand) << "\n";
 #endif
-    std::set<PointerPointsTo*> *srcPointsToInfo = this->getPtos(&I,srcOperand);
+    std::set<PointerPointsTo*> *srcPointsToInfo = this->getPtos(&I,srcOperand, true);
     if (srcPointsToInfo && !srcPointsToInfo->empty()) {
         //In this situation, our overall logic is to propagate all point-to information from the src operand to the dst operand,
         //however, we may have some special processing about the point-to information (e.g. change the type of the point-to obj).
