@@ -1075,7 +1075,7 @@ void AliasAnalysisVisitor::visitCastInst(CastInst &I) {
         //First get the base pointer and its pointees..
         Value* srcPointer = I->getPointerOperand();
 #ifdef CREATE_DUMMY_OBJ_IF_NULL
-        std::set<PointerPointsTo*> *basePointsTo = this->getPtos(propInst,srcPointer,true,true);
+        std::set<PointerPointsTo*> *basePointsTo = this->getPtos(propInst,srcPointer,true);
 #else
         std::set<PointerPointsTo*> *basePointsTo = this->getPtos(propInst,srcPointer);
 #endif
