@@ -100,6 +100,23 @@ public:
                     BBChain[src].insert(successor);
                 }
             }
+        } else if(isa<SwitchInst>(terminator)){
+            auto swi = dyn_cast<SwitchInst>(terminator);
+            for(unsigned int i = 0; i < swi->getNumOperands(); i+=2){
+                if(isa<BasicBlock>(swi->getOperand(i + 1))){
+                    auto successor = dyn_cast<BasicBlock>(swi->getOperand(i + 1));
+                    if(BBChain.find(successor) != BBChain.end() || successor == dst){
+                        foundDst = true;
+                        BBChain[src].insert(successor);
+                        continue;
+                    }
+                    if(BBvisitor(successor, dst, depth+1)){
+                        foundDst = true;
+                        BBChain[src].insert(successor);
+                    }
+                }
+                
+            }
         }
         return foundDst;
 

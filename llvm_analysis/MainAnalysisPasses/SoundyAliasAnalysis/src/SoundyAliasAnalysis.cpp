@@ -803,9 +803,10 @@ namespace DRCHECKER {
             if (!head)
                 return head;
             for (struct Input *i = head->next; i != NULL; i=i->next) {
-                uint64_t size = getSizeOfObj(i->basePointer);
-                if (i->distance > minDistance || size > i->size) {
-                    errs() << "unlink " << i << "\n";
+                if (i->distance > minDistance) {
+                    errs() << "unlink " << i \
+                           << " i->distance: " << i->distance\
+                           << " minDistance: " << minDistance << "\n";
                     struct Input *next = i->next;
                     struct Input *prev = i->prev;
                     if (next != NULL)
