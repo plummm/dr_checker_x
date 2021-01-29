@@ -158,7 +158,7 @@ namespace DRCHECKER {
             "__warn_printk", "srm_printk", "snd_printk", "dbgp_printk", "ql4_printk", "printk", "vprintk", "__dump_page", "irq_stack_union", "queued_spin_lock_slowpath", "__pv_queued_spin_lock_slowpath", "queued_read_lock_slowpath", "queued_write_lock_slowpath"};
             std::set<std::string> black_funcs_inc{"asan_report","llvm.dbg","__sanitizer_cov_trace_pc"};
             if (black_funcs.find(currFuncName) != black_funcs.end()) {
-                dbgs() << "Func in blacklist, IGNORING:" << currFuncName << "\n";
+                //dbgs() << "Func in blacklist, IGNORING:" << currFuncName << "\n";
                 return;
             }
             if(this->currState.taintedindirectcalls.find(&I) != this->currState.taintedindirectcalls.end()){
@@ -270,44 +270,48 @@ namespace DRCHECKER {
             
             vis->analyze();
             //errs() << "caller: " <<I.getFunction()->getName().str() << " Analyze: "<< currFunc->getName().str() << "\n";
-            if (!terminatingFunc) {
+            terminatingFunc = currFunc->getName().str();
+            if (!foundTerminatingFunc) {
+                //errs() << "\n";
                 for (int i = 0; i < this->currState.callsiteinfos.size() -1; i++) {
                     auto callee = this->currState.callsiteinfos[i];
                     auto caller = this->currState.callsiteinfos[i+1];
-                    errs() << "caller func: " <<caller->funcname << " callee func: "<< callee->funcname << "\n";
-                    if (callee->funcname == currFunc->getName().str() && caller->funcname == I.getFunction()->getName().str())
-                        terminatingFunc = true;
-                }
-                if (terminatingFunc) {
-                    int argnum = I.getNumArgOperands();
-                    bool hasTaintInfo = false;
-                    for(int i = 0; i < argnum; i++){
-                        auto arg = I.getArgOperand(i);
-                        if(!hasPointsToObjects(arg)){
-                            arg = arg->stripPointerCasts();
+                    if (callee->funcname == currFunc->getName().str() && caller->funcname == I.getFunction()->getName().str()) {
+                        //errs() << "match the calltrace!!!!\n";
+                        int argnum = I.getNumArgOperands();
+                        bool hasTaintInfo = false;
+                        for(int i = 0; i < argnum; i++){
+                            auto arg = I.getArgOperand(i);
+                            if(!hasPointsToObjects(arg)){
+                                arg = arg->stripPointerCasts();
+                            }
+                            auto ptos = getPointsToObjects(arg);
+                            if(ptos){
+                                for(auto pto : *ptos){
+                                    if(checkObjTainted(pto, 0)){
+                                        hasTaintInfo = true;
+                                    }
+                                }
+                                
+                            }
                         }
-                        auto ptos = getPointsToObjects(arg);
+                        auto ptos = getPointsToObjects(&I);
                         if(ptos){
                             for(auto pto : *ptos){
                                 if(checkObjTainted(pto, 0)){
                                     hasTaintInfo = true;
                                 }
                             }
-                            
                         }
-                    }
-                    auto ptos = getPointsToObjects(&I);
-                    if(ptos){
-                        for(auto pto : *ptos){
-                            if(checkObjTainted(pto, 0)){
-                                hasTaintInfo = true;
-                            }
-                        }
-                    }
-                    if(!hasTaintInfo){
+
                         ofstream fout(this->currState.printPathDir + "/TerminatingFunc");
-                        fout << currFunc->getName().str();
+                        fout << terminatingFunc;
                         fout.close();
+
+                        if(!hasTaintInfo){
+                            errs() << "No taint found!!!!!!!\n";
+                            exit(0);
+                        }
                     }
                 }
             }

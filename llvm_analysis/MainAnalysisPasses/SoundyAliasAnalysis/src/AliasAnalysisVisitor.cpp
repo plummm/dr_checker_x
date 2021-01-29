@@ -633,7 +633,7 @@ std::set<PointerPointsTo*>* AliasAnalysisVisitor::mergePointsTo(std::set<Value*>
     targetObjects.clear();
     std::set<PointerPointsTo*> *toRetPointsTo = new std::set<PointerPointsTo*>();
     for (Value *currVal : valuesToMerge) {
-        std::set<PointerPointsTo*> *tmpPointsTo = this->getPtos(targetInstruction,currVal);
+        std::set<PointerPointsTo*> *tmpPointsTo = this->getPtos(targetInstruction,currVal,true);
         if (tmpPointsTo && !tmpPointsTo->empty()) {
             for (PointerPointsTo *currPointsTo : *tmpPointsTo) {
                 auto to_check = std::make_pair(currPointsTo->dstfieldId, currPointsTo->targetObject);
