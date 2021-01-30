@@ -154,8 +154,14 @@ namespace DRCHECKER {
             //std::set<std::string> black_funcs{"con_write","do_con_write","io_serial_out","io_serial_in","emulation_required", "kfree", "mutex_lock", "mutex_unlock", "queue_delayed_work_on", "pvclock_read_wallclock", "record_times", "update_rq_clock", "sched_clock_idle_sleep_event", \
                 "printk", "vprintk", "queued_spin_lock_slowpath", "__pv_queued_spin_lock_slowpath", "queued_read_lock_slowpath", "queued_write_lock_slowpath", "dump_page", "__warn_printk", "__put_page", "refcount_dec_and_test", "___cache_free", "trace_kmem_cache_free", "kfree_skb", "refcount_sub_and_test", "unix_write_space", \
                 "free_percpu","refcount_sub_and_test_checked","refcount_dec_and_test_checked","refcount_dec_and_mutex_lock","_raw_spin_lock_bh", "trace_lock_acquire", "_raw_spin_unlock_bh", "lock_release", "mutex_lock_nested", "__mutex_lock", "__mutex_lock_common", "__might_sleep", "llvm.lifetime.start.p0i8", "___might_sleep", "print_kernel_ident", "rcu_is_watching", "debug_lockdep_rcu_enabled"};
-            std::set<std::string> black_funcs{"__kasan_check_read", "__kasan_check_write","kasan_report_double_free", "kasan_check_read", "kasan_check_write", "kasan_unpoison_shadow", "queue_delayed_work_on", "pvclock_read_wallclock","mutex_lock", "__mutex_lock", "mutex_unlock", "__mutex_unlock", "record_times", "kfree", "update_rq_clock", "sched_clock_idle_sleep_event", \
-            "__warn_printk", "srm_printk", "snd_printk", "dbgp_printk", "ql4_printk", "printk", "vprintk", "__dump_page", "irq_stack_union", "queued_spin_lock_slowpath", "__pv_queued_spin_lock_slowpath", "queued_read_lock_slowpath", "queued_write_lock_slowpath"};
+            std::set<std::string> black_funcs{"__kasan_check_read", "__kasan_check_write", "kasan_report_double_free", "kasan_report_invalid_free", "kasan_report_error", "kasan_check_read", "kasan_check_write", \
+            "kasan_unpoison_shadow", "queue_delayed_work_on", "pvclock_read_wallclock","mutex_lock", "__mutex_lock", "mutex_unlock", "__mutex_unlock", \
+            "record_times", "update_rq_clock", "sched_clock_idle_sleep_event", "print_tainted", "might_sleep", "__might_sleep", "debug_lockdep_rcu_enabled",\
+            "__warn_printk", "srm_printk", "snd_printk", "dbgp_printk", "ql4_printk", "printk", "vprintk", "__dump_page", "irq_stack_union", \
+            "queued_spin_lock_slowpath", "__pv_queued_spin_lock_slowpath", "queued_read_lock_slowpath", "queued_write_lock_slowpath", \
+            "preempt_schedule_common", "schedule_idle", "schedule", "preempt_schedule_irq", "preempt_schedule_notrace", \
+            "lock_acquire", "lock_release", "dump_stack", "__pv_queued_spin_unlock_slowpath", "save_stack", "check_memory_region",\
+            "set_next_entity", "__schedule", "native_write_msr"};
             std::set<std::string> black_funcs_inc{"asan_report","llvm.dbg","__sanitizer_cov_trace_pc"};
             if (black_funcs.find(currFuncName) != black_funcs.end()) {
                 //dbgs() << "Func in blacklist, IGNORING:" << currFuncName << "\n";
