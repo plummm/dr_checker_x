@@ -319,7 +319,10 @@ namespace DRCHECKER {
 
                 if(!callsite->F){
                     findNextFuncInModule();
-                    //continue;
+                    if (callsite->numDuplication != 1) {
+                        errs() << callsite->funcName << " have " << callsite->numDuplication << " numDuplication. Give up\n";
+                        continue;
+                    }
                 }
                 GlobalState currState(currDataLayout);
                 // set the read and write flag in global state, to be used by differect detectors.
