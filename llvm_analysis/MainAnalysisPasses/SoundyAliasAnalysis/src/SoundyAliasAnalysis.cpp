@@ -825,15 +825,10 @@ namespace DRCHECKER {
         void locatePointerAndOffset(Module &M) {
             uint64_t size = BUG_Size;
             dlForInput = new llvm::DataLayout(&M);
-            bool BUG_in_header = false;
             parseCalltrace(&M);
             minDistance = MAX_DISTANCE * calltrace.size();
             tmpDistance = MAX_DISTANCE * calltrace.size();
-            unsigned long *ret = getFirstValidItemInCalltrace();
-            if (ret == NULL)
-                return;
-            CalltraceItem *item = (CalltraceItem *)ret[0];
-            int index = ret[1];
+            CalltraceItem *item = getFirstValidItemInCalltrace();
             if (item == NULL) {
                 errs() << "calltrace is empty\n";
                 return;
@@ -844,12 +839,10 @@ namespace DRCHECKER {
             }
             auto F = item->F;
             errs() << "item->funcName: " << item->funcName << "\n";
-            if (item->funcBound[0] > BUG_Func_Line)
-                BUG_in_header = true;
             inst_iterator I = inst_begin(*F), E = inst_end(*F);
             for (; I != E; ++I) {
                 llvm::DebugLoc dbgloc = (*I).getDebugLoc();
-                if (!BUG_in_header && !dbgloc) {
+                if (!dbgloc) {
                     //errs() << (*I) << "\n";
                     continue;
                 }
@@ -858,7 +851,7 @@ namespace DRCHECKER {
                 // dbgloc.get() is used to check the existance of dbg info
                 if (!dbgloc.get() || !dbgloc->getLine()) {
                     if (isInst<LoadInst>(&(*I)))
-                        inspectInst<LoadInst, Load>(&(*I), dbgloc, NULL, 0, index);
+                        inspectInst<LoadInst, Load>(&(*I), dbgloc, NULL, 0);
                     continue;
                 }
                 fileName = dbgloc->getFilename().str();
@@ -869,20 +862,15 @@ namespace DRCHECKER {
                     if (curLine < BUG_Func_Line && basePointer != NULL)
                         break;
                 }*/
-                if (BUG_in_header) {
-                    if (isInst<LoadInst>(&(*I)))
-                        inspectInst<LoadInst, Load>(&(*I), dbgloc, NULL, 0, index);
-                    continue;
-                }
                 if (isInCallTrace(fileName, curLine)) {
                     //if ((curLine == BUG_Vul_Line && stripFileName(dbgloc->getFilename().str()) == BUG_Vul_File)) {
                     //   errs() << "target site found: " << (*I) << "\n";
                         //if (isGEPInst(I))
                         //    inspectGEPInst(I);
                         if (isInst<CallInst>(&(*I)))
-                            inspectInst<CallInst, Call>(&(*I), dbgloc, NULL, 0, index);
+                            inspectInst<CallInst, Call>(&(*I), dbgloc, NULL, 0);
                         if (isInst<LoadInst>(&(*I)))
-                            inspectInst<LoadInst, Load>(&(*I), dbgloc, NULL, 0, index);
+                            inspectInst<LoadInst, Load>(&(*I), dbgloc, NULL, 0);
                     //}
                 }
             }
@@ -890,14 +878,12 @@ namespace DRCHECKER {
             return;
         }
 
-        unsigned long *getFirstValidItemInCalltrace() {
+        CalltraceItem *getFirstValidItemInCalltrace() {
             unsigned long ret[2];
             int n = 0;
             for (auto it = calltrace.begin(); it != calltrace.end(); it++) {
                 if ((*it)->numDuplication == 1) {
-                    ret[0] = (unsigned long)*it;
-                    ret[1] = n;
-                    return ret;
+                    return *it;
                 }
                 n++;
             }
@@ -916,8 +902,9 @@ namespace DRCHECKER {
         //}
 
         template <class InstType, class T>
-        void inspectInst(llvm::Instruction *I, llvm::DebugLoc dbgloc, InstType *realSrc, int deep, int index) {
+        void inspectInst(llvm::Instruction *I, llvm::DebugLoc dbgloc, InstType *realSrc, int deep) {
             bool match = false;
+            int index = 0;
             T::printSloganHeader(I);
             if (dbgloc->getLine() == 0) {
                 PHINode *phi = nullptr;
@@ -952,7 +939,7 @@ namespace DRCHECKER {
                             if (realSrc == NULL) {
                                 realSrc = T::convertType(I);                          
                             }
-                            inspectInst<InstType, T>(incomingI, icomDbgloc, realSrc, deep+1, index);
+                            inspectInst<InstType, T>(incomingI, icomDbgloc, realSrc, deep+1);
                             //errs() << dbgloc->getFilename().str() << ":" << dbgloc->getLine() << "\n";
                             //match = matchCalltrace(dbgloc, &index);
                             //if (index >= 0 && match)
@@ -1055,7 +1042,7 @@ namespace DRCHECKER {
 
         void printDistance() {
             for (vector<CalltraceItem*>::iterator it = calltrace.begin(); it != calltrace.end(); it++) {
-                errs() << "filePath:" << (*it)->filePath << " funcName:" << (*it)->funcName << " line:" << (*it)->line << " distance:" << (*it)->distance << " bounds:" << (*it)->funcBound[0] << "-" << (*it)->funcBound[1] << "\n";
+                errs() << "filePath:" << (*it)->filePath << " funcName:" << (*it)->funcName << " line:" << (*it)->line << " distance:" << (*it)->distance << "\n";
             }
         }
 

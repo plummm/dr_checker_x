@@ -142,10 +142,12 @@ namespace DRCHECKER {
         }
         auto firstins = nextbb->getFirstNonPHIOrDbg();
         DebugLoc dbgloc;
-        do {
-            dbgloc = firstins->getDebugLoc();
-            firstins = firstins->getNextNonDebugInstruction();
-        } while((!dbgloc.get() || !dbgloc->getLine()) && firstins != nullptr);
+        if (firstins != nullptr) {
+            do {
+                dbgloc = firstins->getDebugLoc();
+                firstins = firstins->getNextNonDebugInstruction();
+            } while((!dbgloc.get() || !dbgloc->getLine()) && firstins != nullptr);
+        }
 
         if (dbgloc)
             brStr += dbgloc->getFilename().str() + ":" + to_string(dbgloc->getLine()) + " ";
@@ -153,10 +155,12 @@ namespace DRCHECKER {
             return;
 
         firstins = wrongBB->getFirstNonPHIOrDbg();
-        do {
-            dbgloc = firstins->getDebugLoc();
-            firstins = firstins->getNextNonDebugInstruction();
-        } while((!dbgloc || (dbgloc->getLine() == 0)) && firstins != nullptr);
+        if (firstins != nullptr) {
+            do {
+                dbgloc = firstins->getDebugLoc();
+                firstins = firstins->getNextNonDebugInstruction();
+            } while((!dbgloc || (dbgloc->getLine() == 0)) && firstins != nullptr);
+        }
         if (dbgloc)
             brStr += dbgloc->getFilename().str() + ":" + to_string(dbgloc->getLine()) + "\n";
         else
@@ -222,19 +226,25 @@ namespace DRCHECKER {
             auto dbgloc = firstins->getDebugLoc();
             while((!dbgloc || (dbgloc->getLine() == 0)) && !firstins->isTerminator()){
                 firstins = firstins->getNextNonDebugInstruction();
-                dbgloc = firstins->getDebugLoc();
+                if (firstins != nullptr)
+                    dbgloc = firstins->getDebugLoc();
+                else
+                    dbgloc = nullptr;
             }
             std::string firstfilename = "";
             unsigned int firstline = 0;
             if(dbgloc){
                 firstfilename = dbgloc->getFilename().str();
                 firstline = dbgloc->getLine();
-            }
+            } else
+                continue;
             auto lastins = (*bb)->getTerminator();
-            dbgloc = lastins->getDebugLoc();
             while((!dbgloc || (dbgloc->getLine() == 0)) && firstins != (*bb)->getFirstNonPHIOrDbg()){
                 lastins = lastins->getPrevNonDebugInstruction();
-                dbgloc = lastins->getDebugLoc();
+                if (lastins != nullptr)
+                    dbgloc = lastins->getDebugLoc();
+                else
+                    dbgloc = nullptr;
             }
             std::string lastfilename = "";
             unsigned int lastline = 0;
