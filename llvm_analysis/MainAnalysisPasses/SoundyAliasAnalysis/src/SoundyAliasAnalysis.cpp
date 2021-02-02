@@ -889,11 +889,14 @@ namespace DRCHECKER {
             if (cur == NULL) 
                 pick_next = true;
             for (auto it = calltrace.begin(); it != calltrace.end(); it++) {
-                if ((*it)->numDuplication == 1 && pick_next) {
-                    return *it;
+                if (pick_next) {
+                    if ((*it)->F == NULL)
+                        findNextFuncInModule();
+                    if ((*it)->numDuplication == 1)
+                        return *it;
+                }
                 if (!pick_next && cur == *it)
                     pick_next = true;
-                }
                 n++;
             }
             return NULL;
