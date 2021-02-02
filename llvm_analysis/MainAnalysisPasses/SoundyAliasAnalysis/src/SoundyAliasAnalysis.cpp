@@ -828,61 +828,70 @@ namespace DRCHECKER {
             parseCalltrace(&M);
             minDistance = MAX_DISTANCE * calltrace.size();
             tmpDistance = MAX_DISTANCE * calltrace.size();
-            CalltraceItem *item = getFirstValidItemInCalltrace();
-            if (item == NULL) {
-                errs() << "calltrace is empty\n";
-                return;
-            }
-            if (item->F == NULL) {
-                errs() << "Can not find function " << item->funcName << " in one.bc\n";
-                return;
-            }
-            auto F = item->F;
-            errs() << "item->funcName: " << item->funcName << "\n";
-            inst_iterator I = inst_begin(*F), E = inst_end(*F);
-            for (; I != E; ++I) {
-                llvm::DebugLoc dbgloc = (*I).getDebugLoc();
-                if (!dbgloc) {
-                    //errs() << (*I) << "\n";
-                    continue;
+            CalltraceItem *item = NULL;
+
+            do {
+                item = getNextValidItemInCalltrace(item);
+                if (item == NULL) {
+                    errs() << "calltrace is empty\n";
+                    return;
                 }
-                int curLine = 0;
-                string fileName;
-                // dbgloc.get() is used to check the existance of dbg info
-                if (!dbgloc.get() || !dbgloc->getLine()) {
-                    if (isInst<LoadInst>(&(*I)))
-                        inspectInst<LoadInst, Load>(&(*I), dbgloc, NULL, 0);
-                    continue;
+                if (item->F == NULL) {
+                    errs() << "Can not find function " << item->funcName << " in one.bc\n";
+                    return;
                 }
-                fileName = dbgloc->getFilename().str();
-                curLine = dbgloc->getLine();
-                //errs() << fileName << ":" << curLine << "\n";
-                //errs() << (*I) << "\n";
-                /*if (curLine >= func_bound[0] && curLine <= func_bound[1]) {
-                    if (curLine < BUG_Func_Line && basePointer != NULL)
-                        break;
-                }*/
-                if (isInCallTrace(fileName, curLine)) {
-                    //if ((curLine == BUG_Vul_Line && stripFileName(dbgloc->getFilename().str()) == BUG_Vul_File)) {
-                    //   errs() << "target site found: " << (*I) << "\n";
-                        //if (isGEPInst(I))
-                        //    inspectGEPInst(I);
-                        if (isInst<CallInst>(&(*I)))
-                            inspectInst<CallInst, Call>(&(*I), dbgloc, NULL, 0);
+                auto F = item->F;
+                errs() << "item->funcName: " << item->funcName << "\n";
+                inst_iterator I = inst_begin(*F), E = inst_end(*F);
+                for (; I != E; ++I) {
+                    llvm::DebugLoc dbgloc = (*I).getDebugLoc();
+                    if (!dbgloc) {
+                        //errs() << (*I) << "\n";
+                        continue;
+                    }
+                    int curLine = 0;
+                    string fileName;
+                    // dbgloc.get() is used to check the existance of dbg info
+                    if (!dbgloc.get() || !dbgloc->getLine()) {
                         if (isInst<LoadInst>(&(*I)))
                             inspectInst<LoadInst, Load>(&(*I), dbgloc, NULL, 0);
-                    //}
+                        continue;
+                    }
+                    fileName = dbgloc->getFilename().str();
+                    curLine = dbgloc->getLine();
+                    //errs() << fileName << ":" << curLine << "\n";
+                    //errs() << (*I) << "\n";
+                    /*if (curLine >= func_bound[0] && curLine <= func_bound[1]) {
+                        if (curLine < BUG_Func_Line && basePointer != NULL)
+                            break;
+                    }*/
+                    if (isInCallTrace(fileName, curLine)) {
+                        //if ((curLine == BUG_Vul_Line && stripFileName(dbgloc->getFilename().str()) == BUG_Vul_File)) {
+                        //   errs() << "target site found: " << (*I) << "\n";
+                            //if (isGEPInst(I))
+                            //    inspectGEPInst(I);
+                            if (isInst<CallInst>(&(*I)))
+                                inspectInst<CallInst, Call>(&(*I), dbgloc, NULL, 0);
+                            if (isInst<LoadInst>(&(*I)))
+                                inspectInst<LoadInst, Load>(&(*I), dbgloc, NULL, 0);
+                        //}
+                    }
                 }
-            }
+            }while(!head);
             errs() << "the end\n";
             return;
         }
 
-        CalltraceItem *getFirstValidItemInCalltrace() {
+        CalltraceItem *getNextValidItemInCalltrace(CalltraceItem *cur) {
             unsigned long ret[2];
             int n = 0;
+            bool pick_next = false;
+            if (cur == NULL) 
+                pick_next = true;
             for (auto it = calltrace.begin(); it != calltrace.end(); it++) {
-                if ((*it)->numDuplication == 1) {
+                if (!pick_next && cur == *it)
+                    pick_next = true;
+                if ((*it)->numDuplication == 1 && pick_next) {
                     return *it;
                 }
                 n++;
@@ -1052,9 +1061,11 @@ namespace DRCHECKER {
             for (vector<CalltraceItem*>::iterator it = calltrace.begin(); it != calltrace.end(); it++) {
                 //errs() << "filePath: " << (*it)->filePath << " fileName: " << sFileName << "\n";
                 if ((*it)->filePath == sFileName) {
+                    if ((*it)->funcBound[0] == 0 && (*it)->funcBound[1] == 0)
+                        return true;
                     if (curLine >= (*it)->funcBound[0] && curLine <= (*it)->funcBound[1]) {
                         (*it)->distance = (*it)->line - curLine;
-                        ret = true;
+                        return true;
                     }
                 }
             }
