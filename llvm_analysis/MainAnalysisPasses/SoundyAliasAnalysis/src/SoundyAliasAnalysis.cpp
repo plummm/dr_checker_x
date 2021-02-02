@@ -95,7 +95,7 @@ namespace DRCHECKER {
 
     
 
-    
+    static int calltraceIndex = 0;
 
     typedef struct FuncInf {
         std::string name;
@@ -884,7 +884,7 @@ namespace DRCHECKER {
 
         CalltraceItem *getNextValidItemInCalltrace(CalltraceItem *cur) {
             unsigned long ret[2];
-            int n = 0;
+            int calltraceIndex = 0;
             bool pick_next = false;
             if (cur == NULL) 
                 pick_next = true;
@@ -897,7 +897,7 @@ namespace DRCHECKER {
                 }
                 if (!pick_next && cur == *it)
                     pick_next = true;
-                n++;
+                calltraceIndex++;
             }
             return NULL;
         }
@@ -1021,14 +1021,22 @@ namespace DRCHECKER {
         }
 
         bool matchCalltrace(llvm::DebugLoc dbgloc, int *index) {
+            int curLine;
+            string fileName;
             bool ret = false;
             auto inlineDbg = dbgloc->getInlinedAt();
-            if (inlineDbg == NULL) {
-                return true;
+            if (inlineDbg != NULL) {
+                curLine = inlineDbg->getLine();
+                fileName = inlineDbg->getFilename().str();
+            } else {
+                if (calltraceIndex-*index <= 0)
+                    return true;
+                else {
+                    curLine = dbgloc->getLine();
+                    fileName = dbgloc->getFilename().str();
+                }
             }
             (*index)++;
-            int curLine = inlineDbg->getLine();
-            string fileName = inlineDbg->getFilename().str();
             /*for (vector<CalltraceItem*>::iterator it = calltrace.begin(); it != calltrace.end(); it++) {
                 if ((*it)->filePath == stripFileName(fileName) && \
                         curLine >= (*it)->funcBound[0] && curLine <= (*it)->funcBound[1]) {
