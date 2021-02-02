@@ -884,7 +884,7 @@ namespace DRCHECKER {
 
         CalltraceItem *getNextValidItemInCalltrace(CalltraceItem *cur) {
             unsigned long ret[2];
-            int calltraceIndex = 0;
+            calltraceIndex = 0;
             bool pick_next = false;
             if (cur == NULL) 
                 pick_next = true;
@@ -960,9 +960,9 @@ namespace DRCHECKER {
                     }
                 }
             }
-            match = matchCalltrace(dbgloc, &index);
-            if (index >= 0 && match)
-                match = matchLastCaller(index, dbgloc);
+            //match = matchCalltrace(dbgloc, &index);
+            //if (index >= 0 && match)
+                match = matchLastCaller(calltraceIndex, dbgloc);
             if (match) {
                 if (realSrc) {
                     if (T::isInst(realSrc))
@@ -1020,30 +1020,32 @@ namespace DRCHECKER {
             return match;
         }
 
+        bool matchCalltrace(llvm::DebugLoc dbgloc, int deep) {
+            bool ret = false;
+            int curLine = dbgloc->getLine();
+            string fileName = dbgloc->getFilename().str();
+            auto item = calltrace[deep];
+            ret = item->filePath == stripFileName(fileName) && item->line == curLine;
+            if (ret) {
+                errs() << "--> " << fileName << ":" << curLine << " True" << "\n";
+            } else {
+                errs() << "--> " << fileName << ":" << curLine << " False" << "\n";
+            }
+            return ret;
+        }
+/*
         bool matchCalltrace(llvm::DebugLoc dbgloc, int *index) {
             int curLine;
             string fileName;
             bool ret = false;
             auto inlineDbg = dbgloc->getInlinedAt();
-            if (inlineDbg != NULL) {
-                curLine = inlineDbg->getLine();
-                fileName = inlineDbg->getFilename().str();
-            } else {
-                if (calltraceIndex-*index <= 0)
-                    return true;
-                else {
-                    curLine = dbgloc->getLine();
-                    fileName = dbgloc->getFilename().str();
-                }
+            if (inlineDbg == NULL) {
+                return true
             }
+            curLine = inlineDbg->getLine();
+            fileName = inlineDbg->getFilename().str();
             (*index)++;
-            /*for (vector<CalltraceItem*>::iterator it = calltrace.begin(); it != calltrace.end(); it++) {
-                if ((*it)->filePath == stripFileName(fileName) && \
-                        curLine >= (*it)->funcBound[0] && curLine <= (*it)->funcBound[1]) {
-                    (*it)->distance = (*it)->line - curLine;
-                    ret = true;
-                }
-            }*/
+            
             ret = matchCalltrace(inlineDbg, index);
             if (*index >= 0 && ret) {
                 auto item = calltrace[*index];
@@ -1059,7 +1061,7 @@ namespace DRCHECKER {
             }
             return ret;
         }
-
+*/
         void printDistance() {
             for (vector<CalltraceItem*>::iterator it = calltrace.begin(); it != calltrace.end(); it++) {
                 errs() << "filePath:" << (*it)->filePath << " funcName:" << (*it)->funcName << " line:" << (*it)->line << " distance:" << (*it)->distance << "\n";
