@@ -249,7 +249,7 @@ namespace DRCHECKER {
                 if (lastins != nullptr)
                     dbgloc = lastins->getDebugLoc();
                 else
-                    break;
+                    return;
             }
             std::string lastfilename = "";
             unsigned int lastline = 0;
@@ -880,7 +880,7 @@ namespace DRCHECKER {
                 if (lastins != nullptr)
                     dbgloc = lastins->getDebugLoc();
                 else
-                    break;
+                    return;
             }
             std::string lastfilename = "";
             unsigned int lastline = 0;
@@ -965,7 +965,7 @@ namespace DRCHECKER {
                 if (lastins != nullptr)
                     dbgloc = lastins->getDebugLoc();
                 else
-                    break;
+                    return;
             }
             std::string lastfilename = "";
             unsigned int lastline = 0;
