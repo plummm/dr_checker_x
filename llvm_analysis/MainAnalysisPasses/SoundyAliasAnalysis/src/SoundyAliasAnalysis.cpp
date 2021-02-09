@@ -352,6 +352,7 @@ namespace DRCHECKER {
                     csi->func = sitefunc;
                     csi->filename = tmpsite->filePath;
                     csi->linenum = tmpsite->line;
+                    csi->isInline = tmpsite->isInline;
                     currState.callsiteinfos.push_back(csi);
                     if(tmpsite->funcName == callsite->funcName){
                         currState.calltracepointer = CallTracePointer;

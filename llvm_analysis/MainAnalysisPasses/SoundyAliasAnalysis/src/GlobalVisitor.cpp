@@ -282,7 +282,7 @@ namespace DRCHECKER {
                 for (int i = 0; i < this->currState.callsiteinfos.size() -1; i++) {
                     auto callee = this->currState.callsiteinfos[i];
                     auto caller = this->currState.callsiteinfos[i+1];
-                    if (callee->funcname == currFunc->getName().str() && caller->funcname == I.getFunction()->getName().str()) {
+                    if (!callee->isInline && callee->funcname == currFunc->getName().str() && caller->funcname == I.getFunction()->getName().str()) {
                         //errs() << "match the calltrace!!!!\n";
                         int argnum = I.getNumArgOperands();
                         bool hasTaintInfo = false;

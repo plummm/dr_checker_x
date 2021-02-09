@@ -46,6 +46,7 @@ namespace DRCHECKER {
         Function* func;
         std::string filename;
         int linenum;
+        bool isInline;
     };
 //#define DEBUG_GLOBALS
     /***
