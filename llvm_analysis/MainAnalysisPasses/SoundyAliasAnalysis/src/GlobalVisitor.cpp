@@ -322,6 +322,7 @@ namespace DRCHECKER {
 
                         if(!hasTaintInfo){
                             errs() << "No taint found!!!!!!!\n";
+                            errs() << "Terminating Function: " << terminatingFunc << "\n";
                             exit(0);
                         }
                     }

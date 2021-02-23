@@ -847,7 +847,7 @@ namespace DRCHECKER {
                 for (; I != E; ++I) {
                     llvm::DebugLoc dbgloc = (*I).getDebugLoc();
                     if (!dbgloc) {
-                        //errs() << (*I) << "\n";
+                        //errs() << "No dbgloc" << (*I) << "\n";
                         continue;
                     }
                     int curLine = 0;
@@ -862,20 +862,11 @@ namespace DRCHECKER {
                     curLine = dbgloc->getLine();
                     //errs() << fileName << ":" << curLine << "\n";
                     //errs() << (*I) << "\n";
-                    /*if (curLine >= func_bound[0] && curLine <= func_bound[1]) {
-                        if (curLine < BUG_Func_Line && basePointer != NULL)
-                            break;
-                    }*/
                     if (isInCallTrace(fileName, curLine)) {
-                        //if ((curLine == BUG_Vul_Line && stripFileName(dbgloc->getFilename().str()) == BUG_Vul_File)) {
-                        //   errs() << "target site found: " << (*I) << "\n";
-                            //if (isGEPInst(I))
-                            //    inspectGEPInst(I);
-                            if (isInst<CallInst>(&(*I)))
-                                inspectInst<CallInst, Call>(&(*I), dbgloc, NULL, 0);
-                            if (isInst<LoadInst>(&(*I)))
-                                inspectInst<LoadInst, Load>(&(*I), dbgloc, NULL, 0);
-                        //}
+                        if (isInst<CallInst>(&(*I)))
+                            inspectInst<CallInst, Call>(&(*I), dbgloc, NULL, 0);
+                        if (isInst<LoadInst>(&(*I)))
+                            inspectInst<LoadInst, Load>(&(*I), dbgloc, NULL, 0);
                     }
                 }
             }while(!head);
@@ -961,9 +952,9 @@ namespace DRCHECKER {
                     }
                 }
             }
-            //match = matchCalltrace(dbgloc, &index);
+            match = matchCalltrace(calltraceIndex, dbgloc, calltraceIndex);
             //if (index >= 0 && match)
-                match = matchLastCaller(calltraceIndex, dbgloc);
+            //match = matchLastCaller(calltraceIndex, dbgloc);
             if (match) {
                 if (realSrc) {
                     if (T::isInst(realSrc))
@@ -997,30 +988,42 @@ namespace DRCHECKER {
             return ret;
         }
 
-        bool matchLastCaller(int index, llvm::DebugLoc dbgloc) {
+        bool matchCalltrace(int index, llvm::DebugLoc dbgloc, int deep) {
             bool match;
             string fileName = stripFileName(dbgloc->getFilename().str());
+
+            auto inlineDbg = dbgloc->getInlinedAt();
+            if (inlineDbg != NULL) {
+                if (!matchCalltrace(index, inlineDbg, deep-1))
+                    return false;
+            }
+
             int line = dbgloc->getLine();
-            errs() << index;
-            match = calltrace[index]->filePath == fileName && \
-                        calltrace[index]->line == line;
+            errs() << index-deep;
+            if (deep < 0)
+                errs() << "matchCalltrace has a bigger deep " << deep << " than index " << index << "\n";
+            match = calltrace[index-deep]->filePath == fileName && \
+                        calltrace[index-deep]->line == line;
             if (match) {
                 match = true;
-                tmpDistance = 0;
-                errs() << "--> " << calltrace[index]->filePath << ":" << calltrace[index]->line << " True" << "\n";
+                if (deep == 0)
+                    tmpDistance = 0;
+                errs() << "--> " << calltrace[index-deep]->filePath << ":" << calltrace[index-deep]->line << " True" << "\n";
             } else {
-                int tmp = abs(calltrace[index]->line - line);
                 match = false;
-                if (tmp <= minDistance) {
+                if (deep == 0) {
+                    int tmp = abs(calltrace[index]->line - line);
+                    if (tmp <= minDistance) {
                     tmpDistance = tmp;
                     match = true;
                 }
-                errs() << "--> " << calltrace[index]->filePath << ":" << calltrace[index]->line << " False" << "\n";
+                }
+                errs() << "--> " << calltrace[index-deep]->filePath << ":" << calltrace[index-deep]->line << " False" << "\n";
             }
-            errs() << fileName << ":" << line << " " << calltrace[index]->filePath << ":" << calltrace[index]->line <<"\n";
+            errs() << fileName << ":" << line << " " << calltrace[index-deep]->filePath << ":" << calltrace[index-deep]->line <<"\n";
             return match;
         }
-
+/*
         bool matchCalltrace(llvm::DebugLoc dbgloc, int deep) {
             bool ret = false;
             int curLine = dbgloc->getLine();
@@ -1034,7 +1037,7 @@ namespace DRCHECKER {
             }
             return ret;
         }
-/*
+
         bool matchCalltrace(llvm::DebugLoc dbgloc, int *index) {
             int curLine;
             string fileName;
