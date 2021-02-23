@@ -294,17 +294,20 @@ namespace DRCHECKER {
         for(; tmp < usecallsites->size(); tmp++){
             cpusecallsites.push_back((*usecallsites)[tmp]);
         }
-        for(auto idx = cpvulcallsites.size() - 1; idx > 0; idx -= 2){
-            PathfromVultoUse->push_back(cpvulcallsites[idx]);
-            auto getret = new getRet();
-            getret->BBvisit(cpvulcallsites[idx]->getParent(), 0);
-            if(getret->found){
-                PathfromVultoUse->push_back(getret->ret);
-            }else{
-                errs() << "unable to find a ret inst!\n";
-                return;
+        errs() << "cpvulcallsites " << cpvulcallsites.size() << "\n";
+        if (cpvulcallsites.size() > 1) {
+            for(auto idx = cpvulcallsites.size() - 1; idx > 0; idx -= 2){
+                PathfromVultoUse->push_back(cpvulcallsites[idx]);
+                auto getret = new getRet();
+                getret->BBvisit(cpvulcallsites[idx]->getParent(), 0);
+                if(getret->found){
+                    PathfromVultoUse->push_back(getret->ret);
+                }else{
+                    errs() << "unable to find a ret inst!\n";
+                    return;
+                }
+                
             }
-            
         }
         PathfromVultoUse->push_back(cpvulcallsites[0]);
         for(auto idx = 1; idx < cpusecallsites.size(); idx += 2){
@@ -1009,17 +1012,20 @@ namespace DRCHECKER {
         for(; tmp < assigncallsites->size(); tmp++){
             cpasscallsites_a.push_back((*assigncallsites)[tmp]);
         }
-        for(auto idx = cpvulcallsites.size() - 1; idx > 0; idx -= 2){
-            PathfromVultoAss->push_back(cpvulcallsites[idx]);
-            auto getret = new getRet();
-            getret->BBvisit(cpvulcallsites[idx]->getParent(), 0);
-            if(getret->found){
-                PathfromVultoAss->push_back(getret->ret);
-            }else{
-                errs() << "unable to find a ret inst!\n";
-                return;
+        errs() << "cpvulcallsites " << cpvulcallsites.size() << "\n";
+        if (cpvulcallsites.size() > 1) {
+            for(auto idx = cpvulcallsites.size() - 1; idx > 0; idx -= 2){
+                PathfromVultoAss->push_back(cpvulcallsites[idx]);
+                auto getret = new getRet();
+                getret->BBvisit(cpvulcallsites[idx]->getParent(), 0);
+                if(getret->found){
+                    PathfromVultoAss->push_back(getret->ret);
+                }else{
+                    errs() << "unable to find a ret inst!\n";
+                    return;
+                }
+                
             }
-            
         }
         PathfromVultoAss->push_back(cpvulcallsites[0]);
         for(auto idx = 1; idx < cpasscallsites_a.size(); idx += 2){
