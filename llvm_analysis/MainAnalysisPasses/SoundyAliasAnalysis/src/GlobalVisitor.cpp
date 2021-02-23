@@ -109,7 +109,7 @@ namespace DRCHECKER {
     }
 
     bool checkObjTainted(ObjectPointsTo *pto, int depth){
-        if(depth >= 2){
+        if(depth > 3){
             return false;
         }
         auto target_field = pto->dstfieldId;

@@ -285,7 +285,7 @@ namespace DRCHECKER {
 
             for(auto i = input; i != NULL; i = i->next){
                    errs() << "basepointer is: " << *(i->basePointer);
-                   errs() << "size of obj:" << getSizeOfObj(i->basePointer) << "\n";
+                   errs() << " size of obj:" << getSizeOfObj(i->basePointer) << "\n";
                 }
 
             for(auto tmpsite : calltrace){
@@ -471,7 +471,12 @@ namespace DRCHECKER {
             }
 
             if (!foundTerminatingFunc) {
+                auto call = calltrace.back();
                 dbgs() << "No terminating func found untill end\n";
+                dbgs() << "Write the last func " << call->F->getName().str() << " to TerminatingFunc\n";
+                ofstream fout(printPathDir + "/TerminatingFunc");
+                fout << terminatingFunc;
+                fout.close();
             }
 
             dbgs() << "Clean up global state at: ";
