@@ -295,7 +295,7 @@ namespace DRCHECKER {
             cpusecallsites.push_back((*usecallsites)[tmp]);
         }
         if (cpvulcallsites.size() > 1) {
-            for(auto idx = cpvulcallsites.size() - 1; idx > 0; idx -= 2){
+            for(int idx = cpvulcallsites.size() - 1; idx > 0; idx -= 2){
                 PathfromVultoUse->push_back(cpvulcallsites[idx]);
                 auto getret = new getRet();
                 errs() << "cpvulcallsites " << cpvulcallsites[idx] << "\n";
@@ -1014,7 +1014,7 @@ namespace DRCHECKER {
             cpasscallsites_a.push_back((*assigncallsites)[tmp]);
         }
         if (cpvulcallsites.size() > 1) {
-            for(auto idx = cpvulcallsites.size() - 1; idx > 0; idx -= 2){
+            for(int idx = cpvulcallsites.size() - 1; idx > 0; idx -= 2){
                 PathfromVultoAss->push_back(cpvulcallsites[idx]);
                 auto getret = new getRet();
                 errs() << "cpvulcallsites " << cpvulcallsites[idx] << "\n";
