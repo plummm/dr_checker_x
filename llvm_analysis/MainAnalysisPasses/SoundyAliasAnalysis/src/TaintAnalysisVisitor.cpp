@@ -1030,7 +1030,7 @@ namespace DRCHECKER {
             }
         }
         PathfromVultoAss->push_back(cpvulcallsites[0]);
-        for(auto idx = 1; idx < cpasscallsites_a.size(); idx += 2){
+        for(int idx = 1; idx < cpasscallsites_a.size(); idx += 2){
             PathfromVultoAss->push_back(cpasscallsites_a[idx - 1]);
             PathfromVultoAss->push_back(cpasscallsites_a[idx]);
         }
