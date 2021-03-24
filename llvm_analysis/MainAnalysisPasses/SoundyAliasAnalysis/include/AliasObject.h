@@ -1201,8 +1201,8 @@ namespace DRCHECKER {
 #ifdef DEBUG_UPDATE_FIELD_TAINT
                 dbgs() << "AliasObject::setAsTaintSrc(): Updating field taint for obj: " << (const void*)this << "\n";
 #endif
-                for (auto fieldId : allAvailableFields) {
-                    if(this->targetType->isStructTy()){
+                if(this->targetType->isStructTy()){
+                    for (auto fieldId : allAvailableFields) {
                         auto sttype = dyn_cast<StructType>(this->targetType);
                         auto stlayout = dl->getStructLayout(sttype);
                         if(int(stlayout->getElementOffset(fieldId)) >= ofset){
@@ -1222,6 +1222,18 @@ namespace DRCHECKER {
 #ifdef DEBUG_UPDATE_FIELD_TAINT
                     dbgs() << "AliasObject::setAsTaintSrc(): Adding taint to: " << (const void*)this << " | " << fieldId << "\n";
 #endif
+                } else {
+                    for (auto fieldId : allAvailableFields) {
+                        TaintTag *tag = nullptr;
+                        if (v) {
+                            tag = new TaintTag(fieldId, v, is_global, (void *)this);
+                        } else{
+                            tag = new TaintTag(fieldId, this->targetType, is_global, (void*)this);
+                        }
+                        TaintFlag *newFlag = new TaintFlag(nullptr, true, tag);
+                        newFlag->is_inherent = true;
+                        this->addFieldTaintFlag(fieldId, newFlag);
+                    }
                 }
 
                 // for(auto tfdd : this->taintedFields){

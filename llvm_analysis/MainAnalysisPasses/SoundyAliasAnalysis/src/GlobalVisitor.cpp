@@ -14,7 +14,7 @@ namespace DRCHECKER {
 #define MAX_CALLSITE_DEPTH 7
 #define MAX_FUNC_PTR 3
 #define SMART_FUNCTION_PTR_RESOLVING
-// #define DEBUG_BB_VISIT
+#define DEBUG_BB_VISIT
 #define FUNC_BLACKLIST
 #define HARD_LOOP_LIMIT
 #define MAX_LOOP_CNT 1
@@ -161,7 +161,7 @@ namespace DRCHECKER {
             "queued_spin_lock_slowpath", "__pv_queued_spin_lock_slowpath", "queued_read_lock_slowpath", "queued_write_lock_slowpath", \
             "preempt_schedule_common", "schedule_idle", "schedule", "preempt_schedule_irq", "preempt_schedule_notrace", \
             "lock_acquire", "lock_release", "dump_stack", "__pv_queued_spin_unlock_slowpath", "save_stack", "check_memory_region",\
-            "set_next_entity", "__schedule", "native_write_msr"};
+            "set_next_entity", "__schedule", "native_write_msr", "iterate_chain_key", "kmem_cache_free", "kfree"};
             std::set<std::string> black_funcs_inc{"asan_report","llvm.dbg","__sanitizer_cov_trace_pc"};
             if (black_funcs.find(currFuncName) != black_funcs.end()) {
                 //dbgs() << "Func in blacklist, IGNORING:" << currFuncName << "\n";
@@ -408,9 +408,16 @@ namespace DRCHECKER {
                     auto callsiteline = this->currState.callsiteinfos[this->currState.calltracepointer]->linenum;
                     auto nextfunc = this->currState.callsiteinfos[this->currState.calltracepointer - 1];
                     if(dbginfo && dbginfo.getLine() == callsiteline && currFunc == nextfunc->func){
-                            this->currState.calltracepointer--;
-                            this->processCalledFunction(I, currFunc);
+                        this->currState.calltracepointer--;
+                        this->processCalledFunction(I, currFunc);
+                    } else {
+                        auto funcofinst = I.getFunction();
+                        for (auto callsiteinfo : this->currState.callsiteinfos) {
+                            if (callsiteinfo->func == funcofinst) {
+                                this->processCalledFunction(I, currFunc);
+                            }
                         }
+                    }
                 
                 }else{
                     if(this->currState.topcallsites.find(&I) != this->currState.topcallsites.end()){

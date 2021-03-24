@@ -216,7 +216,6 @@ namespace DRCHECKER {
         }
         
         delete pathfinder;
-        // errs() << "\n\n";
         ofstream fout;
         int bb_num = thePath.size();
         fout.open(filenameprefix + to_string(bb_num) + "-" + to_string(filecount));
@@ -240,10 +239,10 @@ namespace DRCHECKER {
                 firstline = dbgloc->getLine();
             } else
                 continue;
-            dbgloc = nullptr;
             auto lastins = (*bb)->getTerminator();
             if (lastins == nullptr)
                 continue;
+            dbgloc = lastins->getDebugLoc();
             while((!dbgloc || (dbgloc->getLine() == 0)) && firstins != (*bb)->getFirstNonPHIOrDbg()){
                 lastins = lastins->getPrevNonDebugInstruction();
                 if (lastins != nullptr)
@@ -298,7 +297,6 @@ namespace DRCHECKER {
             for(int idx = cpvulcallsites.size() - 1; idx > 0; idx -= 2){
                 PathfromVultoUse->push_back(cpvulcallsites[idx]);
                 auto getret = new getRet();
-                errs() << "cpvulcallsites " << cpvulcallsites[idx] << "\n";
                 if (cpvulcallsites[idx]) {
                     getret->BBvisit(cpvulcallsites[idx]->getParent(), 0);
                     if(getret->found){
@@ -865,19 +863,27 @@ namespace DRCHECKER {
         fout.open(filenameprefix + to_string(bb_num) + "-" + to_string(filecount));
         for(auto bb = thePath1.begin(), be = thePath1.end(); bb != be; bb++){
             auto firstins = (*bb)->getFirstNonPHIOrDbg();
+            if (firstins == nullptr)
+                continue;
             auto nextbb = bb + 1;
             auto dbgloc = firstins->getDebugLoc();
             while((!dbgloc || (dbgloc->getLine() == 0)) && !firstins->isTerminator()){
                 firstins = firstins->getNextNonDebugInstruction();
-                dbgloc = firstins->getDebugLoc();
+                if (firstins != nullptr)
+                    dbgloc = firstins->getDebugLoc();
+                else
+                    dbgloc = nullptr;
             }
             std::string firstfilename = "";
             unsigned int firstline = 0;
             if(dbgloc){
                 firstfilename = dbgloc->getFilename().str();
                 firstline = dbgloc->getLine();
-            }
+            } else
+                continue;
             auto lastins = (*bb)->getTerminator();
+            if (lastins == nullptr)
+                continue;
             dbgloc = lastins->getDebugLoc();
             while((!dbgloc || (dbgloc->getLine() == 0)) && firstins != (*bb)->getFirstNonPHIOrDbg()){
                 lastins = lastins->getPrevNonDebugInstruction();
@@ -891,7 +897,9 @@ namespace DRCHECKER {
             if(dbgloc){
                 lastfilename = dbgloc->getFilename().str();
                 lastline = dbgloc->getLine();
-            }
+            } else
+                continue;
+            
             if (isa<BranchInst>(lastins)) {
                 if (nextbb != be && (*bb)->getParent() == (*nextbb)->getParent()) {
                     selectBranch(lastins, *nextbb, lastfilename, lastline, fout);
@@ -900,7 +908,6 @@ namespace DRCHECKER {
                 }
             }
         }
-
 
         std::vector<llvm::BasicBlock *> thePath2;
         skip = 0;
