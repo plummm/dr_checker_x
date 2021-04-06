@@ -420,8 +420,14 @@ namespace DRCHECKER {
                     }
                 
                 }else{
-                    if(this->currState.topcallsites.find(&I) != this->currState.topcallsites.end()){
-                        this->processCalledFunction(I, currFunc);
+                    //if(this->currState.topcallsites.find(&I) != this->currState.topcallsites.end()){
+                    //    this->processCalledFunction(I, currFunc);
+                    //}
+                    auto funcofinst = I.getFunction();
+                    for (auto callsiteinfo : this->currState.callsiteinfos) {
+                        if (callsiteinfo->func == funcofinst) {
+                            this->processCalledFunction(I, currFunc);
+                        }
                     }
                 }
             }else{
