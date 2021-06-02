@@ -58,7 +58,7 @@ class getPath{
 
 public:
     unordered_map<BasicBlock *, unordered_set<BasicBlock*>> BBChain;
-    unsigned int ShortestPathSize = 99;
+    unsigned int ShortestPathSize = 99999;
     std::vector<llvm::BasicBlock *> bbstack;
     std::vector<llvm::BasicBlock *> *ShortestPath = nullptr;
 
